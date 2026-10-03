@@ -42,7 +42,7 @@ def test_empty_relay_fails_clear_without_network() -> None:
 
 def test_desktop_default_has_no_unwanted_backend() -> None:
     text = (ROOT / "desktop" / "nanomuse_desktop" / "config.py").read_text()
-    assert "DEFAULT_CLOUD = \"\"" in text
+    assert 'DEFAULT_CLOUD = ""' in text
     assert "cloud.nanomuse.cn" not in text
     assert "nanomuse.cn" not in text
 
