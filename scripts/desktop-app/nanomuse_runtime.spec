@@ -32,7 +32,7 @@ datas = [
 binaries = []
 
 # packages that read their own data at run time
-for pkg in ("certifi", "ddgs", "tzdata", "mcp", "html2text", "qrcode", "pywebpush", "py_vapid"):
+for pkg in ("certifi", "ddgs", "tzdata", "mcp", "html2text", "qrcode", "pywebpush", "py_vapid", "playwright"):
     try:
         d, b, h = collect_all(pkg)
     except Exception:  # noqa: BLE001 — optional on some platforms
@@ -51,7 +51,7 @@ for pkg in ("pyautogui", "pyscreeze", "pymsgbox", "pytweening", "mouseinfo", "py
     binaries += b
     hidden += h
 
-excludes = ["tkinter", "matplotlib", "numpy", "scipy", "pandas", "IPython", "jupyter", "pytest", "playwright"]
+excludes = ["tkinter", "matplotlib", "numpy", "scipy", "pandas", "IPython", "jupyter", "pytest"]
 
 a = Analysis(
     [os.path.join(ROOT, "scripts", "desktop-app", "runtime_entry.py")],
