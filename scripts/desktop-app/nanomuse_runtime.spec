@@ -69,6 +69,10 @@ a = Analysis(
     excludes=excludes,
     noarchive=False,
 )
+# Playwright's hooks also collect browsers. Copy them intact after freezing instead,
+# preserving macOS framework symlinks and avoiding PyInstaller binary rewriting.
+a.datas = [entry for entry in a.datas if ".local-browsers" not in entry[0]]
+a.binaries = [entry for entry in a.binaries if ".local-browsers" not in entry[0]]
 pyz = PYZ(a.pure)
 
 exe = EXE(
