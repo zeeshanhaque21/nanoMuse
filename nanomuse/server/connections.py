@@ -1345,7 +1345,17 @@ class Connections:
                 k: v
                 for k, v in body.items()
                 if k
-                in ("name", "command", "args", "env", "url", "risk", "egress", "reads_private_data")
+                in (
+                    "name",
+                    "command",
+                    "args",
+                    "env",
+                    "url",
+                    "headers",
+                    "risk",
+                    "egress",
+                    "reads_private_data",
+                )
             }
         )
         if not cfg.name.strip():
@@ -1362,7 +1372,7 @@ class Connections:
         self.data["mcp"] = {"servers": servers}
         self._save()
         apply_app_settings(self.settings, {"mcp": {"servers": [cfg.model_dump(mode="json")]}})
-        manager = MCPManager([cfg])
+        manager = MCPManager([cfg], resolve=self.vault.resolve)
         tools = await manager.connect()
         if not tools:
             await manager.close()
