@@ -352,7 +352,7 @@ def test_without_an_image_model_the_chat_says_so(settings: Settings) -> None:
 @pytest.mark.parametrize(
     ("base", "host"),
     [
-        ("https://cloud.nanomuse.cn/v1", "https://cloud.nanomuse.cn"),
+        ("https://relay-nanomuse.test/v1", "https://relay-nanomuse.test"),
         ("https://dashscope.aliyuncs.com/compatible-mode/v1", "https://dashscope.aliyuncs.com"),
         ("https://dashscope.aliyuncs.com/api/v1", "https://dashscope.aliyuncs.com"),
     ],

@@ -71,7 +71,7 @@ struct NanoMuseCloudError: LocalizedError, Sendable {
 
 @MainActor
 enum NanoMuseCloud {
-    static let defaultBase = "https://cloud.nanomuse.cn"
+    static let defaultBase = ""
     static let label = "nanoMuse Cloud"
 
     private enum Keys {
@@ -85,11 +85,11 @@ enum NanoMuseCloud {
 
     // MARK: - State
 
-    /// The person may point the app at another relay (a self-hosted one, or a
-    /// laptop on the same Wi-Fi); the default stays the hosted one when unset.
+    /// No default relay: the person points the app at their own relay.
+    /// Empty means not configured (callers must ask for it).
     static var canOverrideBase: Bool { true }
 
-    /// The relay this build talks to.
+    /// The relay this build talks to (empty when not configured).
     static var baseURL: String {
         if let custom = UserDefaults.standard.string(forKey: Keys.base)?.trimmingCharacters(in: .whitespacesAndNewlines),
            !custom.isEmpty {
@@ -97,6 +97,9 @@ enum NanoMuseCloud {
         }
         return defaultBase
     }
+
+    /// True when a relay server is configured.
+    static var isConfigured: Bool { !baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     static func setBaseURL(_ url: String?) {
         let trimmed = url?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -344,7 +347,10 @@ enum NanoMuseCloud {
     }()
 
     private static func call(_ method: String, _ path: String, body: [String: Any]?, token: String?) async throws -> [String: Any] {
-        guard let url = URL(string: baseURL + path) else {
+        guard !baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw CloudError(code: "relay_unconfigured", message: "Relay server not configured: enter your relay server in Settings", status: 0)
+        }
+        guard let url = URL(string: baseURL + path), url.scheme == "http" || url.scheme == "https" else {
             throw CloudError(code: "bad_base", message: "Bad relay address", status: 0)
         }
         var request = URLRequest(url: url)

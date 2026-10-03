@@ -44,7 +44,7 @@ import org.json.JSONObject
  * content is forwarded to the model, not stored. See `docs/cloud.md`.
  */
 object NanoMuseCloud {
-    const val DEFAULT_BASE = "https://cloud.nanomuse.cn"
+    const val DEFAULT_BASE = ""
     const val LABEL = "nanoMuse Cloud"
 
     private const val PREFS = "nanomuse"
@@ -225,12 +225,20 @@ object NanoMuseCloud {
     private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     /**
-     * The relay this build talks to. The person may point it at their own relay (a self-hosted
-     * one, or a laptop on the same Wi-Fi); the default stays the hosted one when unset.
+     * The relay this build talks to. No default relay: the person points it at
+     * their own relay; empty means not configured (callers must ask for it).
      */
     fun baseUrl(context: Context): String =
         prefs(context).getString(KEY_BASE, null)?.takeIf { it.isNotBlank() }?.trimEnd('/')
             ?: DEFAULT_BASE
+
+    /** True when a relay server is configured. */
+    fun isConfigured(context: Context): Boolean = baseUrl(context).isNotBlank()
+
+    /** Require a configured relay or throw with a useful message (no silent fallback). */
+    fun requireBaseUrl(context: Context): String =
+        baseUrl(context).takeIf { it.isNotBlank() }
+            ?: throw IllegalStateException("Relay server not configured: enter your relay server in Settings")
 
     fun setBaseUrl(context: Context, url: String?) {
         prefs(context).edit().apply {

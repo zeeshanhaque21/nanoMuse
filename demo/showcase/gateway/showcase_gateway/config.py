@@ -249,7 +249,7 @@ class Settings:
             trial_daily_tokens=_int("TRIAL_DAILY_TOKENS", 20_000_000),
             trial_rpm=_int("TRIAL_RPM", 30),
             web_enabled=_bool("WEB_ENABLED", False),
-            web_relay_url=_str("WEB_RELAY_URL", "https://cloud.nanomuse.cn").rstrip("/"),
+            web_relay_url=_str("WEB_RELAY_URL", "").rstrip("/")  # no default relay: configure WEB_RELAY_URL,
             web_relay_internal_url=_str(
                 "WEB_RELAY_INTERNAL_URL", "http://nanomuse-relay:8787"
             ).rstrip("/"),

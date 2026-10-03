@@ -46,12 +46,12 @@ def test_an_exhausted_allowance_carries_the_ways_on():
         "message": "Your free allowance (¥10) is used up. …",
         "left": 0,
         "grant": 10,
-        "invite_url": "https://nanomuse.cn/web/?invite=ABCD2345",
+        "invite_url": "https://relay.test/web/?invite=ABCD2345",
         "invite_bonus_cny": 5,
         "invitee_bonus_cny": 5,
         "contribute_bonus_available": False,
         "contribute_bonus_cny": 0,
-        "own_key_docs": "https://nanomuse.cn/own-key",
+        "own_key_docs": "https://relay.test/own-key",
         "type": "nanomuse_cloud",
     }
     exc = _status_error(openai.RateLimitError, 429, body)
@@ -66,12 +66,12 @@ def test_an_exhausted_allowance_carries_the_ways_on():
     assert notice["code"] == "allowance" and notice["allowance"] == {
         "left": 0,
         "grant": 10,
-        "invite_url": "https://nanomuse.cn/web/?invite=ABCD2345",
+        "invite_url": "https://relay.test/web/?invite=ABCD2345",
         "invite_bonus_cny": 5,
         "invitee_bonus_cny": 5,
         "contribute_bonus_available": False,
         "contribute_bonus_cny": 0,
-        "own_key_docs": "https://nanomuse.cn/own-key",
+        "own_key_docs": "https://relay.test/own-key",
     }
     # any other failure carries no such block
     other = _status_error(openai.RateLimitError, 429, {"code": "rate_limited", "message": "slow"})

@@ -161,12 +161,14 @@ function toAccount(me: Record<string, unknown>): Account {
   }
 }
 
-/** A client for one relay origin, e.g. `https://cloud.nanomuse.cn`. */
+/** A client for one relay origin (configure your own relay; no default relay). */
 export class Relay {
   readonly origin: string
 
   constructor(origin: string, private readonly fetchImpl: typeof fetch = fetch) {
-    this.origin = origin.replace(/\/+$/, '')
+    const trimmed = (origin || '').trim().replace(/\/+$/, '')
+    if (!trimmed) throw new RelayError(0, 'relay_unconfigured', 'Relay not configured: set the relay origin to your relay.')
+    this.origin = trimmed
   }
 
   /** The OpenAI-compatible root the model adapter is pointed at. */

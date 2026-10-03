@@ -44,7 +44,7 @@ def describe(e: CloudError) -> str:
 
 class Cloud:
     def __init__(self, base: str, api_key: str = "", timeout: float = 180.0):
-        self.base = base.rstrip("/")
+        self.base = (base or "").strip().rstrip("/")
         self.api_key = api_key
         self.timeout = timeout
 
@@ -53,6 +53,8 @@ class Cloud:
         return self.base.replace("https://", "wss://", 1).replace("http://", "ws://", 1) + "/v1/hub"
 
     def _request(self, method: str, path: str, body: dict | None = None, token: str | None = None, timeout: float | None = None) -> dict:
+        if not self.base:
+            raise CloudError(0, "relay_unconfigured", "Relay not configured: rerun with --cloud https://your-relay (no default relay).")
         data = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(self.base + path, data=data, method=method)
         req.add_header("User-Agent", f"nanoMuse-Desktop/{__version__} ({platform.system()})")

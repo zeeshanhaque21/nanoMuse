@@ -7,8 +7,8 @@ import type { CloudMe } from "../types";
 import { cx } from "../util";
 import { MuseCaption, MuseCard, MuseDivider, MuseRow, MuseSwitchRow } from "./MuseList";
 
-/** The policy the apps link when the relay has not said where its own is. */
-export const PRIVACY_URL = "https://nanomuse.cn/privacy/";
+/** The policy the apps link when the relay named one; empty means hide the link. */
+export const PRIVACY_URL = "";
 
 /**
  * Settings → Data controls, in the shape of Muse's: one switch, *Help improve nanoMuse's AI
@@ -85,9 +85,11 @@ export function DataControls({ me: given, onChanged, flush = false }: { me?: Clo
           ? t("Sign in to nanoMuse Cloud to use it.")
           : ct.default_on !== undefined && (ct.default_on ? t("New accounts start with it on.") : t("New accounts start with it off."))}{" "}
         {signedIn && samples > 0 && t("{n} turns kept so far.", { n: String(samples) })}{" "}
-        <a href={privacy} target="_blank" rel="noopener noreferrer" className="text-accent underline-offset-2 hover:underline">
-          {t("Privacy policy")}
-        </a>
+        {privacy ? (
+          <a href={privacy} target="_blank" rel="noopener noreferrer" className="text-accent underline-offset-2 hover:underline">
+            {t("Privacy policy")}
+          </a>
+        ) : null}
       </MuseCaption>
       {signedIn && samples > 0 && (
         <MuseCard className="mt-3">

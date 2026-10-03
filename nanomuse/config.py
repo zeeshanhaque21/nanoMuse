@@ -413,13 +413,18 @@ class HandsSettings(BaseModel):
 class CloudSettings(BaseModel):
     """nanoMuse Cloud: the relay the phone signs in to with a phone-number or e-mail code. The
     account key lives in the vault (``NANOMUSE_CLOUD_KEY``); ``base_url`` is the relay.
-    Signed in, the relay can be the model provider and the hub is reachable."""
+    Signed in, the relay can be the model provider and the hub is reachable.
 
-    base_url: str = "https://cloud.nanomuse.cn"
+    No default relay: set ``base_url`` (or ``NANOMUSE_CLOUD_BASE_URL``) to your own
+    relay. Empty means no relay is configured."""
+
+    base_url: str = ""
     # Sign-in is part of setting up: the first-run flow does not finish without
     # an account (with it, the relay can be the model and the devices meet).
     # Self-hosters who run without a relay set this to false.
-    required: bool = True
+    # Fork default is False: without an explicitly configured relay, do not
+    # require a cloud account and never fall back to another service.
+    required: bool = False
 
 
 class HubSettings(BaseModel):

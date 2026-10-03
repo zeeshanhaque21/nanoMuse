@@ -45,7 +45,7 @@ object VideoGen {
         val label: String get() = instance.label
         /**
          * `https://….maas.aliyuncs.com`, `https://dashscope.aliyuncs.com` or nanoMuse Cloud's
-         * `https://cloud.nanomuse.cn`, without the API path (the relay serves the same
+         * your relay origin, without the API path (the relay serves the same
          * `/api/v1/…` video paths as Model Studio, next to its OpenAI-shaped `/v1`).
          */
         val host: String get() = ImageGen.baseUrlOf(instance)

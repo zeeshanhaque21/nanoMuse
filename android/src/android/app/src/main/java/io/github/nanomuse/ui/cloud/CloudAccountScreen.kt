@@ -933,7 +933,7 @@ private fun InviteCard(a: NanoMuseCloud.Account) {
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     var copied by remember { mutableStateOf(false) }
     LaunchedEffect(copied) { if (copied) { kotlinx.coroutines.delay(1500); copied = false } }
-    val link = a.inviteUrl.ifBlank { "https://nanomuse.cn/web/?invite=" + a.inviteCode }
+    val link = a.inviteUrl.ifBlank { "" }
     MuseCard {
         Column(Modifier.padding(16.dp)) {
             Text(
@@ -988,7 +988,7 @@ private fun InviteCard(a: NanoMuseCloud.Account) {
 }
 
 /** The notice on the site, with the whole story: who pays, what is kept, how to help. */
-const val NOTICE_URL = "https://nanomuse.cn/#open-source"
+const val NOTICE_URL = "https://github.com/zeeshanhaque21/nanoMuse"
 
 /**
  * The community notice: nanoMuse is free, open source and non-profit; who pays; what the relay

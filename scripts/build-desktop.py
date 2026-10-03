@@ -144,7 +144,7 @@ AppId={{9B1D7E7C-6C0B-4F1E-9D4C-nanoMuseDesktop}}
 AppName=nanoMuse Desktop
 AppVersion=%(version)s
 AppPublisher=nanoMuse
-AppPublisherURL=https://nanomuse.cn/
+AppPublisherURL=https://github.com/zeeshanhaque21/nanoMuse/
 DefaultDirName={localappdata}\Programs\nanoMuse Desktop
 DefaultGroupName=nanoMuse
 DisableProgramGroupPage=yes
@@ -369,8 +369,8 @@ def package_linux(exe: Path, ver: str, installer: bool) -> None:
             shutil.copy(icon, d / f"{NAME}.png")
     deb_arch = {"x64": "amd64", "arm64": "arm64"}.get(arch(), arch())
     (stage / "DEBIAN" / "control").write_text(
-        f"Package: {NAME}\nVersion: {ver}\nSection: utils\nPriority: optional\nArchitecture: {deb_arch}\nMaintainer: nanoMuse <hello@nanomuse.cn>\n"
-        f"Homepage: https://nanomuse.cn/\nDescription: nanoMuse Desktop\n Your computer's Muse: hands on this machine and, through the hub, on every other device of the account.\n"
+        f"Package: {NAME}\nVersion: {ver}\nSection: utils\nPriority: optional\nArchitecture: {deb_arch}\nMaintainer: nanoMuse fork <https://github.com/zeeshanhaque21/nanoMuse>\n"
+        f"Homepage: https://github.com/zeeshanhaque21/nanoMuse/\nDescription: nanoMuse Desktop\n Your computer's Muse: hands on this machine and, through the hub, on every other device of the account.\n"
     )
     for p in stage.rglob("*"):
         if p.is_dir():

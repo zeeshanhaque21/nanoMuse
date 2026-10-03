@@ -558,6 +558,9 @@ async def test_open_signup_members_unlimited_everyone_else_has_one_allowance():
         allowance_cny=0.002,
         invite_bonus_cny=5,
         usd_cny=7.0,
+        invite_url="https://relay.test/web/?invite=",
+        own_key_docs="https://relay.test/own-key",
+        privacy_url="https://relay.test/privacy/",
     )
     admin = {"X-Admin-Token": "admin"}
     guest = await sign_up(client, sender, identifier="13800138000", device="pixel")
@@ -581,7 +584,7 @@ async def test_open_signup_members_unlimited_everyone_else_has_one_allowance():
         # the 0.5 co-creation bonus is gone; the names stay for the apps of the time
         "contribute_bonus_cny": 0,
         "contribute_bonus_available": False,
-        "own_key_docs": "https://nanomuse.cn/own-key",
+        "own_key_docs": "https://relay.test/own-key",
         # what a 0.4 app still reads: the pool as the "cap", no midnight
         "daily_cap": 0.002,
         "daily_cap_usd": 0.0003,
@@ -624,10 +627,10 @@ async def test_open_signup_members_unlimited_everyone_else_has_one_allowance():
     assert r.status_code == 429
     err = r.json()["error"]
     assert err["code"] == "allowance_exhausted" and "¥0.002" in err["message"] and "keep working" in err["message"]
-    assert err["left"] == 0 and err["grant"] == 0.002 and err["own_key_docs"] == "https://nanomuse.cn/own-key"
+    assert err["left"] == 0 and err["grant"] == 0.002 and err["own_key_docs"] == "https://relay.test/own-key"
     assert (
-        err["invite_url"].startswith("https://nanomuse.cn/web/?invite=")
-        and len(err["invite_url"]) == len("https://nanomuse.cn/web/?invite=") + 8
+        err["invite_url"].startswith("https://relay.test/web/?invite=")
+        and len(err["invite_url"]) == len("https://relay.test/web/?invite=") + 8
     )
     assert "co-creation" not in err["message"] and "invite a friend" in err["message"] and "own model key" in err["message"]
     assert err["invite_bonus_cny"] == 5 and err["invitee_bonus_cny"] == 5
@@ -1423,7 +1426,9 @@ async def test_data_controls_keep_the_training_view_only_and_are_deletable(stack
     assert r.status_code == 200
     me = (await client.get("/v1/me", headers=headers)).json()
     assert me["contribute"]["on"] is False and me["contribute"]["samples"] == 0 and me["contribute"]["default_on"] is False
-    assert me["contribute"]["privacy_url"] == "https://nanomuse.cn/privacy/" and "what you wrote" in me["contribute"]["keeps"]["kept"]
+    # Fork default: no privacy URL unless the operator configures one (custom
+    # relay URLs are covered by the allowance test with explicit overrides).
+    assert me["contribute"]["privacy_url"] == "" and "what you wrote" in me["contribute"]["keeps"]["kept"]
     assert me["contribute"]["bonus_cny"] == 0 and me["contribute"]["bonus_available"] is False
     assert (await client.get("/v1/admin/samples", headers=admin)).json() == {"samples": [], "total": 0, "places": {}}
 

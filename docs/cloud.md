@@ -167,12 +167,15 @@ The relay is also the meeting point for the account's devices — the **hub** at
 turns it off, `HUB_FRAME_LIMIT` caps one frame (files and screenshots travel
 inside frames, 16 MB by default).
 
-The app talks to `https://cloud.nanomuse.cn` by default. The sign-in screen has
-a *Relay server* field for pointing at another one: a self-hosted relay, or on
-the emulator the host machine at `http://10.0.2.2:8787`. Leave it empty for the
-default. The desktop and the web console take the relay from
+This fork has no default relay. The sign-in screen has a *Relay server* field:
+point it at your own relay (a self-hosted relay, or on the emulator the host
+machine at `http://10.0.2.2:8787`). The field is available in release builds,
+not only debug builds. The desktop and the web console take the relay from
 `NANOMUSE_CLOUD_BASE_URL` (or the app's own settings); the harness takes it from
-its config. Self-hosters who run no relay at all set `[cloud] required = false`.
+its config. Running with no relay at all is the default (`[cloud] required = false`
+and an empty `base_url`); configuring a relay is explicit and never falls back
+to another service. The `cloud.nanomuse.cn` pool and table below describe the
+upstream public relay for reference, not this fork's default.
 
 ## Protocol
 

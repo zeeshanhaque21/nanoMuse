@@ -12,4 +12,4 @@ export const DEVICES_PANEL = 'nanomuse-devices'
 export const ROOM_PANELS = [FEED_PANEL, IDEAS_PANEL, GOALS_PANEL, LIBRARY_PANEL, DEVICES_PANEL] as const
 
 /** Where a problem with nanoMuse is reported. */
-export const ISSUES_URL = 'https://github.com/nano-muse/nanoMuse/issues'
+export const ISSUES_URL = 'https://github.com/zeeshanhaque21/nanoMuse'

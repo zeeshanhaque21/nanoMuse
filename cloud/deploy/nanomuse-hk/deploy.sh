@@ -21,7 +21,7 @@ set -eu
 host=${RELAY_HOST:-nanomuse-hk}
 remote=${RELAY_DIR:-/opt/nanomuse/relay}
 showcase=${SHOWCASE_DIR:-/opt/nanomuse/nanoMuse/demo/showcase}
-public=${PUBLIC_BASE:-https://cloud.nanomuse.cn}
+public=${PUBLIC_BASE:?set PUBLIC_BASE to your relay origin (no default relay)}
 here=$(cd "$(dirname "$0")" && pwd)
 cloud=$(cd "$here/../.." && pwd)
 build=1

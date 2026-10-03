@@ -32,9 +32,9 @@ const PROFILE = "nanomuse";
 const BUNDLES = ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "@deepseek-ai/dsh-experimental-schedule-bundle", "dsh-nanomuse"];
 const BUNDLE = "dsh-nanomuse";
 const READY_TIMEOUT_MS = 120_000;
-const RELEASES_PAGE = "https://github.com/nano-muse/nanoMuse/releases/latest";
-const ISSUES_PAGE = "https://github.com/nano-muse/nanoMuse/issues";
-const DOCS_PAGE = "https://github.com/nano-muse/nanoMuse/blob/main/docs/desktop.md";
+const RELEASES_PAGE = "https://github.com/zeeshanhaque21/nanoMuse/releases/latest";
+const ISSUES_PAGE = "https://github.com/zeeshanhaque21/nanoMuse";
+const DOCS_PAGE = "https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/desktop.md";
 const HARNESS_PAGE = "https://github.com/deepseek-ai/deepseek-harness";
 
 const zh = (app.getLocale() || "").toLowerCase().startsWith("zh");
@@ -791,7 +791,7 @@ function about(): void {
 
 function buildMenu(): void {
   const help: Electron.MenuItemConstructorOptions[] = [
-    { label: T.website, click: () => void shell.openExternal("https://nanomuse.cn/") },
+    { label: T.website, click: () => void shell.openExternal("https://github.com/zeeshanhaque21/nanoMuse") },
     { label: T.docs, click: () => void shell.openExternal(DOCS_PAGE) },
     { label: T.releases, click: () => void shell.openExternal(RELEASES_PAGE) },
     { label: T.issue, click: () => void shell.openExternal(ISSUES_PAGE) },
@@ -861,7 +861,7 @@ if (!app.requestSingleInstanceLock()) {
     applicationName: "nanoMuse",
     applicationVersion: app.getVersion(),
     copyright: "GPL-3.0-or-later · the nanoMuse community · built on DeepSeek Harness (MIT)",
-    website: "https://nanomuse.cn/",
+    website: "https://github.com/zeeshanhaque21/nanoMuse",
   });
   app.whenReady().then(async () => {
     registerBridge();

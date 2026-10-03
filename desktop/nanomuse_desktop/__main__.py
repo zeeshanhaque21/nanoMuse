@@ -246,7 +246,7 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--open", action="store_true", help="also open the web console in the browser")
     sub.add_parser("serve", help="connect and stay, without a terminal chat")
     si = sub.add_parser("sign-in")
-    si.add_argument("--cloud", default=None, help=f"the cloud's base URL (default {DEFAULT_CLOUD})")
+    si.add_argument("--cloud", default=None, help="the relay base URL (no default: configure your relay)")
     sub.add_parser("sign-out")
     sub.add_parser("status")
     sub.add_parser("devices")

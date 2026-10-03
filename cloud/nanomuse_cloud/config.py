@@ -292,11 +292,13 @@ class Settings:
     # INVITE_URL is the link the apps offer to share; the code is appended.
     # OWN_KEY_DOCS is the guide the apps open when the allowance is used up and
     # the person wants to bring their own model key.
-    invite_url: str = field(default_factory=lambda: _env("INVITE_URL", "https://nanomuse.cn/web/?invite="))
-    own_key_docs: str = field(default_factory=lambda: _env("OWN_KEY_DOCS", "https://nanomuse.cn/own-key"))
+    # No default: the operator configures the relay's own URLs (empty hides the link).
+    invite_url: str = field(default_factory=lambda: _env("INVITE_URL", ""))
+    own_key_docs: str = field(default_factory=lambda: _env("OWN_KEY_DOCS", ""))
     # PRIVACY_URL is the policy the apps link from Data controls and the sign-in
     # pages — the one that states what this relay keeps and its default above.
-    privacy_url: str = field(default_factory=lambda: _env("PRIVACY_URL", "https://nanomuse.cn/privacy/"))
+    # No default: configure the relay's own policy URL (empty hides the link).
+    privacy_url: str = field(default_factory=lambda: _env("PRIVACY_URL", ""))
 
     code_ttl_s: int = field(default_factory=lambda: _int("CODE_TTL_S", 600))
     code_per_identifier_10m: int = field(default_factory=lambda: _int("CODE_PER_IDENTIFIER_10M", 3))

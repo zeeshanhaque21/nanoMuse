@@ -14,12 +14,12 @@ import { useLive } from './live.ts'
 import { ISSUES_URL } from './panels.ts'
 import { setPrefs, usePrefs } from './prefs.ts'
 
-const SITE_URL = 'https://nanomuse.cn/'
-const DOCS_URL = 'https://github.com/nano-muse/nanoMuse/blob/main/docs/harness.md'
-const DISCUSS_URL = 'https://github.com/nano-muse/nanoMuse/discussions'
-const PRIVACY_URL = 'https://github.com/nano-muse/nanoMuse/blob/main/docs/privacy.md'
-const TERMS_URL = 'https://github.com/nano-muse/nanoMuse/blob/main/docs/terms.md'
-const LICENSE_URL = 'https://github.com/nano-muse/nanoMuse/blob/main/LICENSE'
+const SITE_URL = 'https://github.com/zeeshanhaque21/nanoMuse'
+const DOCS_URL = 'https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/harness.md'
+const DISCUSS_URL = 'https://github.com/zeeshanhaque21/nanoMuse/discussions'
+const PRIVACY_URL = 'https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/privacy.md'
+const TERMS_URL = 'https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/terms.md'
+const LICENSE_URL = 'https://github.com/zeeshanhaque21/nanoMuse/blob/main/LICENSE'
 
 function Switch({ checked, onChange, label, disabled }: { checked: boolean; onChange(next: boolean): void; label: string; disabled?: boolean }): ReactNode {
   return h('button', { type: 'button', role: 'switch', className: 'nm-switch', 'aria-checked': checked, 'aria-label': label, disabled, onClick: () => onChange(!checked) })
@@ -88,7 +88,7 @@ export function makeHelpSection(t: Translate, version: string) {
     return h('div', { className: 'nm-section' },
       h('div', { className: 'nm-card' },
         h(LinkRow, { icon: h(IconFile, { size: 18 }), title: t('helpDocs'), onClick: () => openLink(DOCS_URL) }),
-        h(LinkRow, { icon: h(IconLink, { size: 18 }), title: t('helpSite'), sub: 'nanomuse.cn', onClick: () => openLink(SITE_URL) }),
+        h(LinkRow, { icon: h(IconLink, { size: 18 }), title: t('helpSite'), sub: 'github.com/zeeshanhaque21/nanoMuse', onClick: () => openLink(SITE_URL) }),
         h(LinkRow, { icon: h(IconLink, { size: 18 }), title: t('helpDiscuss'), onClick: () => openLink(DISCUSS_URL) }),
         h(LinkRow, { icon: h(IconBug, { size: 18 }), title: t('helpIssue'), onClick: () => openLink(ISSUES_URL) })),
       h('div', { className: 'nm-card' },

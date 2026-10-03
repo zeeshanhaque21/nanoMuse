@@ -94,9 +94,9 @@ def test_files_get_put(tmp_path: Path) -> None:
 
 
 def test_cloud_urls() -> None:
-    assert hub_url("https://cloud.nanomuse.cn/") == "wss://cloud.nanomuse.cn/v1/hub"
+    assert hub_url("https://relay.test/") == "wss://relay.test/v1/hub"
     assert hub_url("http://127.0.0.1:8080") == "ws://127.0.0.1:8080/v1/hub"
-    assert model_url("https://cloud.nanomuse.cn") == "https://cloud.nanomuse.cn/v1"
+    assert model_url("https://relay.test") == "https://relay.test/v1"
     assert CloudClient.recommended_model([{"id": "x"}, {"id": "qwen3.8-27b"}]) == "qwen3.8-27b"
     assert CloudClient.recommended_model([{"id": "only"}]) == "only"
 
@@ -957,9 +957,10 @@ def test_password_sign_in_and_account_management(
     monkeypatch.setattr(CloudClient, "sign_out_all", fake_sign_out_all)
 
     before = client.get("/api/cloud").json()
+    # Fork default: no required cloud account without an explicitly configured relay.
     assert (
         before["signed_in"] is False
-        and before["required"] is True
+        and before["required"] is False
         and before["has_password"] is False
     )
     bad = client.post(

@@ -33,10 +33,10 @@ function fakeRelay() {
       return json(200, {
         account: { id: 'acc_1', channel: 'email', hint: 'de***@example.com', member: true },
         tokens: { unlimited: true, granted: 0, used: 30605, remaining: 0 },
-        contribute: { on: true, samples: 2, default_on: true, privacy_url: 'https://nanomuse.cn/privacy/' },
+        contribute: { on: true, samples: 2, default_on: true, privacy_url: 'https://relay.test/privacy/' },
       })
     }
-    if (req.url === '/v1/me/contribute') return json(200, { on: body.on, samples: 2, default_on: true, privacy_url: 'https://nanomuse.cn/privacy/' })
+    if (req.url === '/v1/me/contribute') return json(200, { on: body.on, samples: 2, default_on: true, privacy_url: 'https://relay.test/privacy/' })
     if (req.url === '/v1/me/samples' && req.method === 'DELETE') return json(200, { deleted: 2 })
     if (req.url === '/v1/models') {
       return json(200, {
@@ -58,7 +58,7 @@ function fakeRelay() {
     }
     if (req.url === '/v1/me/invite') {
       if (req.headers.authorization !== 'Bearer sk-test-device-key') return json(401, { error: { code: 'unauthorized', message: 'no' } })
-      return json(200, { code: 'ABCD12', url: 'https://nanomuse.cn/i/ABCD12', invites: 2, bonus_cny: 5, earned_cny: 10 })
+      return json(200, { code: 'ABCD12', url: 'https://relay.test/i/ABCD12', invites: 2, bonus_cny: 5, earned_cny: 10 })
     }
     if (req.url?.startsWith('/v1/me/profile')) {
       if (req.headers.authorization !== 'Bearer sk-test-device-key') return json(401, { error: { code: 'unauthorized', message: 'no' } })
@@ -143,7 +143,7 @@ test('signOut tolerates a key the relay no longer knows', async () => {
 
 test('data controls: me carries the switch, setContribute and deleteSamples speak relay 0.9', async () => {
   const account = await relay.me('sk-test-device-key')
-  assert.deepEqual(account.contribute, { on: true, samples: 2, defaultOn: true, privacyUrl: 'https://nanomuse.cn/privacy/' })
+  assert.deepEqual(account.contribute, { on: true, samples: 2, defaultOn: true, privacyUrl: 'https://relay.test/privacy/' })
   const off = await relay.setContribute('sk-test-device-key', false)
   assert.equal(seen.at(-1).url, '/v1/me/contribute')
   assert.deepEqual(seen.at(-1).body, { on: false })
@@ -172,7 +172,7 @@ test('invite is a GET with the bearer key and reads code, link and bonus', async
   assert.equal(last.method, 'GET')
   assert.equal(last.url, '/v1/me/invite')
   assert.equal(last.auth, 'Bearer sk-test-device-key')
-  assert.deepEqual(invite, { code: 'ABCD12', url: 'https://nanomuse.cn/i/ABCD12', invites: 2, bonusCny: 5, earnedCny: 10 })
+  assert.deepEqual(invite, { code: 'ABCD12', url: 'https://relay.test/i/ABCD12', invites: 2, bonusCny: 5, earnedCny: 10 })
   await assert.rejects(relay.invite('sk-wrong'), (err) => err instanceof RelayError && err.status === 401)
 })
 
