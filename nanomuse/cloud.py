@@ -37,6 +37,7 @@ MESSAGES = {
     "upstream": "The model provider did not answer.",
     "upstream_unconfigured": "nanoMuse Cloud has no model key configured.",
     "offline": "nanoMuse Cloud cannot be reached.",
+    "relay_unconfigured": "Relay not configured: set NANOMUSE_CLOUD_BASE_URL or cloud.base_url to your relay.",
     "bad_credentials": "That address and password do not match.",
     "no_password": "This account has no password yet; sign in with a code and set one under Account.",
     "locked": "Too many wrong passwords; wait a while or sign in with a code.",
@@ -75,7 +76,8 @@ class CloudClient:
     """The relay's account API. One instance per relay; the key may change (sign in/out)."""
 
     def __init__(self, base_url: str, api_key: str = "", timeout: float = 30.0):
-        self.base_url = base_url.rstrip("/")
+        self.base_url = (base_url or "").strip().rstrip("/")
+        self.api_key = api_key
         self.api_key = api_key
         self._client = httpx.AsyncClient(
             timeout=timeout,
@@ -95,6 +97,13 @@ class CloudClient:
     async def _request(
         self, method: str, path: str, body: dict[str, Any] | None = None, token: str | None = None
     ) -> dict[str, Any]:
+        if not self.base_url:
+            raise CloudError(
+                0,
+                "relay_unconfigured",
+                "Relay not configured: set NANOMUSE_CLOUD_BASE_URL or cloud.base_url "
+                "to your relay (no default relay).",
+            )
         headers = {}
         tok = self.api_key if token is None else token
         if tok:

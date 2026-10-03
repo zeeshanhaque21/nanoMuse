@@ -94,9 +94,9 @@ def test_files_get_put(tmp_path: Path) -> None:
 
 
 def test_cloud_urls() -> None:
-    assert hub_url("https://cloud.nanomuse.cn/") == "wss://cloud.nanomuse.cn/v1/hub"
+    assert hub_url("https://relay.test/") == "wss://relay.test/v1/hub"
     assert hub_url("http://127.0.0.1:8080") == "ws://127.0.0.1:8080/v1/hub"
-    assert model_url("https://cloud.nanomuse.cn") == "https://cloud.nanomuse.cn/v1"
+    assert model_url("https://relay.test") == "https://relay.test/v1"
     assert CloudClient.recommended_model([{"id": "x"}, {"id": "qwen3.8-27b"}]) == "qwen3.8-27b"
     assert CloudClient.recommended_model([{"id": "only"}]) == "only"
 
@@ -651,8 +651,34 @@ def test_remote_control_off_refuses_everything_but_info(hub_server) -> None:
     assert res["ok"] is True and res["body"]["kind"] == "computer"
     client.put("/api/hub", json={"remote_control": True})
     relay.call_runtime("shell", {"command": "echo hi"}, "s2")
+    # with remote control on, the person at this computer still agrees first: a card here,
+    # addressed to the phone, offering once / always for that device
+    pending = wait_for(lambda: client.get("/api/state").json()["pending_approvals"])
+    card = pending[0]
+    assert card["tool"] == "remote_control" and card["target"] == "phone-1"
+    assert card["grant_options"] == ["once", "always"] and "echo hi" in card["summary"]
+    assert card["args"]["device"] == "Pixel" and card["args"]["action"] == "shell"
+    # the phone cannot answer that card itself — it is not one of its own run's cards
+    relay.call_runtime("approve", {"approval_id": card["id"], "allow": True}, "a0")
+    assert relay.next_frame("result")["body"]["ok"] is False
+    client.post(f"/api/approvals/{card['id']}", json={"approved": True, "scope": "always"})
     res = relay.next_frame("result")
-    assert res["ok"] is True and res["body"]["stdout"].strip() == "hi"
+    assert res["id"] == "s2" and res["ok"] is True and res["body"]["stdout"].strip() == "hi"
+    # the standing answer is an ordinary grant: no card next time, revocable like the others
+    relay.call_runtime("shell", {"command": "echo again"}, "s3")
+    res = relay.next_frame("result")
+    assert res["ok"] is True and res["body"]["stdout"].strip() == "again"
+    grants = client.get("/api/activity").json()["grants"]
+    assert any(g["tool"] == "remote_control" and g["target"] == "phone-1" for g in grants)
+    client.delete("/api/approvals/grants/remote_control:phone-1")
+    relay.call_runtime("files", {"path": "."}, "f1")
+    card = wait_for(lambda: client.get("/api/state").json()["pending_approvals"])[0]
+    client.post(f"/api/approvals/{card['id']}", json={"approved": False})
+    res = relay.next_frame("result")
+    assert res["id"] == "f1" and res["ok"] is False and res["error"] == "not_allowed"
+    # a notice and a look at this computer never ask
+    relay.call_runtime("notify", {"title": "hi", "text": "there"}, "n1")
+    assert relay.next_frame("result")["ok"] is True
 
 
 def test_ask_a_device_runs_the_text_there_and_shows_its_steps(hub_server) -> None:
@@ -867,8 +893,13 @@ def test_coding_actions_are_served_to_other_devices(
     res = relay.next_frame("result")
     assert res["ok"] is False and res["error"] == "no_session"
 
-    # sending needs the CLI; without it the caller hears why
+    # steering an agent is something another device does *to* this computer: the person
+    # here agrees first (the lists above are reads and did not ask)
     relay.call_runtime("coding.send", {"agent": "cursor", "text": "go", "session_id": "s1"}, "c4")
+    card = wait_for(lambda: client.get("/api/state").json()["pending_approvals"])[0]
+    assert card["tool"] == "remote_control" and card["args"]["action"] == "coding.send"
+    client.post(f"/api/approvals/{card['id']}", json={"approved": True, "scope": "once"})
+    # sending needs the CLI; without it the caller hears why
     res = relay.next_frame("result")
     assert res["ok"] is False and res["error"] == "not_installed"
 
@@ -926,9 +957,10 @@ def test_password_sign_in_and_account_management(
     monkeypatch.setattr(CloudClient, "sign_out_all", fake_sign_out_all)
 
     before = client.get("/api/cloud").json()
+    # Fork default: no required cloud account without an explicitly configured relay.
     assert (
         before["signed_in"] is False
-        and before["required"] is True
+        and before["required"] is False
         and before["has_password"] is False
     )
     bad = client.post(

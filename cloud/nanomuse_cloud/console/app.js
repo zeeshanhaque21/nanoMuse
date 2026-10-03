@@ -5,7 +5,7 @@
 (() => {
   "use strict";
 
-  const VERSION = "0.1.29";
+  const VERSION = "0.1.31";
 
   // ── i18n ────────────────────────────────────────────────────────
   const zh = (navigator.language || "").toLowerCase().startsWith("zh");
@@ -513,7 +513,7 @@
       h("div", { class: "s" }, !free ? T.spentTotal(money(spent), money(cap)) + usd(spent) : T.spentOnly(money(spent)) + usd(spent), tk.used_today !== undefined ? ` · ${T.tokensToday(fmtN(tk.used_today))}` : ""),
       !free && frac >= 0.8 ? h("div", { class: "s", style: "color:var(--bad, #c0392b);margin-top:4px" }, frac >= 1 ? T.allowanceOut : T.allowanceWarn) : null),
       !free ? h("p", { class: "fine", style: "padding:0 16px 12px" }, T.allowanceWhy(sp.allowance_cny ?? 10, sp.invite_bonus_cny ?? 5), " ",
-        h("a", { href: sp.own_key_docs || "https://nanomuse.cn/own-key", target: "_blank", rel: "noopener" }, T.ownKey)) : null));
+        sp.own_key_docs ? h("a", { href: sp.own_key_docs, target: "_blank", rel: "noopener" }, T.ownKey) : null) : null));
     // invite a friend: the code, the link, what came of it
     const inv = me.invite;
     if (inv && inv.code) {
@@ -532,7 +532,7 @@
         h("button", { class: "btn quiet sm", role: "switch", "aria-checked": ct.on ? "true" : "false", onclick: async () => { try { await api("POST", "/v1/me/contribute", { on: !ct.on }, key); } catch (e) { alert(errText(e)); } await loadMe(); drawAccount(body); } }, ct.on ? (zh ? "关闭" : "Turn off") : (zh ? "开启" : "Turn on"))),
       ct.samples ? h("button", { class: "row tap danger", onclick: async () => { if (await ask(T.deleteSamples, T.deleteSamplesConfirm, T.deleteSamples, true)) { try { const r = await api("DELETE", "/v1/me/samples", null, key); alert(T.deleted(r.deleted || 0)); } catch (e) { alert(errText(e)); } await loadMe(); drawAccount(body); } } }, h("span", { class: "tile bad", html: ICON.out }), h("div", { class: "txt" }, h("div", { class: "t" }, T.deleteSamples))) : null,
       h("p", { class: "fine", style: "padding:0 16px 12px" }, T.contributeWhy, " ", T.contributeDefault(!!ct.default_on), " ",
-        h("a", { href: ct.privacy_url || "https://nanomuse.cn/privacy/", target: "_blank", rel: "noopener" }, T.privacy))));
+        ct.privacy_url ? h("a", { href: ct.privacy_url, target: "_blank", rel: "noopener" }, T.privacy) : null)));
     // usage by kind / by model
     const rows = usageTab === "today" ? (u.today && u.today.by_kind) || [] : (u.total && u.total.by_kind) || [];
     const models = (u.total && u.total.by_model) || [];

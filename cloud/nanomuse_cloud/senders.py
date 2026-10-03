@@ -99,7 +99,7 @@ def compose_code_mail(sender: str, to: str, code: str, minutes: int) -> EmailMes
         "Enter it in the nanoMuse app to sign in. Do not share it with anyone.\n\n"
         "如果这不是你本人的操作，忽略这封邮件即可。\n"
         "If you did not ask for this, you can ignore this message.\n\n"
-        "nanoMuse · https://nanomuse.cn/ · 自动发送，请勿回复 / automated, no reply\n"
+        "nanoMuse · automated, no reply / 自动发送，请勿回复\n"
     )
     spaced = " ".join(code)
     html = f"""<!doctype html>
@@ -113,7 +113,7 @@ def compose_code_mail(sender: str, to: str, code: str, minutes: int) -> EmailMes
 <tr><td style="font-size:14px;line-height:22px;color:#3a3a3c;padding-top:8px">It expires in {minutes} minutes. Enter it in the nanoMuse app to sign in; do not share it with anyone.</td></tr>
 <tr><td style="font-size:12px;line-height:18px;color:#8e8e93;padding-top:22px">如果这不是你本人的操作，忽略这封邮件即可。<br>If you did not ask for this, you can ignore this message.</td></tr>
 </table>
-<div style="font-size:12px;color:#8e8e93;padding-top:16px">nanoMuse · <a href="https://nanomuse.cn/" style="color:#8e8e93">nanomuse.cn</a> · 自动发送，请勿回复 / automated, no reply</div>
+<div style="font-size:12px;color:#8e8e93;padding-top:16px">nanoMuse · automated, no reply / 自动发送，请勿回复</div>
 </td></tr></table>
 </body></html>
 """

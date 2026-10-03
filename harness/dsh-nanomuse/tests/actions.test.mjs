@@ -88,15 +88,15 @@ test('files, file.get and file.put: listing, limits and the force rule', async (
 test('open: a URL goes to the platform opener, a missing path is refused', async () => {
   const calls = []
   const fake = { platform: 'linux', env: {}, run: async (file, args) => { calls.push([file, ...args]); return 0 } }
-  const opened = await open({ url: 'https://nanomuse.cn/' }, fake)
-  assert.deepEqual(opened, { ok: true, url: 'https://nanomuse.cn/' })
-  assert.deepEqual(calls, [['xdg-open', 'https://nanomuse.cn/']])
+  const opened = await open({ url: 'https://github.com/zeeshanhaque21/nanoMuse/' }, fake)
+  assert.deepEqual(opened, { ok: true, url: 'https://github.com/zeeshanhaque21/nanoMuse/' })
+  assert.deepEqual(calls, [['xdg-open', 'https://github.com/zeeshanhaque21/nanoMuse/']])
 
   const mac = { platform: 'darwin', env: {}, run: async (file) => (file === 'open' ? 0 : 1) }
-  assert.equal((await open({ url: 'https://nanomuse.cn/' }, mac)).ok, true)
+  assert.equal((await open({ url: 'https://github.com/zeeshanhaque21/nanoMuse/' }, mac)).ok, true)
 
   const broken = { platform: 'linux', env: {}, run: async () => { throw new Error('no xdg-open') } }
-  assert.equal((await open({ url: 'https://nanomuse.cn/' }, broken)).ok, false)
+  assert.equal((await open({ url: 'https://github.com/zeeshanhaque21/nanoMuse/' }, broken)).ok, false)
 
   await assert.rejects(open({ url: '' }, fake), (e) => e.code === 'usage')
   await assert.rejects(open({ url: '/definitely/not/here/nanomuse' }, fake), (e) => e.code === 'not_found')
@@ -141,7 +141,7 @@ test('run dispatches by hub name; brief says what was asked', async () => {
   })
   assert.equal(brief('shell', { command: '  ls   -la\n' }), 'ls -la')
   assert.equal(brief('files', {}), '~')
-  assert.equal(brief('open', { url: 'https://nanomuse.cn/' }), 'https://nanomuse.cn/')
+  assert.equal(brief('open', { url: 'https://github.com/zeeshanhaque21/nanoMuse/' }), 'https://github.com/zeeshanhaque21/nanoMuse/')
   assert.equal(brief('screen', {}), '')
   assert.equal(brief('shell', { command: 'x'.repeat(100) }).length, 80)
 })

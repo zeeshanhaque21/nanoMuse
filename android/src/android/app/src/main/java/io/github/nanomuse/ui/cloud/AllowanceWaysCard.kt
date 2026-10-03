@@ -48,7 +48,7 @@ import io.github.nanomuse.cloud.NanoMuseCloud
 import io.github.nanomuse.ui.home.MuseTones
 
 /** The public guide for bringing one's own key, when the relay did not name one. */
-const val OWN_KEY_DOCS = "https://nanomuse.cn/own-key"
+const val OWN_KEY_DOCS = ""
 
 /** The in-app link that opens "add a provider" pre-filled for Alibaba Cloud Bailian. */
 const val OWN_KEY_DEEP_LINK = "minis://settings/providers/add?preset=bailian"
@@ -73,9 +73,7 @@ fun AllowanceWaysCard(
     val inviteeBonus = info.inviteeBonusCny.takeIf { it > 0 } ?: account?.inviteeBonusCny?.takeIf { it > 0 } ?: inviteBonus
     var copied by remember { mutableStateOf(false) }
     LaunchedEffect(copied) { if (copied) { kotlinx.coroutines.delay(1500); copied = false } }
-    val link = info.inviteUrl.ifBlank { account?.inviteUrl.orEmpty() }.ifBlank {
-        "https://nanomuse.cn/web/?invite=" + account?.inviteCode.orEmpty()
-    }
+    val link = info.inviteUrl.ifBlank { account?.inviteUrl.orEmpty() }
 
     Surface(
         shape = RoundedCornerShape(20.dp),

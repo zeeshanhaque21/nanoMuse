@@ -29,17 +29,19 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { arch, homedir, hostname, release, type, userInfo } from 'node:os'
 import { dirname, join } from 'node:path'
-import { randomBytes } from 'node:crypto'
+import { createHmac, randomBytes, randomUUID } from 'node:crypto'
 import { Service, type Context } from '@deepseek-ai/cordis'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-settings'
-import type {} from '@deepseek-ai/dsh-tools'
+import type { ToolDispatchExecution, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
+import { ToolCallId } from '@deepseek-ai/dsh-llm'
+import type {} from '@deepseek-ai/dsh-user-approval'
 import z from '@deepseek-ai/schemastery'
 import { brief, REMOTE_ACTIONS, run as runAction, type RemoteAction } from './actions.ts'
-import { HubClient, HubError, type HubDevice } from './hub.ts'
+import { HubClient, HubError, type Caller, type HubDevice } from './hub.ts'
 import { ProfileStore, type Profile } from './profile.ts'
-import { Relay, RelayError, type Account, type Invite, type ProfileWrite, type RelayModel, type SignIn } from './relay.ts'
+import { Relay, RelayError, type Account, type Estimate, type Invite, type ProfileWrite, type RelayModel, type SignIn } from './relay.ts'
 import { TaskRunner } from './task.ts'
 
 declare module '@deepseek-ai/cordis' {
@@ -73,7 +75,7 @@ export interface Config {
 }
 
 export const Config: z<Config> = z.object({
-  baseURL: z.string().default('https://cloud.nanomuse.cn').description('The nanoMuse Cloud relay.'),
+  baseURL: z.string().default('').description('Your nanoMuse relay origin (no default relay; e.g. set to your self-hosted relay).'),
   deviceName: z.string().default('').description('This device in the account\'s device list; empty means the host name.'),
   statePath: z.string().default('').description('Account snapshot file; empty means $DSH_HOME/nanomuse/cloud.json.'),
 })
@@ -96,10 +98,76 @@ export interface HubState {
   connected: boolean
   deviceId: string
   deviceName: string
-  /** Whether other devices may run things here (`shell`, `files`, `open`, `screen`…); `info` and `notify` always work. */
+  /**
+   * On: every device of the account may run things here (`shell`, `files`, `open`, `screen`, a task) without
+   * asking. Off (the default): a device asks the person at this computer first — a card on this screen,
+   * allowed once or always for that device. `info` and `notify` always work.
+   */
   remoteControl: boolean
+  /** Devices the person allowed without asking, while remote control is off. */
+  trusted: TrustedDevice[]
+  /** Questions from other devices waiting for an answer on this screen. */
+  asks: Ask[]
   lastError?: string
   devices: HubDevice[]
+}
+
+export interface TrustedDevice {
+  id: string
+  name: string
+  at: number
+}
+
+/** Another device wants to run something here; the person answers on this screen. */
+export interface Ask {
+  id: string
+  from: string
+  fromId: string
+  action: string
+  text: string
+  at: number
+}
+
+export type AskAnswer = 'once' | 'always' | 'deny'
+
+/** How long a question from another device waits on this screen (the hub call itself waits about as long). */
+export const ASK_TIMEOUT_MS = 110_000
+
+/**
+ * The questions other devices are waiting on, and the person's answers. `ask` settles with the answer, or
+ * `'timeout'` when nobody answered in time; `onChange` fires whenever the list changes (for the live state).
+ */
+export class AskDesk {
+  private readonly pending = new Map<string, { ask: Ask; finish(answer: AskAnswer | 'timeout'): void }>()
+
+  constructor(private readonly onChange: () => void = () => undefined) {}
+
+  get list(): Ask[] {
+    return [...this.pending.values()].map((p) => p.ask)
+  }
+
+  ask(from: Caller, action: string, text: string, timeoutMs = ASK_TIMEOUT_MS): Promise<AskAnswer | 'timeout'> {
+    const ask: Ask = { id: `ask_${randomUUID().slice(0, 8)}`, from: from.name || 'a device', fromId: from.id, action, text, at: Date.now() }
+    return new Promise((resolve) => {
+      const finish = (answer: AskAnswer | 'timeout') => {
+        clearTimeout(timer)
+        this.pending.delete(ask.id)
+        this.onChange()
+        resolve(answer)
+      }
+      const timer = setTimeout(() => finish('timeout'), timeoutMs)
+      this.pending.set(ask.id, { ask, finish })
+      this.onChange()
+    })
+  }
+
+  /** The person's answer; false when the question is no longer waiting. */
+  answer(id: string, answer: AskAnswer): boolean {
+    const p = this.pending.get(id)
+    if (!p) return false
+    p.finish(answer)
+    return true
+  }
 }
 
 /** One Hands or Reach tool call in flight. */
@@ -124,22 +192,64 @@ export interface Notice {
   at: number
 }
 
+/** The last thing the hands did, for the stage's caption and cursor marker. */
+export interface StageAction {
+  /** `click`, `type`, `key`, `scroll`, `drag`, `open_app`, `wait`, `look`… */
+  kind: string
+  label: string
+  text: string
+  /** Pixels of the frame the action was aimed at; -1 when it had no point. */
+  x: number
+  y: number
+  at: number
+}
+
+/**
+ * The Live stage: the latest screenshot the agent took while using a screen —
+ * this computer's through the hands, or another device's through Reach — so
+ * the person can watch it work. The bytes are served separately (`/stage/frame`).
+ */
+export interface StageState {
+  /** 0 before any frame; grows with each new one (the frame URL's cache key). */
+  seq: number
+  at: number
+  source: 'computer' | 'device'
+  /** The other device's name; empty for this computer. */
+  device: string
+  width: number
+  height: number
+  /** What is in front on that screen, as the hands reported it. */
+  title: string
+  action: StageAction | null
+  sessionId: string
+}
+
 /** The live state the browser half mirrors over `/events`. */
 export interface LiveState {
   cloud: { signedIn: boolean; hint: string }
   profile: Profile
   hub: HubState
   hands: { calls: HandsCall[]; steps: number }
+  stage: StageState
   notices: Notice[]
 }
+
+/** How long after the last hands call the stage keeps its frame. */
+const STAGE_REST_MS = 10 * 60_000
+/** Four candidates and four poses (the idle still is the candidate itself): what a new face costs. */
+const STUDIO_PICTURES = 8
+
+const NO_STAGE: StageState = { seq: 0, at: 0, source: 'computer', device: '', width: 0, height: 0, title: '', action: null, sessionId: '' }
 
 interface State {
   account?: Account
   models?: RelayModel[]
   deviceId?: string
   deviceName?: string
-  /** Absent means on — the runtime's default too. */
+  /** `true` lets every device of the account run things here without asking; absent or `false` means ask. */
   remoteControl?: boolean
+  /** Devices allowed without asking (device id → name and when), while remote control is off. */
+  trusted?: Record<string, { name: string; at: number }>
   /** The session each other device's conversation lives in (`<device id>\n<conversation>` → session id). */
   taskSessions?: Record<string, string>
 }
@@ -147,6 +257,59 @@ interface State {
 /** Tool names whose calls the capsule follows. */
 export function isHandsTool(name: string): boolean {
   return name.startsWith('mcp__nanomuse__') || name === 'devices' || name.startsWith('device_') || name === 'delegate'
+}
+
+/** The trusted-device map as stored, dropping anything malformed. */
+function trustedOf(raw: Record<string, unknown>): Record<string, { name: string; at: number }> {
+  const out: Record<string, { name: string; at: number }> = {}
+  for (const [id, v] of Object.entries(raw)) {
+    if (!id || !v || typeof v !== 'object') continue
+    const { name, at } = v as { name?: unknown; at?: unknown }
+    out[id] = { name: typeof name === 'string' && name ? name : id, at: typeof at === 'number' ? at : 0 }
+  }
+  return out
+}
+
+/** The `confirmed` field of a hands call, when it is one (a ticket or the legacy `true`). */
+export function confirmationOf(args: unknown): string | true | undefined {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) return undefined
+  const value = (args as Record<string, unknown>).confirmed
+  return value === true || typeof value === 'string' ? value : undefined
+}
+
+/** The confirmation ticket `nanomuse mcp` checks: HMAC-SHA256 over the compact, key-sorted arguments without `confirmed`. */
+export function confirmTicket(secret: string, args: Record<string, unknown>): string {
+  const clean = Object.fromEntries(Object.entries(args).filter(([k]) => k !== 'confirmed'))
+  return createHmac('sha256', secret).update(canonical(clean)).digest('hex').slice(0, 32)
+}
+
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>).filter(([, v]) => v !== undefined).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonical(v)}`).join(',')}}`
+  }
+  return JSON.stringify(value)
+}
+
+/** The runtime's "Not done — …" refusal in an MCP error result, or `undefined` for any other failure. */
+export function refusalOf(result: ToolExecutionResult): string | undefined {
+  const texts: string[] = []
+  for (const block of result.content ?? []) {
+    const b = block as { type?: unknown; text?: unknown }
+    if (b.type === 'text' && typeof b.text === 'string') texts.push(b.text)
+  }
+  const message = (result.error as { message?: unknown } | undefined)?.message
+  if (typeof message === 'string') texts.push(message)
+  const hit = texts.find((t) => t.includes('Not done — '))
+  if (!hit) return undefined
+  const start = hit.indexOf('Not done — ')
+  return hit.slice(start + 'Not done — '.length).trim()
+}
+
+function declined(step: string, why: string): ToolExecutionResult {
+  const text = `Not done — ${step}. The person did not approve this step on their permission card (${why}); do not retry it. Ask them what to do instead, or carry on without it.`
+  return { isError: true, error: { message: text, info: { name: 'HandsDeclined', code: 'REJECTED' } }, content: [{ type: 'text', text }] }
 }
 
 const ARG_KEYS = ['action', 'label', 'text', 'device', 'command', 'task', 'path', 'url'] as const
@@ -161,11 +324,17 @@ export default class NanomuseCloud extends Service {
   private state: State = {}
   private busy: Promise<unknown> = Promise.resolve()
   private readonly streams = new Set<ServerResponse>()
+  private readonly changeListeners = new Set<() => void>()
   private readonly calls = new Map<string, HandsCall>()
   private steps = 0
   private lastCallAt = 0
   private notices: Notice[] = []
+  /** Questions from other devices waiting on this screen. */
+  private readonly asks = new AskDesk(() => this.broadcast())
   private noticeSeq = 0
+  private stage: StageState = NO_STAGE
+  private frame: { seq: number; bytes: Buffer; mime: string } | undefined
+  private stageTimer: NodeJS.Timeout | undefined
   private signedInCache = false
   /** Tasks from other devices, once the session API is up. */
   private tasks: TaskRunner | undefined
@@ -218,7 +387,7 @@ export default class NanomuseCloud extends Service {
       return { ok: true, shown: true }
     })
     for (const action of REMOTE_ACTIONS) {
-      this.hub.handle(action, (args, call) => this.remote(action, args, call.from.name || 'a device'))
+      this.hub.handle(action, (args, call) => this.remote(action, args, call.from))
     }
     // A task from another device runs in a dsh session here; needs the session API, so only once it is up.
     this.ctx.inject(['sessionController', 'approval'], (ctx) => {
@@ -236,8 +405,8 @@ export default class NanomuseCloud extends Service {
       ctx.effect(() => runner.attach(), 'nanomuse cloud: tasks')
       ctx.effect(
         () =>
-          this.hub.handle('task', (args, call) => {
-            if (!this.remoteControl) throw new HubError('not_allowed', `${this.deviceName()} is set not to be operated from other devices`)
+          this.hub.handle('task', async (args, call) => {
+            await this.permit(call.from, 'task', brief('task', args))
             return runner.task(args, call)
           }),
         'nanomuse cloud: task',
@@ -256,9 +425,20 @@ export default class NanomuseCloud extends Service {
     this.ctx.inject(['tools'], (ctx) => {
       ctx.on('tools/execute', async (exec, next) => {
         if (!isHandsTool(exec.name)) return next()
-        this.began(exec.callId, exec.name, exec.arguments, exec.agent?.session.id ?? '')
+        // Our own re-dispatch of a step the person just agreed to: the stage already follows the outer call.
+        if (exec.parent !== undefined && confirmationOf(exec.arguments) !== undefined) return next()
+        const sessionId = exec.agent?.session.id ?? ''
+        this.began(exec.callId, exec.name, exec.arguments, sessionId)
+        if (exec.name === 'mcp__nanomuse__computer_act') this.acted(stageAction(exec.arguments), sessionId)
+        else if (exec.name === 'mcp__nanomuse__computer_screen') this.acted({ kind: 'look', label: '', text: '', x: -1, y: -1, at: Date.now() }, sessionId)
         try {
-          return await next()
+          let result = await next()
+          if (exec.name === 'mcp__nanomuse__computer_act' && result.isError) {
+            const refused = refusalOf(result)
+            if (refused) result = await this.confirmStep(ctx, exec, refused)
+          }
+          if (exec.name.startsWith('mcp__nanomuse__computer_') && !result.isError) this.frameFromMcp(result.value, sessionId)
+          return result
         } finally {
           this.ended(exec.callId)
         }
@@ -313,6 +493,7 @@ export default class NanomuseCloud extends Service {
       profile: this.profile.current(),
       hub: this.hubState(),
       hands: { calls: [...this.calls.values()], steps: this.steps },
+      stage: this.stage,
       notices: this.notices,
     }
   }
@@ -381,6 +562,66 @@ export default class NanomuseCloud extends Service {
       } else {
         await this.profile.wearLocal({ ...current, ...write, rev: current.rev })
       }
+      this.broadcast()
+      return this.profile.current()
+    })
+  }
+
+  // ---- the avatar studio: the pictures through the relay, the face onto the account ------
+
+  /** The account's image model, as the relay lists it (the recommended one first). */
+  private imageModel(): string {
+    const models = (this.state.models ?? []).filter((m) => m.kind === 'image')
+    const pick = models.find((m) => m.recommended) ?? models[0]
+    return pick ? pick.id : ''
+  }
+
+  private async studioToken(): Promise<string> {
+    const token = await this.token()
+    if (!token || !this.state.account) throw new RelayError(401, 'signed_out', 'Sign in to draw a face')
+    if (!this.imageModel()) throw new RelayError(409, 'no_image_model', 'The account has no image model to draw with')
+    return token
+  }
+
+  /** What four candidates and four poses would cost today. */
+  async studioEstimate(): Promise<Estimate> {
+    const token = await this.studioToken()
+    return this.relay.estimate(token, STUDIO_PICTURES)
+  }
+
+  /** One candidate, drawn from the words; PNG bytes as the model gave them. */
+  async studioDraw(prompt: string): Promise<Buffer> {
+    const token = await this.studioToken()
+    return this.relay.generateImage(token, this.imageModel(), prompt)
+  }
+
+  /** One pose of the chosen candidate. */
+  async studioPose(image: Buffer, prompt: string): Promise<Buffer> {
+    const token = await this.studioToken()
+    return this.relay.editImage(token, this.imageModel(), image, prompt)
+  }
+
+  /**
+   * Wear a face drawn here: the stills go to the account (`PUT /v1/me/profile` with the
+   * `face` map), then the profile is pulled so the pictures land under `faces/<id>/`
+   * and every device of the account hears the hub's `profile` frame.
+   */
+  wearFace(description: string, style: string, face: Record<string, string>): Promise<Profile> {
+    return this.serialize(async () => {
+      const token = await this.token()
+      if (!token || !this.state.account) throw new RelayError(401, 'signed_out', 'Sign in to wear a drawn face')
+      const current = this.profile.current()
+      const write: ProfileWrite = {
+        name: current.name || 'nanoMuse',
+        avatar: 'face',
+        emoji: '',
+        color: current.color,
+        style: style.slice(0, 20),
+        description: description.slice(0, 200),
+        face,
+      }
+      await this.relay.putProfile(token, write, this.deviceName())
+      await this.profile.pull(token, true)
       this.broadcast()
       return this.profile.current()
     })
@@ -473,19 +714,52 @@ export default class NanomuseCloud extends Service {
     this.broadcast()
   }
 
-  /** Whether other devices may run things here; `info` and `notify` always work. */
+  /** Whether every device of the account may run things here without asking; off (the default) means each one asks. */
   get remoteControl(): boolean {
-    return this.state.remoteControl !== false
+    return this.state.remoteControl === true
   }
 
-  /** Flip remote control; the hub hears the new action list in the next `hello`. */
+  /** Flip remote control. */
   async setRemoteControl(on: boolean): Promise<void> {
     if (this.remoteControl === on) return
     this.state = { ...this.state, remoteControl: on }
     await this.writeState()
-    this.ctx.logger.info('nanomuse: remote control %s', on ? 'on' : 'off')
-    if (this.hub.connected) this.hub.restart()
+    this.ctx.logger.info('nanomuse: remote control %s', on ? 'on (no questions)' : 'off (each device asks)')
     this.broadcast()
+  }
+
+  /** The devices allowed without asking. */
+  get trusted(): TrustedDevice[] {
+    return Object.entries(this.state.trusted ?? {}).map(([id, v]) => ({ id, name: v.name, at: v.at })).sort((a, b) => a.at - b.at)
+  }
+
+  /** Allow, or stop allowing, one device without asking. */
+  async setTrusted(id: string, name: string, on: boolean): Promise<void> {
+    const trusted = { ...this.state.trusted }
+    if (on) trusted[id] = { name: name || trusted[id]?.name || id, at: Date.now() }
+    else if (id in trusted) delete trusted[id]
+    else return
+    this.state = { ...this.state, trusted }
+    await this.writeState()
+    this.ctx.logger.info('nanomuse: %s %s without asking', name || id, on ? 'allowed' : 'no longer allowed')
+    this.broadcast()
+  }
+
+  /**
+   * Whether `from` may do `action` here now. Remote control on, or a device allowed without asking: yes.
+   * Otherwise a card on this screen asks the person; *always* remembers the device. No answer in time, or
+   * a no, and the asker hears `not_allowed`.
+   */
+  private async permit(from: Caller, action: string, text: string): Promise<void> {
+    if (this.remoteControl || this.state.trusted?.[from.id]) return
+    this.ctx.logger.info('nanomuse: %s asks to %s here%s', from.name || 'a device', action, text ? `: ${text}` : '')
+    const answer = await this.asks.ask(from, action, text)
+    if (answer === 'always') await this.setTrusted(from.id, from.name, true)
+    if (answer === 'once' || answer === 'always') return
+    throw new HubError(
+      'not_allowed',
+      answer === 'timeout' ? `nobody at ${this.deviceName()} answered in time` : `the person at ${this.deviceName()} did not allow it`,
+    )
   }
 
   /** The current account key, for a plugin that speaks to the relay itself. */
@@ -550,7 +824,7 @@ export default class NanomuseCloud extends Service {
       this.ctx.logger.debug('nanomuse cloud: provider row not removed: %s', message(error))
     }
     const { deviceId, deviceName, remoteControl } = this.state
-    this.state = { ...(deviceId ? { deviceId } : {}), ...(deviceName ? { deviceName } : {}), ...(remoteControl === false ? { remoteControl } : {}) }
+    this.state = { ...(deviceId ? { deviceId } : {}), ...(deviceName ? { deviceName } : {}), ...(remoteControl === true ? { remoteControl } : {}) }
     this.signedInCache = false
     await this.writeState()
     await this.profile.reset()
@@ -594,6 +868,103 @@ export default class NanomuseCloud extends Service {
       this.lastCallAt = Date.now()
       this.broadcast()
     }
+    // the stage empties itself a while after the hands rest
+    if (this.stageTimer) clearTimeout(this.stageTimer)
+    this.stageTimer = setTimeout(() => {
+      this.stageTimer = undefined
+      if (this.calls.size === 0 && Date.now() - this.lastCallAt >= STAGE_REST_MS - 1000) this.clearStage()
+    }, STAGE_REST_MS)
+    this.stageTimer.unref?.()
+  }
+
+  // -- the Live stage -------------------------------------------------------------------
+
+  /** A frame of a screen the agent is working on; `meta.device` names another device, else it is this computer's. */
+  stageFrame(bytes: Buffer, mime: string, meta: { device?: string; width?: number; height?: number; title?: string; sessionId: string }): void {
+    if (bytes.length === 0 || bytes.length > 12 * 1024 * 1024) return
+    const seq = (this.frame?.seq ?? 0) + 1
+    this.frame = { seq, bytes, mime }
+    const sameScreen = this.stage.source === (meta.device ? 'device' : 'computer') && this.stage.device === (meta.device ?? '')
+    this.stage = {
+      seq,
+      at: Date.now(),
+      source: meta.device ? 'device' : 'computer',
+      device: meta.device ?? '',
+      width: meta.width ?? 0,
+      height: meta.height ?? 0,
+      title: (meta.title ?? '').slice(0, 120),
+      // an action aimed at another screen does not belong on this frame
+      action: sameScreen ? this.stage.action : null,
+      sessionId: meta.sessionId,
+    }
+    this.broadcast()
+  }
+
+  /** What the hands are about to do on this computer's screen. */
+  private acted(action: StageAction, sessionId: string): void {
+    this.stage = { ...this.stage, action, sessionId: sessionId || this.stage.sessionId }
+    this.broadcast()
+  }
+
+  /**
+   * A step the runtime's hands refused without the person's word (Enter, a submit, a click
+   * on "pay", …): ask them on the permission card, and if they agree, run the same call
+   * again carrying the confirmation ticket the `nanomuse mcp` server checks — an HMAC of
+   * the arguments under the secret the desktop shell gave both of us (NANOMUSE_MCP_CONFIRM).
+   * Without the secret (a hand-made dsh profile) the server takes `confirmed: true`, so
+   * that is what the re-dispatch carries; either way the model never confirms on its own.
+   */
+  private async confirmStep(ctx: Context, exec: ToolDispatchExecution, refused: string): Promise<ToolExecutionResult> {
+    const approval = ctx.get('approval')
+    const tools = ctx.get('tools')
+    if (!approval || !tools || !exec.agent) return declined(refused, 'approval is not available here')
+    const step = refused.replace(/\.\s+(The person has to agree|Ask the person)[\s\S]*$/, '').trim()
+    const outcome = await approval.request({
+      agent: exec.agent,
+      toolName: exec.name,
+      callId: exec.callId,
+      reason: step,
+      displayReason: { en: `On this computer's screen: ${step}`, zh: `在这台电脑的屏幕上：${step}` },
+      signal: exec.signal,
+    })
+    if (outcome !== 'allowed-once') return declined(step, outcome)
+    const args = exec.arguments && typeof exec.arguments === 'object' && !Array.isArray(exec.arguments) ? (exec.arguments as Record<string, unknown>) : {}
+    const secret = process.env.NANOMUSE_MCP_CONFIRM?.trim()
+    const confirmed: string | true = secret ? confirmTicket(secret, args) : true
+    return tools.execute({
+      callId: ToolCallId(`${exec.callId}:confirmed`),
+      rootCallId: exec.rootCallId,
+      name: exec.name,
+      arguments: { ...args, confirmed },
+      agent: exec.agent,
+      parent: exec.token,
+      signal: exec.signal,
+    })
+  }
+
+  /** The screenshot and the words that came back from `computer_screen` / `computer_act` (an MCP result). */
+  private frameFromMcp(value: unknown, sessionId: string): void {
+    const content = (value as { content?: unknown[] } | undefined)?.content
+    if (!Array.isArray(content)) return
+    let image: { data: string; mime: string } | undefined
+    let text = ''
+    for (const block of content) {
+      if (!block || typeof block !== 'object') continue
+      const b = block as { type?: unknown; data?: unknown; mimeType?: unknown; text?: unknown }
+      if (b.type === 'image' && typeof b.data === 'string' && !image) image = { data: b.data, mime: typeof b.mimeType === 'string' ? b.mimeType : 'image/png' }
+      else if (b.type === 'text' && typeof b.text === 'string') text += (text ? '\n' : '') + b.text
+    }
+    if (!image) return
+    const head = screenHead(text)
+    this.stageFrame(Buffer.from(image.data, 'base64'), image.mime, { ...head, sessionId })
+  }
+
+  /** The agent has stopped using that screen for a while: the stage can go. */
+  private clearStage(): void {
+    if (this.stage.seq === 0) return
+    this.stage = NO_STAGE
+    this.frame = undefined
+    this.broadcast()
   }
 
   private notice(kind: Notice['kind'], from: string, title: string, text: string, action?: string): void {
@@ -606,25 +977,22 @@ export default class NanomuseCloud extends Service {
     this.broadcast()
   }
 
-  /** The actions this computer announces: always `info` and `notify`, the rest with remote control on. */
+  /** The actions this computer announces: `info` and `notify`, the remote ones (the person here agrees to each unless remote control is on), a task once sessions are up. */
   private actions(): string[] {
-    const out = [...ACTIONS]
-    if (this.tasks) out.push('approve')
-    if (this.remoteControl) {
-      out.push(...REMOTE_ACTIONS)
-      if (this.tasks) out.push('task', 'stop')
-    }
+    const out = [...ACTIONS, ...REMOTE_ACTIONS]
+    if (this.tasks) out.push('approve', 'task', 'stop')
     return out
   }
 
-  /** Another device running something here (`docs/hub.md`: the asker judged it; here the switch decides). */
-  private async remote(action: RemoteAction, args: Record<string, unknown>, from: string): Promise<Record<string, unknown>> {
-    if (!this.remoteControl) throw new HubError('not_allowed', `${this.deviceName()} is set not to be operated from other devices`)
+  /** Another device running something here (`docs/hub.md`: the asker judged it; here the person — or the switch — decides). */
+  private async remote(action: RemoteAction, args: Record<string, unknown>, from: Caller): Promise<Record<string, unknown>> {
     const summary = brief(action, args)
-    this.ctx.logger.info('nanomuse: %s asked %s here%s', from, action, summary ? `: ${summary}` : '')
+    await this.permit(from, action, summary)
+    const who = from.name || 'a device'
+    this.ctx.logger.info('nanomuse: %s asked %s here%s', who, action, summary ? `: ${summary}` : '')
     const body = await runAction(action, args)
     // Only what actually happened is worth a toast; a refused path is the asker's error to see.
-    if (TOAST_ACTIONS.has(action)) this.notice('call', from, '', summary, action)
+    if (TOAST_ACTIONS.has(action)) this.notice('call', who, '', summary, action)
     return body
   }
 
@@ -636,6 +1004,8 @@ export default class NanomuseCloud extends Service {
       deviceId: this.state.deviceId ?? '',
       deviceName: this.deviceName(),
       remoteControl: this.remoteControl,
+      trusted: this.trusted,
+      asks: this.asks.list,
       ...(this.hub.lastError ? { lastError: this.hub.lastError } : {}),
       devices: this.hub.devices,
     }
@@ -661,7 +1031,8 @@ export default class NanomuseCloud extends Service {
         ...(raw.models ? { models: raw.models } : {}),
         ...(typeof raw.deviceId === 'string' && raw.deviceId ? { deviceId: raw.deviceId } : {}),
         ...(typeof raw.deviceName === 'string' && raw.deviceName ? { deviceName: raw.deviceName } : {}),
-        ...(raw.remoteControl === false ? { remoteControl: false } : {}),
+        ...(raw.remoteControl === true ? { remoteControl: true } : {}),
+        ...(raw.trusted && typeof raw.trusted === 'object' ? { trusted: trustedOf(raw.trusted) } : {}),
         ...(raw.taskSessions && typeof raw.taskSessions === 'object' ? { taskSessions: raw.taskSessions } : {}),
       }
     } catch {
@@ -683,7 +1054,22 @@ export default class NanomuseCloud extends Service {
 
   // -- the loopback API -------------------------------------------------------------
 
+  /** Called whenever the live state changes (sign-in, profile, hub, devices); for other services. */
+  onChange(listener: () => void): () => void {
+    this.changeListeners.add(listener)
+    return () => {
+      this.changeListeners.delete(listener)
+    }
+  }
+
   private broadcast(): void {
+    for (const listener of this.changeListeners) {
+      try {
+        listener()
+      } catch {
+        // a listener's problem is not ours
+      }
+    }
     if (this.streams.size === 0) return
     const data = `data: ${JSON.stringify(this.live())}\n\n`
     for (const res of this.streams) {
@@ -722,6 +1108,17 @@ export default class NanomuseCloud extends Service {
       if (req.method === 'GET' && route === '/status') return send(res, 200, await this.status())
       if (req.method === 'GET' && route === '/events') return this.stream(req, res)
       if (req.method === 'GET' && route === '/live') return send(res, 200, this.live())
+      if (req.method === 'GET' && route === '/stage/frame') {
+        const frame = this.frame
+        if (!frame) return send(res, 404, { error: { code: 'no_frame', message: 'Nothing on the stage' } })
+        res.writeHead(200, { 'content-type': frame.mime, 'content-length': frame.bytes.length, 'cache-control': 'private, max-age=600' })
+        res.end(frame.bytes)
+        return
+      }
+      if (req.method === 'POST' && route === '/stage/clear') {
+        this.clearStage()
+        return send(res, 204)
+      }
       if (req.method === 'POST' && route === '/code') {
         const body = await json(req)
         await this.requestCode(String(body.identifier ?? ''))
@@ -749,6 +1146,25 @@ export default class NanomuseCloud extends Service {
         return send(res, 200, await this.writeProfile(patch))
       }
       if (req.method === 'POST' && route === '/refresh') return send(res, 200, await this.refresh())
+      if (req.method === 'GET' && route === '/studio/estimate') return send(res, 200, await this.studioEstimate())
+      if (req.method === 'POST' && route === '/studio/draw') {
+        const body = await json(req)
+        const png = await this.studioDraw(String(body.prompt ?? '').slice(0, 2000))
+        return send(res, 200, { image: png.toString('base64') })
+      }
+      if (req.method === 'POST' && route === '/studio/pose') {
+        const body = await json(req, 8 * 1024 * 1024)
+        const image = Buffer.from(String(body.image ?? ''), 'base64')
+        if (!image.length) return send(res, 400, { error: { code: 'bad_request', message: 'image is the base64 PNG to pose' } })
+        const png = await this.studioPose(image, String(body.prompt ?? '').slice(0, 2000))
+        return send(res, 200, { image: png.toString('base64') })
+      }
+      if (req.method === 'POST' && route === '/studio/wear') {
+        const body = await json(req, 4 * 1024 * 1024)
+        const face = body.face as Record<string, string> | undefined
+        if (!face || typeof face !== 'object' || typeof face.idle !== 'string') return send(res, 400, { error: { code: 'bad_request', message: 'face is a {mood: base64 WebP} map with idle' } })
+        return send(res, 200, await this.wearFace(String(body.description ?? ''), String(body.style ?? 'muse'), face))
+      }
       if (req.method === 'POST' && route === '/sign-out') return send(res, 200, await this.signOut())
       if (req.method === 'POST' && route === '/data/contribute') {
         const body = await json(req)
@@ -772,7 +1188,19 @@ export default class NanomuseCloud extends Service {
       }
       if (req.method === 'POST' && route === '/devices/remote-control') {
         const body = await json(req)
-        await this.setRemoteControl(body.on !== false)
+        await this.setRemoteControl(body.on === true)
+        return send(res, 204)
+      }
+      if (req.method === 'POST' && route === '/devices/trust') {
+        const body = await json(req)
+        await this.setTrusted(String(body.device_id ?? ''), String(body.name ?? ''), body.on === true)
+        return send(res, 204)
+      }
+      if (req.method === 'POST' && route === '/devices/answer') {
+        const body = await json(req)
+        const answer = body.answer
+        if (answer !== 'once' && answer !== 'always' && answer !== 'deny') return send(res, 400, { error: { code: 'bad_answer', message: 'answer must be once, always or deny' } })
+        if (!this.asks.answer(String(body.id ?? ''), answer)) return send(res, 404, { error: { code: 'not_found', message: 'that question is no longer waiting' } })
         return send(res, 204)
       }
       if (req.method === 'POST' && route === '/notices/clear') {
@@ -799,6 +1227,40 @@ export function dshHome(): string {
 }
 
 /** The few arguments the capsule shows, as short strings. */
+/** The hands' arguments as the stage shows them: what kind of step, aimed where. */
+export function stageAction(args: unknown): StageAction {
+  const a = (args && typeof args === 'object' ? args : {}) as Record<string, unknown>
+  const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : typeof v === 'string' && v.trim() && Number.isFinite(Number(v)) ? Number(v) : -1)
+  const kind = typeof a.action === 'string' ? a.action : 'act'
+  const keys = Array.isArray(a.keys) ? a.keys.filter((k): k is string => typeof k === 'string').join('+') : ''
+  const text = kind === 'key' ? keys : kind === 'open_app' ? String(a.app ?? '') : typeof a.text === 'string' ? a.text : ''
+  return {
+    kind,
+    label: typeof a.label === 'string' ? a.label.replace(/\s+/g, ' ').trim().slice(0, 80) : '',
+    text: text.replace(/\s+/g, ' ').trim().slice(0, 80),
+    x: num(a.x),
+    y: num(a.y),
+    at: Date.now(),
+  }
+}
+
+/** The first line of what `computer_screen` says: `<window in front> · <WxH> · …` → title and size. */
+export function screenHead(text: string): { title: string; width: number; height: number } {
+  const line = text.split('\n').find((l) => l.trim()) ?? ''
+  const parts = line.split(' · ').map((p) => p.trim())
+  let width = 0
+  let height = 0
+  const rest: string[] = []
+  for (const part of parts) {
+    const m = /^(\d{2,5})[×x](\d{2,5})$/.exec(part)
+    if (m) {
+      width = Number(m[1])
+      height = Number(m[2])
+    } else if (!/^keyboard (shown|hidden)$/.test(part)) rest.push(part)
+  }
+  return { title: (rest[0] ?? '').slice(0, 120), width, height }
+}
+
 export function pickArgs(args: unknown): Record<string, string> {
   const out: Record<string, string> = {}
   if (!args || typeof args !== 'object') return out
@@ -822,7 +1284,7 @@ function sameModels(a: RelayModel[], b: RelayModel[]): boolean {
 }
 
 /** A browser on another origin cannot sign this device in or out. */
-function sameOrigin(req: IncomingMessage): boolean {
+export function sameOrigin(req: IncomingMessage): boolean {
   const origin = req.headers.origin
   const site = req.headers['sec-fetch-site']
   if (typeof site === 'string' && site !== 'same-origin' && site !== 'none') return false
@@ -831,13 +1293,14 @@ function sameOrigin(req: IncomingMessage): boolean {
   return typeof host === 'string' && (origin === `http://${host}` || origin === `https://${host}`)
 }
 
-async function json(req: IncomingMessage): Promise<Record<string, unknown>> {
+/** The request body as an object; empty when there is none. */
+export async function json(req: IncomingMessage, limit = 64 * 1024): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = []
   let size = 0
   for await (const chunk of req) {
     const buffer = chunk as Buffer
     size += buffer.length
-    if (size > 64 * 1024) throw new RelayError(413, 'too_large', 'Request body too large')
+    if (size > limit) throw new RelayError(413, 'too_large', 'Request body too large')
     chunks.push(buffer)
   }
   if (chunks.length === 0) return {}
@@ -849,7 +1312,8 @@ async function json(req: IncomingMessage): Promise<Record<string, unknown>> {
   }
 }
 
-function send(res: ServerResponse, status: number, body?: unknown): void {
+/** A JSON reply, or an empty one for 204. */
+export function send(res: ServerResponse, status: number, body?: unknown): void {
   if (body === undefined) {
     res.writeHead(status, { 'cache-control': 'no-store' }).end()
     return
@@ -857,6 +1321,6 @@ function send(res: ServerResponse, status: number, body?: unknown): void {
   res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify(body))
 }
 
-function message(error: unknown): string {
+export function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }

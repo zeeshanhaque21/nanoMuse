@@ -42,7 +42,7 @@ export default function SetupPage() {
 }
 
 /** Where the real thing is: the Android app and the desktop, on the project site. */
-const DOWNLOAD_URL = 'https://nanomuse.cn/#download';
+const DOWNLOAD_URL = 'https://github.com/zeeshanhaque21/nanoMuse/releases';
 
 type Phase = 'idle' | 'starting' | 'failed';
 type Step = 'welcome' | 'signin' | 'meet';
@@ -211,7 +211,7 @@ function ShowcaseFlow({ gateway, onOwnServer }: { gateway: string; onOwnServer: 
 }
 
 /** Where the project explains itself: the open-source section of the site (the APK's NOTICE_URL). */
-const NOTICE_URL = 'https://nanomuse.cn/#open-source';
+const NOTICE_URL = 'https://github.com/zeeshanhaque21/nanoMuse';
 
 /** The Android welcome page's card (FirstRunSetup.kt NoticeCard): free, open source, non-profit; a tap opens the site. */
 function NoticeCard({ title, body, closing }: { title: string; body: string; closing: string }) {
@@ -433,7 +433,7 @@ function OwnServerPage({ onBack }: { onBack?: () => void }) {
       finePrint={s.setup_own_fine_print}
     >
       <form onSubmit={submit} className="flex flex-col gap-2.5">
-        <Field type="url" value={address} onChange={setAddress} placeholder="http://127.0.0.1:8787/?token=…" label={s.setup_address} />
+        <Field type="url" value={address} onChange={setAddress} placeholder="http://127.0.0.1:8787/#token=…" label={s.setup_address} />
         <Field type="text" value={token} onChange={setToken} placeholder={s.setup_token_hint} label={s.setup_token} />
         <button type="submit" className="hidden" />
       </form>
@@ -639,7 +639,7 @@ function probe(serverUrl: string, token: string): Promise<'ok' | 'unauthorized' 
     }
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
     url.pathname = '/ws';
-    url.search = token ? `?token=${encodeURIComponent(token)}` : '';
+    url.search = '';
     let done = false;
     let ws: WebSocket | null = null;
     const finish = (r: 'ok' | 'unauthorized' | 'unreachable') => {
@@ -660,6 +660,9 @@ function probe(serverUrl: string, token: string): Promise<'ok' | 'unauthorized' 
       finish('unreachable');
       return;
     }
+    ws.onopen = () => {
+      if (token) ws?.send(JSON.stringify({ kind: 'auth', token }));
+    };
     ws.onmessage = () => finish('ok');
     ws.onclose = (ev) => finish(ev.code === 4401 ? 'unauthorized' : 'unreachable');
     ws.onerror = () => {

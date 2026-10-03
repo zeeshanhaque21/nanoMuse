@@ -42,9 +42,9 @@ type View = 'loading' | 'welcome' | 'identifier' | 'code' | 'password' | 'wait' 
 type SlideId = 'computer' | 'files' | 'devices'
 
 const READY_MS = 1400
-const PRIVACY_URL = 'https://github.com/nano-muse/nanoMuse/blob/main/docs/privacy.md'
-const TERMS_URL = 'https://github.com/nano-muse/nanoMuse/blob/main/docs/terms.md'
-const PHONE_URL = 'https://nanomuse.cn/'
+const PRIVACY_URL = 'https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/privacy.md'
+const TERMS_URL = 'https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/terms.md'
+const PHONE_URL = 'https://github.com/zeeshanhaque21/nanoMuse'
 
 function Pill({ children, onClick, disabled, type = 'button', ghost = false, small = false, className = '' }: {
   children?: ReactNode

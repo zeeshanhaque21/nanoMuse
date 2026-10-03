@@ -47,7 +47,7 @@ import java.util.Date
 import java.util.Locale
 
 const val ROUTE_COMPUTERS = "nanomuse/computers"
-const val DESKTOP_DOWNLOAD_URL = "https://nanomuse.cn/#download"
+const val DESKTOP_DOWNLOAD_URL = "https://github.com/zeeshanhaque21/nanoMuse/releases"
 
 /**
  * Settings → Computers: the account's computers, as the hub knows them. One way in — nanoMuse

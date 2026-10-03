@@ -53,9 +53,56 @@ export interface LiveHub {
   connected: boolean
   deviceId: string
   deviceName: string
+  /** On: every device may run things here without asking; off: each device asks on this screen. */
   remoteControl: boolean
+  /** Devices allowed without asking. */
+  trusted: LiveTrusted[]
+  /** Questions from other devices waiting for an answer here. */
+  asks: LiveAsk[]
   lastError?: string
   devices: LiveDevice[]
+}
+
+export interface LiveTrusted {
+  id: string
+  name: string
+  at: number
+}
+
+export interface LiveAsk {
+  id: string
+  from: string
+  fromId: string
+  action: string
+  text: string
+  at: number
+}
+
+/** The last thing the hands did, for the stage's caption and cursor marker. */
+export interface LiveStageAction {
+  kind: string
+  label: string
+  text: string
+  /** Pixels of the frame; -1 when the step had no point. */
+  x: number
+  y: number
+  at: number
+}
+
+/** The Live stage: the latest screenshot of a screen the agent is working on. */
+export interface LiveStage {
+  /** 0 before any frame; grows with each new one (the frame URL's cache key). */
+  seq: number
+  at: number
+  source: 'computer' | 'device'
+  /** The other device's name; empty for this computer. */
+  device: string
+  width: number
+  height: number
+  /** What is in front on that screen. */
+  title: string
+  action: LiveStageAction | null
+  sessionId: string
 }
 
 export interface Live {
@@ -63,6 +110,7 @@ export interface Live {
   profile: LiveProfile
   hub: LiveHub
   hands: { calls: LiveCall[]; steps: number }
+  stage: LiveStage
   notices: LiveNotice[]
   /** Whether the stream is open; false before the first snapshot and while reconnecting. */
   streaming: boolean
@@ -73,8 +121,9 @@ export const DEFAULT_PROFILE: LiveProfile = { rev: 0, name: 'nanoMuse', avatar: 
 const INITIAL: Live = {
   cloud: { signedIn: false, hint: '' },
   profile: DEFAULT_PROFILE,
-  hub: { connected: false, deviceId: '', deviceName: '', remoteControl: true, devices: [] },
+  hub: { connected: false, deviceId: '', deviceName: '', remoteControl: false, trusted: [], asks: [], devices: [] },
   hands: { calls: [], steps: 0 },
+  stage: { seq: 0, at: 0, source: 'computer', device: '', width: 0, height: 0, title: '', action: null, sessionId: '' },
   notices: [],
   streaming: false,
 }

@@ -44,7 +44,7 @@ import org.json.JSONObject
  * content is forwarded to the model, not stored. See `docs/cloud.md`.
  */
 object NanoMuseCloud {
-    const val DEFAULT_BASE = "https://cloud.nanomuse.cn"
+    const val DEFAULT_BASE = ""
     const val LABEL = "nanoMuse Cloud"
 
     private const val PREFS = "nanomuse"
@@ -98,8 +98,8 @@ object NanoMuseCloud {
     private const val KEY_MODELS_AT = "cloud.models_at"
     private const val MODELS_FRESH_MS = 60 * 60 * 1000L
 
-    /** Where the privacy policy is when the relay did not name one. */
-    const val PRIVACY_URL = "https://nanomuse.cn/privacy/"
+    /** Where the privacy policy is when the relay named one; empty means hide the link. */
+    const val PRIVACY_URL = ""
 
     class CloudException(val code: String, message: String, val status: Int = 0) : IOException(message)
 
@@ -225,12 +225,20 @@ object NanoMuseCloud {
     private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     /**
-     * The relay this build talks to. The person may point it at their own relay (a self-hosted
-     * one, or a laptop on the same Wi-Fi); the default stays the hosted one when unset.
+     * The relay this build talks to. No default relay: the person points it at
+     * their own relay; empty means not configured (callers must ask for it).
      */
     fun baseUrl(context: Context): String =
         prefs(context).getString(KEY_BASE, null)?.takeIf { it.isNotBlank() }?.trimEnd('/')
             ?: DEFAULT_BASE
+
+    /** True when a relay server is configured. */
+    fun isConfigured(context: Context): Boolean = baseUrl(context).isNotBlank()
+
+    /** Require a configured relay or throw with a useful message (no silent fallback). */
+    fun requireBaseUrl(context: Context): String =
+        baseUrl(context).takeIf { it.isNotBlank() }
+            ?: throw IllegalStateException("Relay server not configured: enter your relay server in Settings")
 
     fun setBaseUrl(context: Context, url: String?) {
         prefs(context).edit().apply {
@@ -632,7 +640,10 @@ object NanoMuseCloud {
         val chatEntry = entries.firstOrNull { it.model.id == recommendedChat }
             ?: entries.firstOrNull { !ImageGen.looksLikeImageModel(it.model.id) && !drawsOrFilms(it.model) }
         if (chatEntry != null) {
-            val already = config.modelGroups.any { chatEntry.id in it.memberEntryIds }
+            // Ours already, with the recommended model or with the person's own choice
+            // (a member who swapped the recommended model for another must not get a
+            // second "nanoMuse Cloud" group with the old one back on signing in again).
+            val already = config.modelGroups.any { chatEntry.id in it.memberEntryIds || (it.name == LABEL && it.memberEntryIds.isNotEmpty()) }
             if (!already) {
                 // A group of ours left empty by an earlier sign-out is reused rather
                 // than doubled; otherwise a new one.
@@ -650,7 +661,8 @@ object NanoMuseCloud {
             // The default group must be one that can answer.
             val default = repo.config.value.modelGroups.firstOrNull { it.id == repo.defaultPrimaryGroupId }
             if (default == null || default.memberEntryIds.isEmpty()) {
-                repo.defaultPrimaryGroupId = repo.config.value.modelGroups.firstOrNull { chatEntry.id in it.memberEntryIds }?.id
+                val groups = repo.config.value.modelGroups
+                repo.defaultPrimaryGroupId = (groups.firstOrNull { chatEntry.id in it.memberEntryIds } ?: groups.firstOrNull { it.name == LABEL && it.memberEntryIds.isNotEmpty() })?.id
             }
         }
         if (imageModel != null) {

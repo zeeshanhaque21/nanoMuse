@@ -5,9 +5,9 @@ type: software
 authors:
   - name: "nanoMuse Contributors"
 repository-code: "https://github.com/nano-muse/nanoMuse"
-url: "https://nanomuse.cn/"
+url: "https://github.com/zeeshanhaque21/nanoMuse"
 license: GPL-3.0-or-later
-version: 0.1.29
+version: 0.1.31
 date-released: 2026-10-03
 keywords:
   - personal agent

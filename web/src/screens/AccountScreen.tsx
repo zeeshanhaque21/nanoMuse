@@ -221,7 +221,7 @@ function Invite({ me }: { me: CloudMe }) {
   const t = useT();
   const { toast } = useStore();
   const inv = me.invite!;
-  const link = inv.url || `https://nanomuse.cn/web/?invite=${inv.code}`;
+  const link = inv.url || "";
   const earned = inv.earned_cny ?? inv.invites * inv.bonus_cny;
   const copy = async (text: string) => {
     try {
@@ -232,7 +232,9 @@ function Invite({ me }: { me: CloudMe }) {
     }
   };
   const share = async () => {
-    const text = t("Try nanoMuse with me — a fully open-source personal agent, free to use. Sign up with my code {code}: {link}", { code: inv.code, link });
+    const text = link
+      ? t("Try nanoMuse with me — a fully open-source personal agent, free to use. Sign up with my code {code}: {link}", { code: inv.code, link })
+      : t("Try nanoMuse with me — a fully open-source personal agent, free to use. Sign up with my code {code}", { code: inv.code });
     const nav = navigator as Navigator & { share?: (data: { text: string }) => Promise<void> };
     if (nav.share) {
       try {
@@ -260,11 +262,13 @@ function Invite({ me }: { me: CloudMe }) {
       </div>
       <div className="flex gap-2">
         <button type="button" onClick={() => void share()} className={cx(primaryBtn, "inline-flex flex-1 items-center justify-center gap-1.5 py-2.5")}>
-          <Share2 size={14} /> {t("Share the link")}
+          <Share2 size={14} /> {link ? t("Share the link") : t("Share the code")}
         </button>
-        <button type="button" onClick={() => void copy(link)} className={cx(secondaryBtn, "inline-flex items-center gap-1.5")}>
-          <Gift size={14} /> {t("Copy the link")}
-        </button>
+        {link ? (
+          <button type="button" onClick={() => void copy(link)} className={cx(secondaryBtn, "inline-flex items-center gap-1.5")}>
+            <Gift size={14} /> {t("Copy the link")}
+          </button>
+        ) : null}
       </div>
       <p className="text-[12.5px] text-muted">
         {t("{n} friends joined", { n: String(inv.invites) })}

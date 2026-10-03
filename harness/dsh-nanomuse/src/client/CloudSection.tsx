@@ -11,12 +11,13 @@ import { Avatar } from './Avatar.tsx'
 import { settingsBus } from './bus.ts'
 import { useLive, type LiveHub } from './live.ts'
 import { DEVICES_PANEL } from './panels.ts'
+import { DataRows } from './Memory.tsx'
 import { SignIn } from './SignIn.tsx'
 
 type Phase = 'loading' | 'signedOut' | 'signedIn'
 
-/** Where the privacy policy is when the relay did not name one. */
-const PRIVACY_URL = 'https://nanomuse.cn/privacy/'
+/** Where the privacy policy is when the relay named one; empty means hide the link. */
+const PRIVACY_URL = ''
 
 /** Build the section component around the translator the plugin bound. */
 /**
@@ -94,7 +95,9 @@ export function makeCloudSection(t: Translate, part: 'account' | 'data' = 'accou
               t('dataWhy'), ' ',
               a.contribute.defaultOn === undefined ? '' : t(a.contribute.defaultOn ? 'dataDefaultOn' : 'dataDefaultOff'), ' ',
               a.contribute.samples > 0 ? t('dataKept', { n: a.contribute.samples }) : '', ' ',
-              h('a', { href: a.contribute.privacyUrl || PRIVACY_URL, target: '_blank', rel: 'noopener noreferrer' }, t('dataPrivacy'))),
+              (a.contribute.privacyUrl || PRIVACY_URL)
+                ? h('a', { href: a.contribute.privacyUrl || PRIVACY_URL, target: '_blank', rel: 'noopener noreferrer' }, t('dataPrivacy'))
+                : t('dataPrivacy')),
             a.contribute.samples > 0
               ? h('div', { style: { marginTop: 6 } }, h(Button, { variant: 'outline', size: 'sm', disabled: busy, onClick: deleteSamples }, t('dataDelete')))
               : null,
@@ -105,9 +108,13 @@ export function makeCloudSection(t: Translate, part: 'account' | 'data' = 'accou
           h('div', { className: 'nm-card', style: { padding: '14px 16px' } },
             h('div', { style: { fontWeight: 600, marginBottom: 4 } }, t('dataPrivacyTitle')),
             h('div', { style: muted }, t('dataPrivacyText'), ' ',
-              h('a', { href: a.contribute?.privacyUrl || PRIVACY_URL, target: '_blank', rel: 'noopener noreferrer' }, t('dataPrivacy')))),
+              (a.contribute?.privacyUrl || PRIVACY_URL)
+                ? h('a', { href: a.contribute?.privacyUrl || PRIVACY_URL, target: '_blank', rel: 'noopener noreferrer' }, t('dataPrivacy'))
+                : t('dataPrivacy'))),
           dataControls,
-          error ? h('div', { style: errorStyle }, error) : null)
+          error ? h('div', { style: errorStyle }, error) : null,
+          h('h3', { style: heading }, t('dataLocalTitle')),
+          h(DataRows, { t }))
       }
       return h('section', { style: { ...column, maxWidth: 560 } },
         header,
@@ -130,7 +137,7 @@ export function makeCloudSection(t: Translate, part: 'account' | 'data' = 'accou
         h('div', { style: muted }, t('relay', { baseURL: status.baseURL })))
     }
 
-    if (part === 'data') return h('section', { style: column }, h('div', { style: muted }, t('dataSignedOut')))
+    if (part === 'data') return h('section', { style: { ...column, maxWidth: 560 } }, h('div', { style: muted }, t('dataSignedOut')), h('h3', { style: heading }, t('dataLocalTitle')), h(DataRows, { t }))
     return h('section', { style: column },
       header,
       error ? h('div', { style: errorStyle }, error) : null,

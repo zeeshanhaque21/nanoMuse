@@ -21,7 +21,7 @@ export interface AllowanceInfo {
   own_key_docs?: string;
 }
 
-export const OWN_KEY_DOCS = "https://nanomuse.cn/own-key";
+export const OWN_KEY_DOCS = "";
 /** The preset the Connections page opens with when someone comes here for their own key. */
 const PRESET_HINT = "nm.connections.preset";
 
@@ -111,9 +111,11 @@ export function AllowanceWays({
           <button type="button" onClick={() => openOwnKeySetup(setTab)} className={cx(primaryBtn, "inline-flex items-center gap-1.5 py-2")}>
             <KeyRound size={14} /> {t("Set it up")}
           </button>
-          <a href={docs} target="_blank" rel="noopener noreferrer" className={cx(secondaryBtn, "inline-flex items-center gap-1.5")}>
-            <ExternalLink size={14} /> {t("Step-by-step guide")}
-          </a>
+          {docs ? (
+            <a href={docs} target="_blank" rel="noopener noreferrer" className={cx(secondaryBtn, "inline-flex items-center gap-1.5")}>
+              <ExternalLink size={14} /> {t("Step-by-step guide")}
+            </a>
+          ) : null}
         </div>
       </Way>
 

@@ -576,10 +576,14 @@ function SettingsHome({ release, onOpen }: { release: UpdateView | null; onOpen:
         {/* about */}
         <MuseCard className="mb-3">
           <MuseRow icon={<Info size={22} />} label={t("About nanoMuse")} value={release?.newer && release.latest ? t("{version} is out", { version: release.latest }) : undefined} onClick={() => onOpen("about")} />
+          {PRIVACY_URL ? (
+            <>
+              <MuseDivider />
+              <MuseRow icon={<Hand size={22} />} label={t("Privacy policy")} onClick={() => window.open(PRIVACY_URL, "_blank", "noopener")} external />
+            </>
+          ) : null}
           <MuseDivider />
-          <MuseRow icon={<Hand size={22} />} label={t("Privacy policy")} onClick={() => window.open(PRIVACY_URL, "_blank", "noopener")} external />
-          <MuseDivider />
-          <MuseRow icon={<MessageSquareWarning size={22} />} label={t("Feedback")} onClick={() => window.open("https://github.com/nano-muse/nanoMuse/issues/new/choose", "_blank", "noopener")} external />
+          <MuseRow icon={<MessageSquareWarning size={22} />} label={t("Feedback")} onClick={() => window.open("https://github.com/zeeshanhaque21/nanoMuse/issues", "_blank", "noopener")} external />
         </MuseCard>
         <MuseCaption>nanoMuse {state.version}</MuseCaption>
       </div>

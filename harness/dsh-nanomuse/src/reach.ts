@@ -138,6 +138,8 @@ export function apply(ctx: Context): void {
             const data = typeof body.data === 'string' ? body.data : ''
             const value = { device: d.name, width: Number(body.width ?? 0), height: Number(body.height ?? 0), mime, bytes: data ? Buffer.byteLength(data, 'base64') : 0 }
             if (data) {
+              // the Live stage shows the person what the agent is looking at on that device
+              cloud.stageFrame(Buffer.from(data, 'base64'), mime, { device: d.name, width: value.width, height: value.height, sessionId: exec.agent?.session.id ?? '' })
               const image = await admitImage(ctx, exec, data, mime, `${d.name} screen`)
               projections.set(exec, [...(image ? [image] : []), { type: 'text', text: image ? `Screenshot of ${d.name} (${value.width}×${value.height}).` : `Screenshot of ${d.name} taken (${value.width}×${value.height}), but the current model cannot look at images.` }])
             }
@@ -211,7 +213,7 @@ export function apply(ctx: Context): void {
       ctx.tools.register(
         defineTool({
           name: 'device_files',
-          description: "List a folder on another device (its home folder when no path is given). Read-only.",
+          description: "List a folder on another device (its home folder when no path is given). Read-only; the person is asked first.",
           parameters: { device: DEVICE, path: { type: 'string', description: 'Folder path on that device; ~ is its home.' } },
           output: {
             schema: {
@@ -229,6 +231,9 @@ export function apply(ctx: Context): void {
           isConcurrencySafe: () => true,
           async execute(args, exec) {
             const d = target(args.device)
+            // their folders are their private data: the person says yes before a listing leaves that device
+            const where = args.path || '~'
+            await approve(exec, 'device_files', `List ${where} on ${d.name}`, `列出 ${d.name} 上的 ${where}`)
             const body = await hub.call(d.id, 'files', args.path ? { path: args.path } : {}, { signal: exec.signal, timeoutMs: 45_000 }).catch(fail)
             return { device: d.name, path: String(body.path ?? args.path ?? '~'), entries: Array.isArray(body.entries) ? body.entries : [] }
           },
