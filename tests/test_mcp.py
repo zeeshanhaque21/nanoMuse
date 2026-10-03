@@ -94,12 +94,15 @@ async def test_vault_placeholders_are_resolved_before_connecting():
         command=sys.executable,
         args=[str(SERVER), "{{vault:ECHO_MODE}}"],
         env={"ECHO_KEY": "{{vault:AMAP_KEY}}"},
+        headers={"Authorization": "Bearer {{vault:AMAP_KEY}}"},
         url=None,
     )
     manager = MCPManager([cfg], resolve=resolve)
     resolved = manager._resolved(cfg)
     assert resolved.args == [str(SERVER), "loud"] and resolved.env == {"ECHO_KEY": "k-123"}
     assert cfg.args[1] == "{{vault:ECHO_MODE}}" and cfg.env["ECHO_KEY"] == "{{vault:AMAP_KEY}}"
+    assert resolved.headers == {"Authorization": "Bearer k-123"}
+    assert cfg.headers == {"Authorization": "Bearer {{vault:AMAP_KEY}}"}
     url = MCPServerSettings(name="amap", url="https://mcp.amap.com/mcp?key={{vault:AMAP_KEY}}")
     assert manager._resolved(url).url == "https://mcp.amap.com/mcp?key=k-123"
     try:

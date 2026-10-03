@@ -108,6 +108,7 @@ class MCPManager:
                 "url": self._resolve(cfg.url) if cfg.url else cfg.url,
                 "args": [str(a) for a in self._resolve(list(cfg.args))],
                 "env": {k: str(v) for k, v in self._resolve(dict(cfg.env)).items()},
+                "headers": {k: str(v) for k, v in self._resolve(dict(cfg.headers)).items()},
             }
         )
 
@@ -152,12 +153,20 @@ class MCPManager:
         if cfg.url:
             try:  # mcp >= 2
                 from mcp.client.streamable_http import streamable_http_client as http_client
+                from mcp.shared._httpx_utils import create_mcp_http_client
+
+                client = await self._stack.enter_async_context(
+                    create_mcp_http_client(headers=cfg.headers or None)
+                )
+                transport = http_client(cfg.url, http_client=client)
             except ImportError:  # mcp 1.x
                 from mcp.client.streamable_http import (  # type: ignore[attr-defined,no-redef]
                     streamablehttp_client as http_client,
                 )
+
+                transport = http_client(cfg.url, headers=cfg.headers or None)  # type: ignore[call-arg]
             try:
-                streams = await self._stack.enter_async_context(http_client(cfg.url))
+                streams = await self._stack.enter_async_context(transport)
             except Exception as exc:  # noqa: BLE001
                 # an older server speaks SSE only; but a wrong URL or a refused key looks the
                 # same from here, so the first answer is kept in the log
@@ -169,7 +178,9 @@ class MCPManager:
                 )
                 from mcp.client.sse import sse_client
 
-                streams = await self._stack.enter_async_context(sse_client(cfg.url))
+                streams = await self._stack.enter_async_context(
+                    sse_client(cfg.url, headers=cfg.headers or None)
+                )
             return streams[0], streams[1]
         if not cfg.command:
             raise ValueError(f"MCP server '{cfg.name}' needs either `command` or `url`")
