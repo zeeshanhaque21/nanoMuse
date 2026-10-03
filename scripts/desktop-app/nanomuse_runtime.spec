@@ -4,6 +4,11 @@ executable that serves the app, talks to the hub and moves this computer's hands
 
     python -m PyInstaller --noconfirm --clean scripts/desktop-app/nanomuse_runtime.spec
 
+For a self-contained browser, install before building:
+    pip install 'nanomuse[browser]'
+    PLAYWRIGHT_BROWSERS_PATH=0 playwright install chromium
+Playwright's frozen driver uses its bundled .local-browsers directory.
+
 Built by scripts/desktop-app/build-runtime.py, which puts the folder where electron-builder
 picks it up (desktop/app/runtime/). One-folder rather than one-file: a one-file build
 unpacks itself on every start, which is slow for a server that starts with the app.
