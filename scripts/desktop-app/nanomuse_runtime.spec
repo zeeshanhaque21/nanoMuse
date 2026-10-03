@@ -4,6 +4,11 @@ executable that serves the app, talks to the hub and moves this computer's hands
 
     python -m PyInstaller --noconfirm --clean scripts/desktop-app/nanomuse_runtime.spec
 
+For a self-contained browser, install before building:
+    pip install 'nanomuse[browser]'
+    PLAYWRIGHT_BROWSERS_PATH=0 playwright install chromium
+Playwright's frozen driver uses its bundled .local-browsers directory.
+
 Built by scripts/desktop-app/build-runtime.py, which puts the folder where electron-builder
 picks it up (harness/desktop/runtime/). One-folder rather than one-file: a one-file build
 unpacks itself on every start, which is slow for a server that starts with the app.
@@ -32,7 +37,7 @@ datas = [
 binaries = []
 
 # packages that read their own data at run time
-for pkg in ("certifi", "ddgs", "tzdata", "mcp", "html2text", "qrcode", "pywebpush", "py_vapid"):
+for pkg in ("certifi", "ddgs", "tzdata", "mcp", "html2text", "qrcode", "pywebpush", "py_vapid", "playwright"):
     try:
         d, b, h = collect_all(pkg)
     except Exception:  # noqa: BLE001 — optional on some platforms
@@ -51,7 +56,7 @@ for pkg in ("pyautogui", "pyscreeze", "pymsgbox", "pytweening", "mouseinfo", "py
     binaries += b
     hidden += h
 
-excludes = ["tkinter", "matplotlib", "numpy", "scipy", "pandas", "IPython", "jupyter", "pytest", "playwright"]
+excludes = ["tkinter", "matplotlib", "numpy", "scipy", "pandas", "IPython", "jupyter", "pytest"]
 
 a = Analysis(
     [os.path.join(ROOT, "scripts", "desktop-app", "runtime_entry.py")],
@@ -64,6 +69,10 @@ a = Analysis(
     excludes=excludes,
     noarchive=False,
 )
+# Playwright's hooks also collect browsers. Copy them intact after freezing instead,
+# preserving macOS framework symlinks and avoiding PyInstaller binary rewriting.
+a.datas = [entry for entry in a.datas if not any(".local-browsers" in p for p in entry[:2])]
+a.binaries = [entry for entry in a.binaries if not any(".local-browsers" in p for p in entry[:2])]
 pyz = PYZ(a.pure)
 
 exe = EXE(
