@@ -98,8 +98,8 @@ object NanoMuseCloud {
     private const val KEY_MODELS_AT = "cloud.models_at"
     private const val MODELS_FRESH_MS = 60 * 60 * 1000L
 
-    /** Where the privacy policy is when the relay did not name one. */
-    const val PRIVACY_URL = "https://nanomuse.cn/privacy/"
+    /** Where the privacy policy is when the relay named one; empty means hide the link. */
+    const val PRIVACY_URL = ""
 
     class CloudException(val code: String, message: String, val status: Int = 0) : IOException(message)
 

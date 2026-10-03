@@ -109,9 +109,9 @@ for the full list. The ones that matter:
 | `ALLOWANCE_CNY` | 10 | yuan per non-member account **for its lifetime**, at the list prices below; 0 = no limit |
 | `INVITE_BONUS_CNY` | 5 | added to **both** pools — the inviter's and the newcomer's — per new person who signs up with the code |
 | `IMPROVE_DEFAULT` | `0` | what *Help improve nanoMuse's AI models* (Data controls) starts as for accounts created from now on: `1` = on until the person turns it off, `0` = off until they turn it on; existing accounts keep their setting. State it in your privacy policy |
-| `PRIVACY_URL` | `https://nanomuse.cn/privacy/` | the policy the apps link from Data controls and the sign-in pages — the one that says what this relay keeps and its default |
-| `INVITE_URL` | `https://nanomuse.cn/web/?invite=` | the link the apps offer to share; the code is appended |
-| `OWN_KEY_DOCS` | `https://nanomuse.cn/own-key` | the guide the apps open for bringing one's own key |
+| `PRIVACY_URL` | _(empty)_ | the policy the apps link from Data controls and the sign-in pages — the relay operator sets the URL stating what this relay keeps and its default; empty hides the link |
+| `INVITE_URL` | _(empty)_ | the link the apps offer to share; the code is appended; empty hides the link |
+| `OWN_KEY_DOCS` | _(empty)_ | the guide the apps open for bringing one's own key; empty hides the link |
 | `DAY_OFFSET_H` | 8 | the operator's reports group by local day, midnight UTC+8 (Beijing) |
 | `TRAFFIC_DB` | empty | the site's daily traffic counts (`demo/showcase/mirror/traffic.py`), mounted read-only, for the operator's page; empty = that panel says it is not connected |
 | `WEB_INFO_URL` | empty | nanoMuse Web's gateway (`http://gateway:8000/api/web/info` on the same docker network) for its account and session counts on the operator's page |
