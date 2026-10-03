@@ -274,6 +274,7 @@ class MCPBody(BaseModel):
     args: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
     url: str | None = None
+    headers: dict[str, str] = Field(default_factory=dict)
     risk: str = "moderate"
     egress: bool = True
     reads_private_data: bool = False
