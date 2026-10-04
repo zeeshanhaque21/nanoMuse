@@ -44,7 +44,7 @@ import org.json.JSONObject
  * content is forwarded to the model, not stored. See `docs/cloud.md`.
  */
 object NanoMuseCloud {
-    const val DEFAULT_BASE = "https://cloud.nanomuse.cn"
+    const val DEFAULT_BASE = "https://jetson-orin-nano.time-mora.ts.net"
     const val LABEL = "nanoMuse Cloud"
 
     private const val PREFS = "nanomuse"

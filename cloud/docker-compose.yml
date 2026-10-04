@@ -8,7 +8,7 @@ services:
     expose:
       - "8787"
 
-  # TLS termination. Set CLOUD_DOMAIN in .env (e.g. cloud.nanomuse.cn); Caddy
+  # TLS termination. Set CLOUD_DOMAIN in .env (e.g. jetson-orin-nano.time-mora.ts.net); Caddy
   # fetches and renews the certificate on its own.
   caddy:
     image: caddy:2

@@ -150,7 +150,7 @@ function toAccount(me: Record<string, unknown>): Account {
   }
 }
 
-/** A client for one relay origin, e.g. `https://cloud.nanomuse.cn`. */
+/** A client for one relay origin, e.g. `https://jetson-orin-nano.time-mora.ts.net`. */
 export class Relay {
   readonly origin: string
 

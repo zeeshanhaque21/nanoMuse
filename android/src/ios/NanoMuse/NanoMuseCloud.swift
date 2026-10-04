@@ -71,7 +71,7 @@ struct NanoMuseCloudError: LocalizedError, Sendable {
 
 @MainActor
 enum NanoMuseCloud {
-    static let defaultBase = "https://cloud.nanomuse.cn"
+    static let defaultBase = "https://jetson-orin-nano.time-mora.ts.net"
     static let label = "nanoMuse Cloud"
 
     private enum Keys {

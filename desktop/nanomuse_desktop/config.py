@@ -11,7 +11,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-DEFAULT_CLOUD = "https://cloud.nanomuse.cn"
+DEFAULT_CLOUD = "https://jetson-orin-nano.time-mora.ts.net"
 
 
 def home() -> Path:
