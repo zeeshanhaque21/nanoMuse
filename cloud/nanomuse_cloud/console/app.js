@@ -518,7 +518,7 @@
       !free ? h("div", { class: "meter" }, h("i", { class: frac >= 1 ? "bad" : frac >= 0.8 ? "warn" : "", style: `width:${Math.round(frac * 100)}%` })) : null,
       h("div", { class: "s" }, !free ? T.spentTotal(money(spent), money(cap)) + usd(spent) : T.spentOnly(money(spent)) + usd(spent), tk.used_today !== undefined ? ` · ${T.tokensToday(fmtN(tk.used_today))}` : ""),
       !free && frac >= 0.8 ? h("div", { class: "s", style: "color:var(--bad, #c0392b);margin-top:4px" }, frac >= 1 ? T.allowanceOut : T.allowanceWarn) : null),
-!free ? h("p", { class: "fine", style: "padding:0 16px 12px" }, T.allowanceWhy(sp.allowance_cny ?? 10, sp.invite_bonus_cny ?? 5, me.region), " ", ...keyLinks(sp, me.region)) : null));
+      !free ? h("p", { class: "fine", style: "padding:0 16px 12px" }, T.allowanceWhy(sp.allowance_cny ?? 10, sp.invite_bonus_cny ?? 5, me.region), " ", ...keyLinks(sp, me.region)) : null));
     // invite a friend: the code, the link, what came of it
     const inv = me.invite;
     if (inv && inv.code) {

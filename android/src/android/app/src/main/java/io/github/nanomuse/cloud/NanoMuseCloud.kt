@@ -960,7 +960,9 @@ object NanoMuseCloud {
     }
 
     private fun call(context: Context, method: String, path: String, body: JSONObject?, token: String?): JSONObject {
-        val builder = Request.Builder().url(baseUrl(context) + path)
+        // No relay configured is a configuration error, not a network one: say so plainly
+        // instead of handing OkHttp a relative URL (which raises IllegalArgumentException).
+        val builder = Request.Builder().url(requireBaseUrl(context) + path)
         if (token != null) builder.header("Authorization", "Bearer $token")
         builder.header("User-Agent", "nanoMuse-Android/${BuildConfig.VERSION_NAME}")
         when (method) {

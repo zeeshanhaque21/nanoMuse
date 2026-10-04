@@ -117,7 +117,7 @@ export function AllowanceWays({
           <button type="button" onClick={() => openOwnKeySetup(setTab, way.preset)} className={cx(primaryBtn, "inline-flex items-center gap-1.5 py-2")}>
             <KeyRound size={14} /> {t("Set it up")}
           </button>
-<a href={way.keyUrl} target="_blank" rel="noopener noreferrer" className={cx(secondaryBtn, "inline-flex items-center gap-1.5")}>
+          <a href={way.keyUrl} target="_blank" rel="noopener noreferrer" className={cx(secondaryBtn, "inline-flex items-center gap-1.5")}>
             <ExternalLink size={14} /> {t("Get a key from {vendor}", { vendor: way.label })}
           </a>
           {docs ? (

@@ -1,6 +1,7 @@
 """Browser bundles must retain framework symlinks when copied into the runtime."""
 
 import runpy
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -12,7 +13,10 @@ def test_runtime_copies_browser_bundle_intact(tmp_path, monkeypatch):
     dist = tmp_path / "dist"
     built = dist / "nanomuse"
     built.mkdir(parents=True)
-    (built / "nanomuse").write_text("fake executable")
+    # build-runtime.py looks for nanomuse.exe on win32; create the name it will look for
+    (built / ("nanomuse.exe" if sys.platform == "win32" else "nanomuse")).write_text(
+        "fake executable"
+    )
     package = tmp_path / "playwright"
     browsers = package / "driver/package/.local-browsers"
     browsers.mkdir(parents=True)

@@ -84,7 +84,6 @@ class CloudClient:
     def __init__(self, base_url: str, api_key: str = "", timeout: float = 30.0):
         self.base_url = (base_url or "").strip().rstrip("/")
         self.api_key = api_key
-        self.api_key = api_key
         self._client = httpx.AsyncClient(
             timeout=timeout,
             headers={

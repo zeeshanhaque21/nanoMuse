@@ -47,13 +47,11 @@ export interface OnboardingActions {
 type View = 'loading' | 'welcome' | 'identifier' | 'code' | 'password' | 'wait' | 'slides' | 'starting'
 type SlideId = 'computer' | 'files' | 'voice'
 
-const READY_MS = 1400
 /** How long the end of the run may take to open the main chat before we stop waiting. */
 const KICKOFF_MS = 12_000
 const PRIVACY_URL = 'https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/privacy.md'
 const TERMS_URL = 'https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/terms.md'
 const HANDS_URL = 'https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/sentinel.md'
-const PHONE_URL = 'https://github.com/zeeshanhaque21/nanoMuse'
 
 function Pill({ children, onClick, disabled, type = 'button', ghost = false, small = false, className = '' }: {
   children?: ReactNode

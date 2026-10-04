@@ -118,6 +118,8 @@ fun DataControlsScreen(
                     },
                 )
             }
+            // The relay names its own policy. With none configured the row stays plain text
+            // rather than opening a browser on an empty URL.
             val privacy = a?.privacyUrl?.takeIf { it.isNotBlank() } ?: NanoMuseCloud.PRIVACY_URL
             val caption = buildString {
                 append(stringResource(R.string.nm_data_why))
@@ -132,10 +134,16 @@ fun DataControlsScreen(
             Text(
                 text = stringResource(R.string.nm_data_privacy),
                 style = MaterialTheme.typography.bodySmall,
-                color = MuseTones.action,
+                color = if (privacy.isNotBlank()) MuseTones.action else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier
                     .padding(horizontal = 32.dp)
-                    .clickable { openExternalUrl(context, privacy) }
+                    .then(
+                        if (privacy.isNotBlank()) {
+                            Modifier.clickable { openExternalUrl(context, privacy) }
+                        } else {
+                            Modifier
+                        }
+                    )
                     .padding(vertical = 4.dp),
             )
 

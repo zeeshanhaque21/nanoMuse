@@ -84,7 +84,7 @@ fun AllowanceWaysCard(
     val inviteeBonus = info.inviteeBonusCny.takeIf { it > 0 } ?: account?.inviteeBonusCny?.takeIf { it > 0 } ?: inviteBonus
     var copied by remember { mutableStateOf(false) }
     LaunchedEffect(copied) { if (copied) { kotlinx.coroutines.delay(1500); copied = false } }
-// The star row goes once the person has been to GitHub (from here or from any other ask).
+    // The star row goes once the person has been to GitHub (from here or from any other ask).
     var starred by remember { mutableStateOf(io.github.nanomuse.community.StarPrompt.starred(context)) }
     // No fallback URL: the relay operator configures INVITE_URL. Blank hides the share link
     // rather than sending people to a backend this fork does not talk to.

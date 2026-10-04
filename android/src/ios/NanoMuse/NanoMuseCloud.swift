@@ -402,7 +402,7 @@ enum NanoMuseCloud {
         return URLSession(configuration: config)
     }()
 
-static func call(_ method: String, _ path: String, body: [String: Any]?, token: String?) async throws -> [String: Any] {
+    static func call(_ method: String, _ path: String, body: [String: Any]?, token: String?) async throws -> [String: Any] {
         guard !baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw CloudError(code: "relay_unconfigured", message: "Relay server not configured: enter your relay server in Settings", status: 0)
         }
