@@ -191,7 +191,7 @@ class MCPManager:
                 client = await stack.enter_async_context(
                     create_mcp_http_client(headers=cfg.headers or None)
                 )
-                opened = http_client(cfg.url, http_client=client)
+                opened = http_client(cfg.url or "", http_client=client)
             except ImportError:  # mcp 1.x
                 from mcp.client.streamable_http import (  # type: ignore[attr-defined,no-redef]
                     streamablehttp_client as http_client,
