@@ -13,10 +13,10 @@ def test_runtime_copies_browser_bundle_intact(tmp_path, monkeypatch):
     dist = tmp_path / "dist"
     built = dist / "nanomuse"
     built.mkdir(parents=True)
-    # build-runtime.py looks for nanomuse.exe on win32; create the name it will look for
-    (built / ("nanomuse.exe" if sys.platform == "win32" else "nanomuse")).write_text(
-        "fake executable"
-    )
+    # build-runtime.py looks for nanomuse.exe on win32 and returns that path, so the fixture
+    # has to create and expect the platform's own name
+    exe_name = "nanomuse.exe" if sys.platform == "win32" else "nanomuse"
+    (built / exe_name).write_text("fake executable")
     package = tmp_path / "playwright"
     browsers = package / "driver/package/.local-browsers"
     browsers.mkdir(parents=True)
@@ -37,7 +37,7 @@ def test_runtime_copies_browser_bundle_intact(tmp_path, monkeypatch):
         lambda name: SimpleNamespace(origin=str(package / "__init__.py")),
     )
     target = tmp_path / "runtime"
-    assert build(target) == target / "nanomuse"
+    assert build(target) == target / exe_name
     copied = target / "_internal/playwright/driver/package/.local-browsers"
     assert (copied / "framework-link").is_symlink()
     assert (copied / "framework-link").read_text() == "framework content"
