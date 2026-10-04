@@ -15,6 +15,7 @@ The web app must already be built into nanomuse/server/static (it is committed).
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import shutil
@@ -57,6 +58,15 @@ def build(target: Path) -> Path:
         raise SystemExit(f"PyInstaller produced nothing at {exe}")
     shutil.rmtree(target, ignore_errors=True)
     shutil.copytree(built, target)
+    playwright = importlib.util.find_spec("playwright")
+    if playwright is not None and playwright.origin:
+        browsers = Path(playwright.origin).parent / "driver" / "package" / ".local-browsers"
+        if browsers.is_dir():
+            shutil.copytree(
+                browsers,
+                target / "_internal" / "playwright" / "driver" / "package" / ".local-browsers",
+                symlinks=True,
+            )
     size = sum(p.stat().st_size for p in target.rglob("*") if p.is_file()) // (1024 * 1024)
     print(f"runtime: {target} ({size} MB)")
     return target / exe.name
