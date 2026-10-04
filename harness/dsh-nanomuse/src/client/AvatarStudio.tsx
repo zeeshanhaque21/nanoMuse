@@ -10,7 +10,8 @@
  * asks for a new look in a chat.
  */
 import { createElement as h, Fragment, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import { call, type Translate } from './api.ts'
+import { StarNudgeOnce } from './AccountPage.tsx'
+import { call, errorCode, type Translate } from './api.ts'
 import type { Words } from './locales.ts'
 import { useRooms } from './rooms.ts'
 import { Sheet } from './ui.tsx'
@@ -30,8 +31,8 @@ const VARIATIONS = [
   'variation 3: a different breed or colour pattern, darker or warmer tones, a small accessory such as a scarf or glasses',
   'variation 4: a playful take — unusual colouring or a tiny outfit, slight head tilt',
 ]
-const KEEP = 'Keep this exact character — same face, colours, outfit, art style, proportions, framing, camera angle and pure white background. Change only the pose and props described. '
-const MOOD_INSTRUCTIONS: Record<string, string> = {
+export const KEEP = 'Keep this exact character — same face, colours, outfit, art style, proportions, framing, camera angle and pure white background. Change only the pose and props described. '
+export const MOOD_INSTRUCTIONS: Record<string, string> = {
   working: 'It now wears over-ear headphones and sits typing on a small open laptop in front of it, focused and content, a faint glow from the screen on its face.',
   waiting: 'It now holds a small glowing crystal ball in both hands at chest height and gazes into it with wide curious eyes, waiting for an answer.',
   happy: 'It is now celebrating, hugging a big glowing yellow five-pointed star, eyes closed with a wide smile. Same white background; no confetti, no night sky, no extra decoration.',
@@ -50,7 +51,7 @@ export function buildPrompt(description: string, index: number, style: string): 
 /** The studio's open/close, shared with the look editor and the agent's request. */
 export const studioBus: { open?: ((description?: string, style?: string) => void) | undefined } = {}
 
-interface Estimate {
+export interface Estimate {
   cny: number
   leftCny: number
   unlimited: boolean
@@ -91,7 +92,7 @@ async function base64Of(blob: Blob): Promise<string> {
 }
 
 /** A still as the account keeps it: square, 512 px, WebP under the relay's size cap. */
-async function still(b64: string): Promise<string> {
+export async function still(b64: string): Promise<string> {
   const canvas = square(await decode(b64), STILL_PX)
   let quality = 0.88
   let blob = await blobOf(canvas, 'image/webp', quality)
@@ -103,7 +104,7 @@ async function still(b64: string): Promise<string> {
 }
 
 /** The chosen candidate as a PNG for the edits (whatever the model handed back). */
-async function png(b64: string): Promise<string> {
+export async function png(b64: string): Promise<string> {
   const img = await decode(b64)
   const canvas = square(img, Math.min(1024, Math.min(img.naturalWidth, img.naturalHeight)))
   return base64Of(await blobOf(canvas, 'image/png'))
@@ -124,7 +125,7 @@ export function AvatarStudioSheet({ t, initial, style: initialStyle, onClose }: 
   const round = useRef(0)
   useEffect(() => () => { alive.current = false }, [])
   useEffect(() => {
-    call<Estimate>('studio/estimate').then((e) => { if (alive.current) setEstimate(e) }).catch((err: unknown) => { if (alive.current) setEstimateError((err as Error).message) })
+    call<Estimate>('studio/estimate').then((e) => { if (alive.current) setEstimate(e) }).catch((err: unknown) => { if (alive.current) setEstimateError(errorCode(err) === 'signed_out' ? t('stSignedOut') : (err as Error).message) })
   }, [])
 
   const draw = () => {
@@ -240,7 +241,9 @@ export function AvatarStudioSheet({ t, initial, style: initialStyle, onClose }: 
     body = h('div', { className: 'nm-sheet-form' },
       h('div', { className: 'nm-st-moods' }, ['idle', ...MOODS].map((mood) =>
         h('div', { key: mood, className: 'nm-st-mood' }, moods[mood] ? h('img', { src: `data:image/webp;base64,${moods[mood]}`, alt: mood }) : null))),
-      h('p', { className: 'nm-sheet-lead' }, t('stDone')))
+      h('p', { className: 'nm-sheet-lead' }, t('stDone')),
+      // the face is done: a moment of delight, and the one fair ask for a star here (once)
+      h(StarNudgeOnce, { t, moment: 'new_look' }))
     footer = h('div', { className: 'nm-sheet-actions' }, h('span', { style: { flex: 1 } }), h('button', { type: 'button', className: 'nm-pill nm-pill-sm', onClick: onClose }, t('stFinish')))
   }
   return h(Sheet, { title: t('stTitle'), closeLabel: t('close'), onClose: stage === 'posing' ? () => undefined : onClose, footer, wide: stage !== 'describe' }, body)

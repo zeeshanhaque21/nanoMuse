@@ -3,23 +3,29 @@
  * card: the agent's face and "Welcome", a Sign in pill; "Sign in or create an
  * account" with one field for a phone number or an e-mail; the six boxes of
  * the code (or the password, as the other way); a spinner while the account
- * and its look arrive; then the permissions carousel, one page per thing to
- * allow — the computer (Accessibility and Screen Recording on macOS, each with
- * its Allow pill that turns into a check), the files (the working folder), the
- * other devices — with a pager in the corner and Skip under every page; and the
- * agent ready. Registered as the `settings.onboarding` step with the shipped
- * id, so the coordinator shows ours in that turn; it completes itself when a
- * model can already answer (the account, a DeepSeek key, a provider the person
- * added) unless reopened on purpose.
+ * and its look arrive; then the three permission pages of Muse's recording —
+ * the computer (Accessibility and Screen Recording, each with an Allow pill
+ * that turns into a check), the files (the working folder and what the agent
+ * may touch), voice input (the microphone) — each with "Skip" under the card
+ * that becomes "Continue" once everything on the page is allowed, a dots pager
+ * and arrows in the corner; and at the end the main chat opened with the
+ * agent's introduction in it. Registered as the `settings.onboarding` step with
+ * the shipped id, so the coordinator shows ours in that turn; it completes
+ * itself when a model can already answer (the account, a DeepSeek key, a
+ * provider the person added) unless reopened on purpose.
  */
 import { useModalLayer } from '@deepseek-ai/dsh-client-ui-primitives'
-import { createElement as h, useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { createElement as h, Fragment, useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { call, type CloudStatus, type Translate } from './api.ts'
+import { useCloudConfig } from './AccountPage.tsx'
 import { Avatar } from './Avatar.tsx'
-import { bridge, gatedPermissions, openLink, type PermissionKind, type PermissionState } from './bridge.ts'
-import { IconCheck, IconChevronLeft, IconChevronRight, IconDevices, IconFolder, IconLaptop, IconPhone } from './icons.tsx'
+import { gatedPermissions, openLink, type PermissionKind } from './bridge.ts'
+import { usePermissions, type Permissions } from './permissions.ts'
+import { IconCheck, IconChevronLeft, IconChevronRight, IconDownload, IconFolder, IconHand, IconHome, IconMic, IconMonitor } from './icons.tsx'
 import { useLive } from './live.ts'
+import { setMainChatId } from './MuseChats.tsx'
+import { nav, roomsCall } from './rooms.ts'
 
 /** The owner share the onboarding coordinator passes to a step. */
 export interface OnboardingOwnerProps {
@@ -38,12 +44,15 @@ export interface OnboardingActions {
   openWorkspace(workspaceId: string): Promise<void>
 }
 
-type View = 'loading' | 'welcome' | 'identifier' | 'code' | 'password' | 'wait' | 'slides' | 'ready'
-type SlideId = 'computer' | 'files' | 'devices'
+type View = 'loading' | 'welcome' | 'identifier' | 'code' | 'password' | 'wait' | 'slides' | 'starting'
+type SlideId = 'computer' | 'files' | 'voice'
 
 const READY_MS = 1400
+/** How long the end of the run may take to open the main chat before we stop waiting. */
+const KICKOFF_MS = 12_000
 const PRIVACY_URL = 'https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/privacy.md'
 const TERMS_URL = 'https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/terms.md'
+const HANDS_URL = 'https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/sentinel.md'
 const PHONE_URL = 'https://github.com/zeeshanhaque21/nanoMuse'
 
 function Pill({ children, onClick, disabled, type = 'button', ghost = false, small = false, className = '' }: {
@@ -102,14 +111,13 @@ const ART_FILES = h('svg', { viewBox: '0 0 240 150', width: 240, height: 150, cl
   h('rect', { x: 102, y: 66, width: 42, height: 6, rx: 3, className: 'nm-art-line' }),
   h('path', { d: 'M28 70h184v60a10 10 0 0 1-10 10H38a10 10 0 0 1-10-10z', className: 'nm-art-back' }))
 
-const ART_DEVICES = h('svg', { viewBox: '0 0 240 150', width: 240, height: 150, className: 'nm-art', 'aria-hidden': true },
-  h('rect', { x: 20, y: 30, width: 136, height: 86, rx: 10, className: 'nm-art-mid' }),
-  h('rect', { x: 8, y: 116, width: 160, height: 10, rx: 5, className: 'nm-art-front' }),
-  h('rect', { x: 170, y: 46, width: 54, height: 94, rx: 10, className: 'nm-art-front' }),
-  h('rect', { x: 189, y: 56, width: 16, height: 4, rx: 2, className: 'nm-art-line' }),
-  h('circle', { cx: 88, cy: 73, r: 16, className: 'nm-art-accent' }),
-  h('circle', { cx: 197, cy: 92, r: 10, className: 'nm-art-accent' }),
-  h('path', { d: 'M104 73h66', className: 'nm-art-link' }))
+const ART_VOICE = h('svg', { viewBox: '0 0 240 150', width: 240, height: 150, className: 'nm-art', 'aria-hidden': true },
+  h('rect', { x: 62, y: 14, width: 116, height: 122, rx: 12, className: 'nm-art-front' }),
+  h('rect', { x: 78, y: 32, width: 60, height: 6, rx: 3, className: 'nm-art-line' }),
+  h('rect', { x: 78, y: 46, width: 84, height: 6, rx: 3, className: 'nm-art-line' }),
+  h('rect', { x: 78, y: 60, width: 48, height: 6, rx: 3, className: 'nm-art-line' }),
+  ...[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((i) => h('rect', { key: i, x: 80 + i * 7, y: 102 - [6, 12, 20, 9, 16, 24, 14, 8, 18, 11, 6, 10][i]! / 2, width: 4, height: [6, 12, 20, 9, 16, 24, 14, 8, 18, 11, 6, 10][i], rx: 2, className: 'nm-art-accent' })),
+  h('path', { d: 'M66 98l12 6-12 6z', className: 'nm-art-cursor' }))
 
 export function makeOnboarding(t: Translate, actions: OnboardingActions) {
   return function NanomuseOnboarding(props: OnboardingOwnerProps): ReactNode {
@@ -120,6 +128,11 @@ export function makeOnboarding(t: Translate, actions: OnboardingActions) {
     const [identifier, setIdentifier] = useState('')
     const [code, setCode] = useState('')
     const [password, setPassword] = useState('')
+    // A friend's invite code (optional, with the six digits): both get credit on a first sign-in.
+    const [invite, setInvite] = useState('')
+    const [inviteOpen, setInviteOpen] = useState(false)
+    // What the relay gives on sign-up, read before anyone signs in (relay 0.15; silent on older ones).
+    const config = useCloudConfig()
     const [busy, setBusy] = useState(false)
     const [error, setError] = useState<string | undefined>()
     const [resent, setResent] = useState(false)
@@ -154,11 +167,23 @@ export function makeOnboarding(t: Translate, actions: OnboardingActions) {
       setFading(true)
       window.setTimeout(() => owner.current.complete(), 260)
     }, [])
-    useEffect(() => {
-      if (view !== 'ready') return undefined
-      const timer = window.setTimeout(finish, READY_MS)
-      return () => window.clearTimeout(timer)
-    }, [view, finish])
+    // The end of the run: the main chat is opened with the introduction in it (once
+    // per install; the host says so), then the overlay fades into it.
+    const start = useCallback(() => {
+      setView('starting')
+      let done = false
+      const settle = () => { if (!done) { done = true; finish() } }
+      const timer = window.setTimeout(settle, KICKOFF_MS)
+      roomsCall<{ sessionId?: string; introduced: boolean }>('kickoff', {})
+        .then((result) => {
+          if (result.sessionId) {
+            setMainChatId(result.sessionId)
+            nav.openSession(result.sessionId)
+          }
+        })
+        .catch(() => undefined)
+        .finally(() => { window.clearTimeout(timer); settle() })
+    }, [finish])
 
     const run = async (work: () => Promise<void>) => {
       setBusy(true)
@@ -196,7 +221,7 @@ export function makeOnboarding(t: Translate, actions: OnboardingActions) {
       if (busy || value.length !== 6) return
       void run(async () => {
         try {
-          const next = await call<CloudStatus>('verify', { identifier: identifier.trim(), code: value })
+          const next = await call<CloudStatus>('verify', { identifier: identifier.trim(), code: value, invite: invite.trim().toUpperCase() })
           setCode('')
           signedIn(next)
         } catch (err: unknown) {
@@ -219,13 +244,14 @@ export function makeOnboarding(t: Translate, actions: OnboardingActions) {
 
     const profile = live.streaming ? live.profile : status?.profile
     const name = profile?.name || 'nanoMuse'
-    const slides: SlideId[] = [...(gatedPermissions() ? ['computer' as const] : []), 'files', 'devices']
+    const slides: SlideId[] = ['computer', 'files', 'voice']
 
     let body: ReactNode
     if (view === 'welcome') {
       body = h('div', { className: 'nm-ob-center' },
         h(Avatar, { size: 112, profile, mood: 'idle' }),
         h('h1', { className: 'nm-ob-title' }, t('obWelcomeTitle')),
+        h('p', { className: 'nm-ob-fine' }, config.allowance_cny ? t('obFreeAmount', { allowance: config.allowance_cny }) : t('obFree')),
         h(Pill, { onClick: () => setView('identifier'), className: 'nm-ob-cta' }, t('obSignIn')),
         h('div', { className: 'nm-ob-links' },
           h('button', { type: 'button', className: 'nm-ob-link', onClick: () => { openSection('models'); finish() } }, t('obOwnKey')),
@@ -249,6 +275,10 @@ export function makeOnboarding(t: Translate, actions: OnboardingActions) {
           t('obCodeSent', { identifier: identifier.trim() }), ' ',
           h('button', { type: 'button', className: 'nm-ob-link nm-inline', disabled: busy, onClick: resend }, resent ? t('obResent') : t('obResend'))),
         h(CodeBoxes, { value: code, disabled: busy, label: t('code'), onChange: (next) => { setCode(next); if (next.length === 6) verify(next) } }),
+        inviteOpen
+          ? h('input', { className: 'nm-field', value: invite, placeholder: t('obInviteCode'), autoComplete: 'off', autoCapitalize: 'characters', 'aria-label': t('obInviteCode'), onChange: (e: FormEvent<HTMLInputElement>) => setInvite(e.currentTarget.value.replace(/[^0-9a-zA-Z-]/g, '').slice(0, 16)) })
+          : h('button', { type: 'button', className: 'nm-ob-link nm-inline', disabled: busy, onClick: () => setInviteOpen(true) }, t('obHaveInvite')),
+        inviteOpen ? h('p', { className: 'nm-ob-fine' }, t('obInviteHint', { bonus: config.invitee_bonus_cny ?? 5 })) : null,
         error ? h('div', { className: 'nm-ob-error', role: 'alert' }, error) : null,
         h(Pill, { disabled: busy || code.length !== 6, onClick: () => verify(code), className: 'nm-ob-wide' }, busy ? t('signingIn') : t('obNext')),
         h('div', { className: 'nm-ob-links' },
@@ -266,26 +296,23 @@ export function makeOnboarding(t: Translate, actions: OnboardingActions) {
           h('button', { type: 'button', className: 'nm-ob-link', onClick: () => { setError(undefined); setView('code') } }, t('obUseCode')),
           h('span', { className: 'nm-ob-sep', 'aria-hidden': true }, '·'),
           h('button', { type: 'button', className: 'nm-ob-link', onClick: () => { setError(undefined); setPassword(''); setView('identifier') } }, t('obChangeIdentifier'))))
-    } else if (view === 'wait') {
+    } else if (view === 'wait' || view === 'starting') {
       body = h('div', { className: 'nm-ob-center' }, h(Spinner))
-    } else if (view === 'ready') {
-      body = h('div', { className: 'nm-ob-center' },
-        h(Avatar, { size: 112, profile, mood: 'happy' }),
-        h('h1', { className: 'nm-ob-title' }, t('obReady', { name })))
     } else {
       const index = Math.min(slide, slides.length - 1)
       const current = slides[index]!
       const last = index === slides.length - 1
-      const next = () => { if (last) setView('ready'); else setSlide(index + 1) }
+      const next = () => { if (last) start(); else setSlide(index + 1) }
+      const props: SlideProps = { t, name, onNext: next, dots: h(Dots, { count: slides.length, index }) }
       body = h('div', { className: 'nm-ob-slide-wrap' },
         h('div', { className: 'nm-ob-pager' },
           h('button', { type: 'button', className: 'nm-ob-pager-btn', 'aria-label': t('obPrev'), disabled: index === 0, onClick: () => setSlide(index - 1) }, h(IconChevronLeft, { size: 16 })),
           h('button', { type: 'button', className: 'nm-ob-pager-btn', 'aria-label': t('obNextSlide'), disabled: last, onClick: () => setSlide(index + 1) }, h(IconChevronRight, { size: 16 }))),
         current === 'computer'
-          ? h(ComputerSlide, { t, name, onNext: next, onSkip: () => setView('ready') })
+          ? h(ComputerSlide, props)
           : current === 'files'
-            ? h(FilesSlide, { t, name, actions, useWorkspaces, onNext: next, onSkip: () => setView('ready') })
-            : h(DevicesSlide, { t, name, live, onNext: next, onSkip: () => setView('ready') }))
+            ? h(FilesSlide, { ...props, actions, useWorkspaces })
+            : h(VoiceSlide, props))
     }
 
     return createPortal(
@@ -299,56 +326,76 @@ export function makeOnboarding(t: Translate, actions: OnboardingActions) {
 interface SlideProps {
   t: Translate
   name: string
+  /** Moves on: the next page, or the end of the run on the last one. */
   onNext(): void
-  onSkip(): void
+  dots: ReactNode
 }
 
-function SlideFrame({ t, art, title, text, children, fine, onNext, onSkip, nextLabel }: SlideProps & { art: ReactNode; title: string; text: string; children?: ReactNode; fine: string; nextLabel?: string }): ReactNode {
+function Dots({ count, index }: { count: number; index: number }): ReactNode {
+  return h('div', { className: 'nm-ob-dots', 'aria-hidden': true },
+    Array.from({ length: count }, (_, i) => h('span', { key: i, className: `nm-ob-dot${i === index ? ' nm-on' : ''}` })))
+}
+
+/**
+ * One page as the recording has it: the picture, the question, a line under it,
+ * the card of rows, fine print, then "Skip" in plain text — or the blue
+ * "Continue" once everything on the page is allowed — and the dots.
+ */
+function SlideFrame({ t, art, title, text, children, fine, onNext, dots, done, above }: Omit<SlideProps, 'name'> & { art: ReactNode; title: string; text: string; children?: ReactNode; fine: ReactNode; done: boolean; above?: ReactNode }): ReactNode {
   return h('div', { className: 'nm-ob-center nm-ob-slide' },
     art,
     h('h1', { className: 'nm-ob-title nm-ob-title-sm' }, title),
     h('p', { className: 'nm-ob-sub' }, text),
+    above ?? null,
     h('div', { className: 'nm-ob-card' }, children),
     h('p', { className: 'nm-ob-fine' }, fine),
-    h(Pill, { onClick: onNext, className: 'nm-ob-wide' }, nextLabel ?? t('obContinue')),
-    h('button', { type: 'button', className: 'nm-ob-link', onClick: onSkip }, t('obSkip')))
+    done
+      ? h(Pill, { onClick: onNext, className: 'nm-ob-wide' }, t('obContinue'))
+      : h('button', { type: 'button', className: 'nm-ob-skip', onClick: onNext }, t('obSkip')),
+    dots)
 }
 
-function PermissionRow({ t, kind, title, sub, state, onAllow }: { t: Translate; kind: PermissionKind; title: string; sub: string; state: PermissionState | undefined; onAllow(kind: PermissionKind): void }): ReactNode {
-  const granted = state === 'granted' || state === 'not-needed'
+function PermissionRow({ t, kind, icon, title, sub, perms }: { t: Translate; kind: PermissionKind; icon: ReactNode; title: string; sub: string; perms: Permissions }): ReactNode {
+  const granted = perms.granted(kind)
   return h('div', { className: 'nm-ob-row' },
+    h('span', { className: 'nm-ob-row-icon' }, icon),
     h('div', { className: 'nm-ob-row-main' },
       h('div', { className: 'nm-ob-row-title' }, title),
       h('div', { className: 'nm-ob-row-sub' }, sub)),
     granted
       ? h('span', { className: 'nm-ob-granted', 'aria-label': t('obAllowed') }, h(IconCheck, { size: 16 }))
-      : h(Pill, { small: true, onClick: () => onAllow(kind) }, t('obAllow')))
+      : perms.asked(kind) && gatedPermissions()
+        // a second press cannot bring the system's dialog back: the pane is where the switch is
+        ? h(Pill, { small: true, onClick: () => perms.settings(kind) }, t('obOpenSettings'))
+        : h(Pill, { small: true, onClick: () => perms.allow(kind) }, t('obAllow')))
 }
 
-/** macOS: Accessibility for clicking and typing, Screen Recording for the screenshots the hands look at. */
+/** macOS applies Screen Recording only to processes started after the grant: the notice and the restart. */
+export function RelaunchNotice({ t, perms }: { t: Translate; perms: Permissions }): ReactNode {
+  if (!perms.needsRelaunch) return null
+  return h('div', { className: 'nm-ob-relaunch', role: 'status' },
+    h('span', null, t('obRelaunch')),
+    h(Pill, { small: true, onClick: () => perms.relaunch() }, t('obRelaunchNow')))
+}
+
+/** macOS: Accessibility for clicking and typing, Screen Recording for the screenshots the hands look at. Elsewhere nothing is asked and both rows are already checks. */
 function ComputerSlide(props: SlideProps): ReactNode {
   const { t, name } = props
-  const [states, setStates] = useState<Partial<Record<PermissionKind, PermissionState>>>({})
-  const refresh = useCallback(() => {
-    void bridge()?.permissions().then((next) => setStates(next)).catch(() => undefined)
-  }, [])
-  // The person flips the switch in System Settings and comes back: poll while the page shows.
-  useEffect(() => {
-    refresh()
-    const timer = window.setInterval(refresh, 1500)
-    const onFocus = () => refresh()
-    window.addEventListener('focus', onFocus)
-    return () => { window.clearInterval(timer); window.removeEventListener('focus', onFocus) }
-  }, [refresh])
-  const allow = (kind: PermissionKind) => {
-    void bridge()?.requestPermission(kind).then((state) => setStates((s) => ({ ...s, [kind]: state }))).catch(() => undefined)
-  }
-  return h(SlideFrame, { ...props, art: ART_COMPUTER, title: t('obPermTitle', { name }), text: t('obPermSub', { name }), fine: t('obPermFine') },
-    h(PermissionRow, { t, kind: 'accessibility', title: t('obAccessibility'), sub: t('obAccessibilitySub'), state: states.accessibility, onAllow: allow }),
-    h(PermissionRow, { t, kind: 'screen', title: t('obScreen'), sub: t('obScreenSub'), state: states.screen, onAllow: allow }))
+  const perms = usePermissions(['accessibility', 'screen'])
+  return h(SlideFrame, {
+    ...props,
+    art: ART_COMPUTER,
+    title: t('obPermTitle', { name }),
+    text: t('obPermSub', { name }),
+    done: perms.granted('accessibility') && perms.granted('screen'),
+    fine: h(Fragment, null, gatedPermissions() ? t('obPermFine') : t('obPermFineOpen', { name }), ' ', h('a', { href: HANDS_URL, onClick: (e: Event) => { e.preventDefault(); openLink(HANDS_URL) } }, t('obLearnMore'))),
+  },
+    h(PermissionRow, { t, kind: 'accessibility', icon: h(IconHand, { size: 18 }), title: t('obAccessibility'), sub: t('obAccessibilitySub', { name }), perms }),
+    h(PermissionRow, { t, kind: 'screen', icon: h(IconMonitor, { size: 18 }), title: t('obScreen'), sub: t('obScreenSub', { name }), perms }),
+    h(RelaunchNotice, { t, perms }))
 }
 
-/** The working folder: the first workspace, or one picked here. */
+/** The working folder, and the places the agent may read and write under the default permission preset. */
 function FilesSlide(props: SlideProps & { actions: OnboardingActions; useWorkspaces: OnboardingOwnerProps['useWorkspaces'] }): ReactNode {
   const { t, name, actions, useWorkspaces } = props
   const first = typeof useWorkspaces === 'function' ? useWorkspaces((s) => s.items[0]) : undefined
@@ -368,37 +415,42 @@ function FilesSlide(props: SlideProps & { actions: OnboardingActions; useWorkspa
       .catch(() => undefined)
       .finally(() => setBusy(false))
   }
-  return h(SlideFrame, { ...props, art: ART_FILES, title: t('obFilesTitle', { name }), text: t('obFilesSub', { name }), fine: t('obFilesFine') },
-    h('div', { className: 'nm-ob-row' },
-      h('span', { className: 'nm-ob-row-icon' }, h(IconFolder, { size: 20 })),
-      h('div', { className: 'nm-ob-row-main' },
-        h('div', { className: 'nm-ob-row-title' }, t('obFolder')),
-        h('div', { className: 'nm-ob-row-sub nm-ob-path', title: path }, path ?? t('obFolderNone'))),
-      h(Pill, { small: true, ghost: path !== undefined, disabled: busy, onClick: choose }, path ? t('obChange') : t('obChoose'))))
+  const place = (icon: ReactNode, title: string, sub: string, right: string) => h('div', { className: 'nm-ob-row' },
+    h('span', { className: 'nm-ob-row-icon' }, icon),
+    h('div', { className: 'nm-ob-row-main' },
+      h('div', { className: 'nm-ob-row-title' }, title),
+      h('div', { className: 'nm-ob-row-sub' }, sub)),
+    h('span', { className: 'nm-ob-mode' }, right))
+  return h(SlideFrame, {
+    ...props,
+    art: ART_FILES,
+    title: t('obFilesTitle', { name }),
+    text: t('obFilesSub', { name }),
+    done: true,
+    fine: t('obFilesFine'),
+    above: h(Fragment, null,
+      h('div', { className: 'nm-ob-folder' },
+        h(IconFolder, { size: 16 }),
+        h('span', { className: 'nm-ob-folder-path', title: path }, path ?? t('obFolderNone')),
+        h('button', { type: 'button', className: 'nm-ob-link nm-inline', disabled: busy, onClick: choose }, path ? t('obChange') : t('obChoose'))),
+      h('div', { className: 'nm-ob-card-label' }, t('obPlaces', { name }))),
+  },
+    place(h(IconFolder, { size: 18 }), t('obFolder'), t('obFolderSub', { name }), t('obReadWrite')),
+    place(h(IconHome, { size: 18 }), t('obHome'), t('obHomeSub'), t('obReadAsk')),
+    place(h(IconDownload, { size: 18 }), t('obDownloads'), t('obDownloadsSub'), t('obReadAsk')))
 }
 
-/** This computer on the account's list, and the phones and computers beside it. */
-function DevicesSlide(props: SlideProps & { live: ReturnType<typeof useLive> }): ReactNode {
-  const { t, name, live } = props
-  const others = live.hub.devices.filter((d) => d.id !== live.hub.deviceId && d.kind !== 'web')
-  return h(SlideFrame, { ...props, art: ART_DEVICES, title: t('obDevicesTitle'), text: t('obDevicesSub', { name }), fine: t('obDevicesFine') },
-    h('div', { className: 'nm-ob-row' },
-      h('span', { className: 'nm-ob-row-icon' }, h(IconLaptop, { size: 20 })),
-      h('div', { className: 'nm-ob-row-main' },
-        h('div', { className: 'nm-ob-row-title' }, live.hub.deviceName || t('obThisComputer')),
-        h('div', { className: 'nm-ob-row-sub' }, t('obThisComputer'))),
-      h('span', { className: `nm-ob-granted${live.hub.connected ? '' : ' nm-ob-pending'}` }, h(IconCheck, { size: 16 }))),
-    others.length === 0
-      ? h('div', { className: 'nm-ob-row' },
-          h('span', { className: 'nm-ob-row-icon' }, h(IconDevices, { size: 20 })),
-          h('div', { className: 'nm-ob-row-main' },
-            h('div', { className: 'nm-ob-row-title' }, t('obNoOthers')),
-            h('div', { className: 'nm-ob-row-sub' }, t('obGetPhone'))),
-          h(Pill, { small: true, ghost: true, onClick: () => openLink(PHONE_URL) }, t('obOpen')))
-      : others.slice(0, 4).map((d) => h('div', { key: d.id, className: 'nm-ob-row' },
-          h('span', { className: 'nm-ob-row-icon' }, h(d.kind === 'phone' ? IconPhone : IconLaptop, { size: 20 })),
-          h('div', { className: 'nm-ob-row-main' },
-            h('div', { className: 'nm-ob-row-title' }, d.name),
-            h('div', { className: 'nm-ob-row-sub' }, d.online ? t('online') : t('offline'))),
-          h('span', { className: `nm-ob-granted${d.online ? '' : ' nm-ob-pending'}` }, h(IconCheck, { size: 16 })))))
+/** Voice input: the microphone, asked for here so the composer's mic works at once. */
+function VoiceSlide(props: SlideProps): ReactNode {
+  const { t, name } = props
+  const perms = usePermissions(['microphone'])
+  return h(SlideFrame, {
+    ...props,
+    art: ART_VOICE,
+    title: t('obVoiceTitle'),
+    text: t('obVoiceSub'),
+    done: perms.granted('microphone'),
+    fine: t('obVoiceFine'),
+  },
+    h(PermissionRow, { t, kind: 'microphone', icon: h(IconMic, { size: 18 }), title: t('obMic'), sub: t('obMicSub', { name }), perms }))
 }

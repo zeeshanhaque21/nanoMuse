@@ -1,4 +1,4 @@
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 
 import pytest
 
@@ -54,7 +54,13 @@ async def test_remote_headers_reach_http_and_sse(monkeypatch, fallback):
         [MCPServerSettings(name="remote", url="https://example.test/mcp", headers=headers)]
     )
     try:
-        assert await manager._open_transport(manager.servers[0]) == ("read", "write")
-        assert seen == (["http", "sse"] if fallback else ["http"])
+        # upstream 0.1.34 refactored _open_transport to take the transport kind and the
+        # caller's exit stack; the fork's header support and SSE fallback ride along.
+        async with AsyncExitStack() as stack:
+            assert await manager._open_transport(manager.servers[0], "streamable", stack) == (
+                "read",
+                "write",
+            )
+            assert seen == (["http", "sse"] if fallback else ["http"])
     finally:
         await manager.close()

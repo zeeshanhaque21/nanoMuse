@@ -395,7 +395,7 @@ async def test_admin_series_and_traffic(tmp_path):
             "status": status,
             "size": 1000,
             "request": {
-                "host": "nanomuse.cn",
+                "host": "relay.test",
                 "uri": uri,
                 "client_ip": "203.0.113.7",
                 "headers": {"User-Agent": [ua], "Referer": ["https://github.com/nano-muse/nanoMuse"]},

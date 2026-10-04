@@ -205,7 +205,21 @@ class WebUI:
             fields: dict[str, Any] = {
                 "last": {
                     k: body.get(k)
-                    for k in ("action", "label", "fx", "fy", "fx2", "fy2", "text", "keys")
+                    for k in (
+                        "action",
+                        "label",
+                        "x",
+                        "y",
+                        "x2",
+                        "y2",
+                        "fx",
+                        "fy",
+                        "fx2",
+                        "fy2",
+                        "mode",
+                        "text",
+                        "keys",
+                    )
                     if body.get(k) is not None
                 },
                 "app": body.get("app") or "",
@@ -241,6 +255,18 @@ class WebUI:
     def browser_frame(self, thread: str, fid: str) -> bytes | None:
         frames = self.browser_frames.get(thread)
         return frames.get(fid) if frames is not None else None
+
+    # ------------------------------------------------------------------ holds (C1)
+    def on_hold(self, event: dict[str, Any]) -> None:
+        """A hold went on or off (:mod:`nanomuse.agent.holds`): one *hold* card per hold in
+        the chat, updated in place when it goes off, and the live frame for every client."""
+        thread = str(event.get("thread") or self.thread())
+        timeline = self.get_timeline(thread)
+        if timeline.get(str(event.get("id"))) is None:
+            self.emit({**event, "thread": thread})
+            return
+        fields = {k: v for k, v in event.items() if k not in ("id", "type", "thread")}
+        self.patch(thread, str(event["id"]), **fields)
 
     # ------------------------------------------------------------------ helpers
     @staticmethod
@@ -294,7 +320,13 @@ class WebUI:
     def emit(self, event: dict[str, Any], persist: bool = True) -> dict[str, Any]:
         thread = event.get("thread") or self.thread()
         event["thread"] = thread
-        if thread in self.background and "source" not in event:
+        if (
+            thread in self.background
+            and "source" not in event
+            # what the user typed while a background pass runs in the thread, and the look
+            # card that answers it, are theirs — not the pass's, and not Feed items
+            and event.get("type") not in ("user", "avatar")
+        ):
             event["source"] = "background"
             event["about"] = self.background[thread]
         if persist:
@@ -385,11 +417,15 @@ class WebUI:
             return
         self._step_text.pop(thread, None)
         args = call.arguments if isinstance(call.arguments, dict) else {}
+        # the model's own words for the step ("打开携程网站") head the pill and the status
+        # line; the technical summary stays underneath for the trace
+        step = call.step
         ev = self.emit(
             {
                 "type": "tool",
                 "tool": call.name,
                 "summary": summary,
+                "title": step,
                 "args": _preview_args(args),
                 "status": "running",
             }
@@ -398,7 +434,7 @@ class WebUI:
         if call.name not in _READ_ONLY_TOOLS:
             self._ws_before[thread] = self._scan_workspace()
         label = _TOOL_LABELS.get(call.name, f"Using {call.name}")
-        self.set_status("working", f"{label}: {summary}" if summary else label, thread)
+        self.set_status("working", step or (f"{label}: {summary}" if summary else label), thread)
 
     def on_tool_result(self, call: ToolCall, result: ToolResult) -> None:
         thread = self.thread()
@@ -419,7 +455,7 @@ class WebUI:
         elif result.ok and call.name in ("remember", "forget"):
             self.bus.publish({"kind": "memory"})
         if call.name != "terminate":
-            self.set_status("working", "Thinking…", thread)
+            self.set_status("working", "", thread)
 
     def _announce_new_files(self, thread: str, call: ToolCall) -> None:
         """Every file a tool created or changed in the workspace becomes an artifact card:
@@ -494,7 +530,7 @@ class WebUI:
             self.patch(thread, ev["id"], status="expired")
         finally:
             self.pending_approvals.pop(approval_id, None)
-        self.set_status("working", "Thinking…", thread)
+        self.set_status("working", "", thread)
         return decision
 
     def resolve_approval(
@@ -533,7 +569,7 @@ class WebUI:
             self.pending_questions.pop(thread, None)
         if answer:
             self.patch(thread, ev["id"], status="answered", answer=answer)
-        self.set_status("working", "Thinking…", thread)
+        self.set_status("working", "", thread)
         return answer
 
     def answer_question(self, thread: str, text: str) -> bool:

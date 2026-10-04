@@ -5,7 +5,7 @@ import { AllowanceHeadsUp } from "../components/AllowanceWays";
 import { AvatarOptionsCard } from "../components/AvatarOptionsCard";
 import { BrowserViewer } from "../components/BrowserViewer";
 import { MicButton, useDictation } from "../components/Dictation";
-import { ApprovalCard, ArtifactCard, BrowserCard, HandsCard, Notice, QuestionCard, ToolChip } from "../components/Cards";
+import { ApprovalCard, ArtifactCard, BrowserCard, HandsCard, HoldCard, Notice, QuestionCard, ToolChip } from "../components/Cards";
 import { Markdown, splitBlocks } from "../components/Markdown";
 import { MuseHeader, MuseRoundButton } from "../components/MuseHeader";
 import { MoreMenu } from "../components/TabHeader";
@@ -14,6 +14,8 @@ import { useStore } from "../store";
 import type { AttachmentInfo, HubDevice, SkillInfo, ThreadMeta, TimelineEvent, UserEvent } from "../types";
 import { cx, timeDivider, timeShort } from "../util";
 import { MuseSheet } from "./MuseSheet";
+import { countTask, momentForTask, StarNudgeOnce, type StarMoment } from "../components/StarNudge";
+import { useShowSteps } from "../steps";
 
 export function ChatScreen() {
   const { state, send, decide, loadEvents, openFile, toast, setDrawer, setTab } = useStore();
@@ -35,6 +37,24 @@ export function ChatScreen() {
   const listRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
   const [showJump, setShowJump] = useState(false);
+
+  // A task this browser saw through: busy → idle with a reply at the end of the list. Every one
+  // is counted; the first and the tenth are the moments for a word about a star.
+  const [taskMoment, setTaskMoment] = useState<StarMoment | null>(null);
+  const sawBusy = useRef(false);
+  useEffect(() => {
+    if (thread?.busy) {
+      sawBusy.current = true;
+      return;
+    }
+    if (!sawBusy.current) return;
+    sawBusy.current = false;
+    const last = [...events].reverse().find((e) => e.type === "assistant" || e.type === "user" || e.type === "notice");
+    if (last?.type === "assistant" && last.text) {
+      const m = momentForTask(countTask());
+      if (m) setTaskMoment(m);
+    }
+  }, [thread?.busy, events]);
 
   const onScroll = useCallback(() => {
     const el = listRef.current;
@@ -67,13 +87,19 @@ export function ChatScreen() {
       return waitingHere > 1 ? t("{n} approvals waiting for you", { n: waitingHere }) : t("1 approval waiting for you");
     }
     // Idle shows nothing under the name, as on the phone: the tag is just the name.
-    if (!here) return thread?.busy ? t("Thinking…") : undefined;
+    if (!here) return thread?.busy ? t("On it") : undefined;
     if (status.state === "idle" && !thread?.busy) return undefined;
     if (status.detail) return status.detail;
-    return status.state === "waiting" ? t("Waiting for you") : t("Thinking…");
-  }, [status, thread, activeThread, waitingHere, t]);
+    if (status.state === "waiting") return t("Waiting for you");
+    // Between steps the line names the job, not a state of mind: "On it: book the table".
+    const brief = requestBrief(events);
+    return brief ? t("On it: {request}", { request: brief }) : t("On it");
+  }, [status, thread, activeThread, waitingHere, events, t]);
 
   const pendingApprovals = events.filter((e) => e.type === "approval" && e.status === "pending").length;
+  // the steps (tool chips) stay out of the chat unless asked for; everything else always shows
+  const steps = useShowSteps();
+  const shown = useMemo(() => (steps ? events : events.filter((e) => e.type !== "tool")), [events, steps]);
   // files made in this chat: a reply that names one ("saved to `plan.md`") opens it on tap
   const files = useMemo(
     () => Array.from(new Set(events.flatMap((e) => (e.type === "artifact" ? [e.path] : [])))),
@@ -136,11 +162,11 @@ export function ChatScreen() {
             onSend={(text) => send(activeThread, text).catch((e: Error) => toast(e.message || t("Could not send")))}
           />
         )}
-        {events.map((ev, i) => (
+        {shown.map((ev, i) => (
           <EventView
             key={ev.id}
             event={ev}
-            prev={events[i - 1]}
+            prev={shown[i - 1]}
             name={name}
             onDecide={(approved, scope) =>
               decide(ev.id, approved, scope).catch((e: Error) => toast(e.message || t("Could not send decision")))
@@ -156,6 +182,7 @@ export function ChatScreen() {
         {(thread?.busy || status.state !== "idle") && !stream?.text && status.state !== "waiting" && (
           <TypingIndicator label={thread?.queued ? t("{n} queued", { n: thread.queued }) : undefined} />
         )}
+        {!thread?.busy && status.state === "idle" && taskMoment && <StarNudgeOnce moment={taskMoment} className="mx-1 my-2" />}
         {showJump && (
           <button
             type="button"
@@ -236,6 +263,8 @@ function EventView({
         return <BrowserCard event={event} onOpen={onOpenBrowser} />;
       case "hands":
         return <HandsCard event={event} name={name} />;
+      case "hold":
+        return <HoldCard event={event} name={name} />;
       case "avatar":
         return <AvatarOptionsCard event={event} name={name} />;
       default:
@@ -889,4 +918,16 @@ export function ThreadList({
       </div>
     </div>
   );
+}
+
+/** The person's request, briefly, for "On it: …": its first line, folded, cut at a word. */
+function requestBrief(events: TimelineEvent[]): string {
+  const last = [...events].reverse().find((e) => e.type === "user");
+  const text = last?.type === "user" ? last.text : "";
+  const line = (text || "").split(/\r?\n/).map((l) => l.trim()).find((l) => l.length > 0) ?? "";
+  const folded = line.replace(/\s+/g, " ");
+  if (folded.length <= 36) return folded;
+  const cut = folded.slice(0, 36);
+  const at = cut.lastIndexOf(" ");
+  return (at > 16 ? cut.slice(0, at) : cut).trimEnd() + "…";
 }

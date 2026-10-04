@@ -12,4 +12,8 @@ export const DEVICES_PANEL = 'nanomuse-devices'
 export const ROOM_PANELS = [FEED_PANEL, IDEAS_PANEL, GOALS_PANEL, LIBRARY_PANEL, DEVICES_PANEL] as const
 
 /** Where a problem with nanoMuse is reported. */
-export const ISSUES_URL = 'https://github.com/zeeshanhaque21/nanoMuse'
+export const REPO_URL = 'https://github.com/zeeshanhaque21/nanoMuse'
+export const ISSUES_URL = 'https://github.com/zeeshanhaque21/nanoMuse/issues'
+// The fork's own desktop docs, which exist in this repository. Upstream pointed this at
+// a third-party host; this fork links only a page it can actually verify.
+export const DOCS_URL = 'https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/desktop-muse.md'

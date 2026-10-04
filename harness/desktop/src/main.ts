@@ -1,5 +1,5 @@
 import { pathToFileURL } from "node:url";
-import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, powerSaveBlocker, shell, systemPreferences, Tray } from "electron";
+import { app, BrowserWindow, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, powerSaveBlocker, screen, shell, systemPreferences, Tray } from "electron";
 import { randomBytes } from "node:crypto";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -201,17 +201,52 @@ function ensureProfile(dshDir: string): string {
   return dir;
 }
 
-function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
+/** Try to bind one loopback port (0 = any); the port bound, or 0 when it is taken. */
+function tryPort(port: number): Promise<number> {
+  return new Promise((resolve) => {
     const srv = createServer();
     srv.unref();
-    srv.on("error", reject);
-    srv.listen(0, "127.0.0.1", () => {
+    srv.on("error", () => resolve(0));
+    srv.listen(port, "127.0.0.1", () => {
       const address = srv.address();
-      const port = typeof address === "object" && address ? address.port : 0;
-      srv.close(() => resolve(port));
+      const bound = typeof address === "object" && address ? address.port : 0;
+      srv.close(() => resolve(bound));
     });
   });
+}
+
+/** The port tried first on a fresh install (the connectors' loopback is 38417). */
+const HOST_PORT_DEFAULT = 38421;
+
+/**
+ * The host's port, kept across launches. The window's origin is `127.0.0.1:<port>`, and
+ * the origin is the browser's storage key — the preferences, the star asks' memory, the
+ * live stage's place, the harness's own settings all live in that origin's localStorage —
+ * so a port that changed on every launch meant an app that forgot everything on every
+ * launch. The port used last time is tried first (it is written to `<home>/port`), then
+ * the default, then any free one.
+ */
+async function hostPort(home: string): Promise<number> {
+  const file = join(home, "port");
+  let last = 0;
+  try {
+    last = Number.parseInt(readFileSync(file, "utf8").trim(), 10) || 0;
+  } catch {
+    last = 0;
+  }
+  const candidates = last > 0 ? [last, HOST_PORT_DEFAULT, 0] : [HOST_PORT_DEFAULT, 0];
+  for (const candidate of candidates) {
+    const port = await tryPort(candidate);
+    if (port > 0) {
+      try {
+        writeFileSync(file, `${port}\n`);
+      } catch (exc) {
+        log(`port: could not remember ${port}: ${String(exc)}`);
+      }
+      return port;
+    }
+  }
+  throw new Error("no free loopback port for the host");
 }
 
 /**
@@ -247,7 +282,7 @@ function startHost(): Promise<string> {
   mkdirSync(home, { recursive: true });
   ensureProfile(dshDir);
   return new Promise<string>((resolve, reject) => {
-    freePort()
+    hostPort(home)
       .then((port) => {
         const env: NodeJS.ProcessEnv = {
           ...process.env,
@@ -467,12 +502,28 @@ interface Prefs {
   openAtLogin: boolean;
   menuBar: boolean;
   quickChat: boolean;
+  /** The person's own quick-chat combination (an Electron accelerator); absent means the platform's default. */
+  quickChatKey?: string;
 }
 const PREFS_DEFAULT: Prefs = { openAtLogin: false, menuBar: true, quickChat: true };
 /** ⌥ Space on macOS as in Muse; Ctrl+Alt+Space where Alt+Space is the window menu. */
-const QUICK_CHAT_KEY = process.platform === "darwin" ? "Alt+Space" : "Ctrl+Alt+Space";
+const QUICK_CHAT_DEFAULT = process.platform === "darwin" ? "Alt+Space" : "Ctrl+Alt+Space";
+/** One or more modifiers and a key, in Electron's accelerator words; a function key may stand alone. */
+const ACCELERATOR = /^((?:(?:CommandOrControl|CmdOrCtrl|Command|Cmd|Control|Ctrl|Alt|Option|Shift|Super|Meta)\+)*)(Space|Tab|Backspace|Delete|Insert|Return|Enter|Up|Down|Left|Right|Home|End|PageUp|PageDown|F(?:[1-9]|1[0-9]|2[0-4])|[A-Z0-9]|[`\-=\[\]\\;',.\/])$/;
 let prefs: Prefs = PREFS_DEFAULT;
 let tray: Tray | null = null;
+/** Whether the last registration failed because another app holds the combination. */
+let quickChatTaken = false;
+
+function validAccelerator(text: string): boolean {
+  const m = ACCELERATOR.exec(text);
+  return Boolean(m) && (Boolean(m?.[1]) || /^F\d+$/.test(m?.[2] ?? ""));
+}
+
+/** The combination in force: the person's, when it parses, else the platform's default. */
+function quickChatKey(): string {
+  return prefs.quickChatKey && validAccelerator(prefs.quickChatKey) ? prefs.quickChatKey : QUICK_CHAT_DEFAULT;
+}
 
 function prefsPath(): string {
   return join(harnessHome(), "desktop.json");
@@ -522,9 +573,17 @@ function quickChat(): void {
 
 function applyQuickChat(): void {
   globalShortcut.unregisterAll();
+  quickChatTaken = false;
   if (!prefs.quickChat) return;
-  const ok = globalShortcut.register(QUICK_CHAT_KEY, quickChat);
-  if (!ok) log(`quick chat: ${QUICK_CHAT_KEY} is taken by another app`);
+  const key = quickChatKey();
+  let ok = false;
+  try {
+    ok = globalShortcut.register(key, quickChat);
+  } catch (exc) {
+    log(`quick chat: ${key}: ${String(exc)}`);
+  }
+  quickChatTaken = !ok;
+  if (!ok) log(`quick chat: ${key} is taken by another app`);
 }
 
 function applyMenuBar(): void {
@@ -546,7 +605,7 @@ function applyMenuBar(): void {
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: T.open, click: () => void showWindow() },
-      { label: T.newChat, accelerator: prefs.quickChat ? QUICK_CHAT_KEY : undefined, click: () => showWindow()?.webContents.send("nanomuse:quick-chat") },
+      { label: T.newChat, accelerator: prefs.quickChat ? quickChatKey() : undefined, click: () => showWindow()?.webContents.send("nanomuse:quick-chat") },
       { type: "separator" },
       { label: T.quit, click: () => app.quit() },
     ]),
@@ -580,9 +639,9 @@ function applyPrefs(): void {
   applyOpenAtLogin();
 }
 
-/** What the General page shows: the values, the key's name, and which of the three this platform can do. */
-function prefsView(): Prefs & { quickChatKey: string; supports: Record<keyof Prefs, boolean> } {
-  return { ...prefs, quickChatKey: QUICK_CHAT_KEY, supports: { openAtLogin: process.platform !== "linux" || Boolean(process.env.APPIMAGE) || app.isPackaged, menuBar: true, quickChat: true } };
+/** What the General page shows: the values, the key in force and the default, whether another app holds it, and which of the three this platform can do. */
+function prefsView(): Prefs & { quickChatKey: string; quickChatDefault: string; quickChatTaken: boolean; supports: { openAtLogin: boolean; menuBar: boolean; quickChat: boolean } } {
+  return { ...prefs, quickChatKey: quickChatKey(), quickChatDefault: QUICK_CHAT_DEFAULT, quickChatTaken, supports: { openAtLogin: process.platform !== "linux" || Boolean(process.env.APPIMAGE) || app.isPackaged, menuBar: true, quickChat: true } };
 }
 
 /**
@@ -642,10 +701,23 @@ function registerBridge(): void {
     } else if (kind === "microphone") {
       await systemPreferences.askForMediaAccess("microphone").catch(() => false);
     } else {
-      // Screen Recording has no prompt API: the pane is where the switch is
+      // Screen Recording has no prompt API. A first capture attempt is what puts the app on
+      // the pane's list (and shows the system's own notice); without it the user finds
+      // nothing to switch on. Then the pane, where the switch is.
+      try {
+        await desktopCapturer.getSources({ types: ["screen"], thumbnailSize: { width: 1, height: 1 } });
+      } catch {
+        /* no sources without the permission — that attempt was the point */
+      }
       void shell.openExternal(PERMISSION_PANES.screen);
     }
     return permissionState(kind);
+  });
+  // macOS applies Screen Recording only to freshly started processes: after granting it, the
+  // runtime that takes the screenshots has to start again.
+  ipcMain.handle("nanomuse:relaunch", () => {
+    app.relaunch();
+    app.exit(0);
   });
   ipcMain.handle("nanomuse:permissions:settings", (_e, kind: PermissionKind | "files") => {
     if (process.platform === "darwin" && typeof kind === "string" && kind in PERMISSION_PANES) void shell.openExternal(PERMISSION_PANES[kind]);
@@ -666,15 +738,208 @@ function registerBridge(): void {
   ipcMain.handle("nanomuse:prefs:set", (_e, patch: Partial<Prefs>) => {
     if (patch && typeof patch === "object") {
       for (const key of ["openAtLogin", "menuBar", "quickChat"] as const) if (typeof patch[key] === "boolean") prefs = { ...prefs, [key]: patch[key] };
+      if (typeof patch.quickChatKey === "string") {
+        // the person's combination; an empty string or the default puts the default back
+        const key = patch.quickChatKey.trim();
+        const { quickChatKey: _drop, ...rest } = prefs;
+        prefs = !key || key === QUICK_CHAT_DEFAULT ? rest : validAccelerator(key) ? { ...rest, quickChatKey: key } : prefs;
+      }
       writePrefs();
       applyPrefs();
     }
     return prefsView();
   });
   ipcMain.handle("nanomuse:report-bug", () => reportBug());
+  ipcMain.handle("nanomuse:permissions:guide", () => guidePermissions());
+  ipcMain.handle("nanomuse:content-protection", (e, on: boolean) => {
+    // The main window too, while the hands work: the agent should not read its own chat off the screen.
+    if (e.sender === mainWindow?.webContents) mainWindow?.setContentProtection(on === true);
+  });
   ipcMain.handle("nanomuse:reveal", (_e, path: string) => {
     if (typeof path === "string" && path && existsSync(path)) shell.showItemInFolder(path);
   });
+}
+
+// ---- the overlays while the hands work (0.1.34) ---------------------------------------------
+//
+// Two windows the web client drives over IPC, both with content protection on so neither is
+// ever in a screenshot the hands take (UI-TARS does the same with its ScreenMarker):
+//   • the glow — transparent, click-through, always on top, over the whole display: an
+//     animated border says "the agent has the hands", the agent's face follows the pointer;
+//   • the capsule — a small always-on-top card with the question the agent asked before a
+//     step (Allow once / Deny) or the hold ("Your turn — Done"), shown when the main window
+//     is not the one in front, so the person can answer from wherever they are.
+
+interface OverlayCard {
+  id: string;
+  kind: "approval" | "hold";
+  title: string;
+  text: string;
+  actions: { id: string; label: string; tone?: "on" | "no" }[];
+}
+
+interface OverlayState {
+  hands: { active: boolean; held: boolean; x: number; y: number; kind: string; text: string; face: string } | null;
+  cards: OverlayCard[];
+}
+
+let glowWindow: BrowserWindow | null = null;
+let capsuleWindow: BrowserWindow | null = null;
+let overlayState: OverlayState = { hands: null, cards: [] };
+let glowHideTimer: NodeJS.Timeout | null = null;
+
+const OVERLAY_PREFS = { contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false, preload: join(__dirname, "overlay-preload.js") };
+
+function overlayWindow(kind: "glow" | "capsule"): BrowserWindow {
+  const display = screen.getPrimaryDisplay();
+  const glow = kind === "glow";
+  const win = new BrowserWindow({
+    show: false,
+    frame: false,
+    transparent: true,
+    hasShadow: false,
+    resizable: false,
+    movable: !glow,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    focusable: false,
+    alwaysOnTop: true,
+    ...(glow ? { x: display.bounds.x, y: display.bounds.y, width: display.bounds.width, height: display.bounds.height } : { width: 360, height: 120, x: display.workArea.x + display.workArea.width - 376, y: display.workArea.y + 16 }),
+    webPreferences: OVERLAY_PREFS,
+  });
+  // Never in a screenshot: the hands must not see our own marks on the screen.
+  win.setContentProtection(true);
+  win.setAlwaysOnTop(true, "screen-saver");
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  if (glow) win.setIgnoreMouseEvents(true, { forward: true });
+  win.on("page-title-updated", (e) => e.preventDefault());
+  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  void win.loadFile(join(ownResources(), `${kind}.html`));
+  return win;
+}
+
+function sendOverlay(win: BrowserWindow | null, state: unknown): void {
+  if (win && !win.isDestroyed()) win.webContents.send("nanomuse:overlay:state", state);
+}
+
+function applyOverlay(): void {
+  const hands = overlayState.hands;
+  // the glow: up while the hands are active (or held), down a moment after they stop
+  if (hands && (hands.active || hands.held)) {
+    if (glowHideTimer) { clearTimeout(glowHideTimer); glowHideTimer = null; }
+    if (!glowWindow || glowWindow.isDestroyed()) glowWindow = overlayWindow("glow");
+    const display = screen.getPrimaryDisplay();
+    glowWindow.setBounds(display.bounds);
+    if (!glowWindow.isVisible()) glowWindow.showInactive();
+    sendOverlay(glowWindow, { ...hands, active: true });
+  } else if (glowWindow && !glowWindow.isDestroyed() && glowWindow.isVisible()) {
+    sendOverlay(glowWindow, { active: false });
+    if (!glowHideTimer) glowHideTimer = setTimeout(() => { glowHideTimer = null; glowWindow?.hide(); }, 400);
+  }
+  // the capsule: the cards, but only when the main window is not in front (the page shows them itself then)
+  const mainInFront = Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused() && mainWindow.isVisible());
+  const cards = mainInFront ? [] : overlayState.cards;
+  if (cards.length) {
+    if (!capsuleWindow || capsuleWindow.isDestroyed()) capsuleWindow = overlayWindow("capsule");
+    capsuleWindow.setFocusable(true);
+    if (!capsuleWindow.isVisible()) capsuleWindow.showInactive();
+    sendOverlay(capsuleWindow, { cards });
+  } else if (capsuleWindow && !capsuleWindow.isDestroyed() && capsuleWindow.isVisible()) {
+    sendOverlay(capsuleWindow, { cards: [] });
+    capsuleWindow.hide();
+  }
+}
+
+function registerOverlays(): void {
+  ipcMain.on("nanomuse:overlay", (e, state: OverlayState) => {
+    if (e.sender !== mainWindow?.webContents || !state || typeof state !== "object") return;
+    const hands = state.hands && typeof state.hands === "object" ? state.hands : null;
+    overlayState = {
+      hands: hands
+        ? {
+            active: hands.active === true,
+            held: hands.held === true,
+            x: typeof hands.x === "number" ? hands.x : -1,
+            y: typeof hands.y === "number" ? hands.y : -1,
+            kind: String(hands.kind ?? "").slice(0, 32),
+            text: String(hands.text ?? "").slice(0, 120),
+            face: typeof hands.face === "string" && /^(data:image\/[a-z+]+;base64,|https?:\/\/127\.0\.0\.1|https?:\/\/localhost)/.test(hands.face) ? hands.face.slice(0, 400_000) : "",
+          }
+        : null,
+      cards: Array.isArray(state.cards)
+        ? state.cards.slice(0, 3).map((c) => ({
+            id: String(c.id ?? "").slice(0, 80),
+            kind: c.kind === "hold" ? "hold" : "approval",
+            title: String(c.title ?? "").slice(0, 60),
+            text: String(c.text ?? "").slice(0, 400),
+            actions: (Array.isArray(c.actions) ? c.actions : []).slice(0, 4).map((a) => ({ id: String(a.id ?? "").slice(0, 32), label: String(a.label ?? "").slice(0, 40), ...(a.tone === "on" || a.tone === "no" ? { tone: a.tone } : {}) })),
+          }))
+        : [],
+    };
+    applyOverlay();
+  });
+  ipcMain.on("nanomuse:overlay:ready", (e) => {
+    if (e.sender === glowWindow?.webContents) sendOverlay(glowWindow, overlayState.hands ? { ...overlayState.hands } : { active: false });
+    if (e.sender === capsuleWindow?.webContents) sendOverlay(capsuleWindow, { cards: overlayState.cards });
+  });
+  ipcMain.on("nanomuse:overlay:act", (e, payload: { card?: string; action?: string }) => {
+    if (e.sender !== capsuleWindow?.webContents || !payload) return;
+    mainWindow?.webContents.send("nanomuse:overlay:action", { card: String(payload.card ?? ""), action: String(payload.action ?? "") });
+  });
+  ipcMain.on("nanomuse:overlay:resize", (e, height: number) => {
+    if (e.sender !== capsuleWindow?.webContents || typeof height !== "number") return;
+    const h = Math.max(60, Math.min(480, Math.round(height)));
+    const b = capsuleWindow.getBounds();
+    if (b.height !== h) capsuleWindow.setBounds({ ...b, height: h });
+  });
+  app.on("browser-window-focus", applyOverlay);
+  app.on("browser-window-blur", applyOverlay);
+}
+
+/**
+ * The first time the hands are about to be used on macOS: the two system permissions, asked
+ * for in order with a word on why (Codex does the same), the panel live-updating as they are
+ * granted. Returns what is granted now; the page decides whether to go on.
+ */
+async function guidePermissions(): Promise<Record<PermissionKind, PermissionState>> {
+  const state = () => ({ accessibility: permissionState("accessibility"), screen: permissionState("screen"), microphone: permissionState("microphone") });
+  if (process.platform !== "darwin") return state();
+  if (permissionState("accessibility") !== "granted") {
+    const { response } = await dialog.showMessageBox({
+      type: "info",
+      message: zh ? "nanoMuse 需要「辅助功能」权限" : "nanoMuse needs Accessibility",
+      detail: zh
+        ? "动手操作电脑要靠它移动鼠标和输入。系统会弹出请求；在「系统设置 → 隐私与安全性 → 辅助功能」里打开 nanoMuse Desktop 和它附带的 nanomuse 运行时。"
+        : "The hands move the mouse and type through it. The system asks next; in System Settings → Privacy & Security → Accessibility, switch on nanoMuse Desktop and the bundled nanomuse runtime.",
+      buttons: [zh ? "继续" : "Continue", zh ? "以后再说" : "Later"],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (response === 0 && !systemPreferences.isTrustedAccessibilityClient(true)) void shell.openExternal(PERMISSION_PANES.accessibility);
+  }
+  if (permissionState("screen") !== "granted") {
+    const { response } = await dialog.showMessageBox({
+      type: "info",
+      message: zh ? "nanoMuse 需要「屏幕录制」权限" : "nanoMuse needs Screen Recording",
+      detail: zh
+        ? "它靠截图看到屏幕上有什么。系统没有弹窗；点「继续」后在「屏幕录制」面板里打开 nanoMuse Desktop 和 nanomuse，然后重新启动应用。"
+        : "It sees the screen through screenshots. There is no system prompt: after Continue, switch on nanoMuse Desktop and nanomuse in the Screen Recording pane, then relaunch the app.",
+      buttons: [zh ? "继续" : "Continue", zh ? "以后再说" : "Later"],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (response === 0) {
+      try {
+        await desktopCapturer.getSources({ types: ["screen"], thumbnailSize: { width: 1, height: 1 } });
+      } catch {
+        /* the attempt is what lists the app in the pane */
+      }
+      void shell.openExternal(PERMISSION_PANES.screen);
+    }
+  }
+  return state();
 }
 
 function createWindow(): BrowserWindow {
@@ -769,7 +1034,8 @@ async function boot(): Promise<void> {
 function about(): void {
   const s = shipped();
   const lines = [
-    `nanoMuse Desktop ${app.getVersion()}`,
+    // the same version line as the web client's About (About.tsx `versionLine`)
+    `nanoMuse Desktop ${app.getVersion()} · harness ${s.bundle ?? "?"}`,
     zh ? "一个开源的个人智能体，装在你的每一台设备上。" : "An open-source personal agent for every device you own.",
     "",
     `DeepSeek Harness ${s.dsh ?? "?"} (MIT) · ${BUNDLE} ${s.bundle ?? "?"} (GPL-3.0-or-later)`,
@@ -865,6 +1131,7 @@ if (!app.requestSingleInstanceLock()) {
   });
   app.whenReady().then(async () => {
     registerBridge();
+    registerOverlays();
     buildMenu();
     prefs = readPrefs();
     applyPrefs();

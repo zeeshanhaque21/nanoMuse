@@ -29,7 +29,7 @@ import androidx.compose.material.icons.outlined.Storage // nanoMuse: Data contro
 import androidx.compose.material.icons.outlined.BarChart
 import androidx.compose.material.icons.outlined.BatteryFull
 import androidx.compose.material.icons.outlined.BugReport
-import androidx.compose.material.icons.outlined.Dashboard
+import androidx.compose.material.icons.outlined.Link // nanoMuse: the Connectors row
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Face
 import androidx.compose.material.icons.outlined.Email
@@ -105,6 +105,7 @@ fun SettingsScreen(
     onDataControlsClick: () -> Unit = {}, // nanoMuse: Settings → Data controls (what nanoMuse Cloud keeps)
     onComputersClick: () -> Unit = {}, // nanoMuse: Settings → Computers (the phone drives a PC)
     onCodingClick: () -> Unit = {}, // nanoMuse: Settings → Coding agents (Cursor/Codex/Claude Code on the account's computers)
+    onConnectorsClick: () -> Unit = {}, // nanoMuse: Settings → Connectors (the services the agent can be let into)
     onPermissionsClick: () -> Unit = {},
     onUsageClick: () -> Unit = {},
     onAppearanceClick: () -> Unit = {},
@@ -241,7 +242,9 @@ fun SettingsScreen(
                 io.github.nanomuse.ui.muse.MuseRowDivider()
                 io.github.nanomuse.ui.muse.MuseRow(title = stringResource(R.string.settings_skills), icon = Icons.Outlined.Extension, onClick = onSkillsClick)
                 io.github.nanomuse.ui.muse.MuseRowDivider()
-                io.github.nanomuse.ui.muse.MuseRow(title = stringResource(R.string.settings_mcp), icon = Icons.Outlined.Dashboard, onClick = onMcpClick)
+                // nanoMuse: one entry for every service the agent can be let into — the connectors
+                // catalogue, with the person's own MCP servers behind it (the MCP page is reached from there).
+                io.github.nanomuse.ui.muse.MuseRow(title = stringResource(R.string.nm_connectors_title), icon = Icons.Outlined.Link, onClick = onConnectorsClick)
                 io.github.nanomuse.ui.muse.MuseRowDivider()
                 // nanoMuse: the phone's screen as a hand — off by default.
                 io.github.nanomuse.ui.muse.MuseRow(

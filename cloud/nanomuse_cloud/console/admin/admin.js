@@ -30,13 +30,14 @@
     kSignalsSub: (s) => `${s.sign_ins} 次登录 · ${s.sign_in_failures} 次失败 · ${s.budget_refusals} 次超额 · ${s.upstream_errors} 次上游错误 · ${s.calls} 通电话`,
     byKind: "按类型", byModel: "按模型", byDay: (d) => `每日花费 · 最近 ${d} 天`, top: (d) => `花费最多 · 最近 ${d} 天`, events: "最近动态", accounts: "全部账号", config: "当前配置",
     kinds: { chat: "对话", image: "图片", video: "视频", realtime: "实时通话", grant: "加 tokens", credit: "加额度" },
+    lanes: { chat: "聊天", gui: "动手" }, laneDefault: (l) => `${l}默认`, laneTitle: (l) => `这个模型供「${l}」选择器选用`, laneDefaultTitle: (l) => `「${l}」选择器的默认模型`,
     thWho: "账号", thJoined: "注册", thSpent: "花费 累计 / 今天", thTokens: "tokens 累计 / 今天", thReqs: "请求", thActive: "最近活跃", thDevices: "设备",
     never: "从未", phone: "手机", email: "邮箱", disabled: "已停用", locked: "已锁定", member: "成员", listed: "白名单", password: "密码", noAccounts: "还没有人登录过。", search: "搜索提示 / ID / 地址…",
     reqs: (n) => `${fmt(n)} 次`, tokens: (n) => `${fmt(n)} tokens`, seconds: (n) => `${fmt(n)} 秒`, pictures: (n) => `${fmt(n)} 张`, inOut: (i, o) => `输入 ${fmt(i)} · 输出 ${fmt(o)}`,
     all: "全部", signIns: "登录", refusals: "超额", errors: "错误", calls: "通话", passwords: "密码",
     eventName: {
       "account.created": "注册", "sign_in.code": "验证码登录", "sign_in.password": "密码登录", "sign_in.session": "换会话密钥", "sign_in.failed": "登录失败", "password.set": "设置密码", "password.changed": "修改密码",
-      "password.cleared": "移除密码", "sign_out": "退出", "sign_out.all": "全部退出", "budget.refused": "超出额度被拒", "upstream.error": "上游出错", "call.ended": "通话结束", "contribute.on": "开启「帮助改进」", "contribute.default": "新账号默认开启「帮助改进」", "contribute.bonus": "早期共创奖励 +¥10", "contribute.off": "关闭「帮助改进」", "contribute.deleted": "删除保存的对话", "invite.accepted": "邀请成功", "invite.used": "通过邀请注册", "invite.unknown": "无效邀请码", "credit.granted": "获得额度奖励", "profile.put": "更新资料", "profile.clear": "清空资料",
+      "password.cleared": "移除密码", "sign_out": "退出", "sign_out.all": "全部退出", "pool.set": "额度调整", "pool.set.many": "批量额度调整", "budget.refused": "超出额度被拒", "upstream.error": "上游出错", "call.ended": "通话结束", "contribute.on": "开启「帮助改进」", "contribute.default": "新账号默认开启「帮助改进」", "contribute.bonus": "早期共创奖励 +¥10", "contribute.off": "关闭「帮助改进」", "contribute.deleted": "删除保存的对话", "invite.accepted": "邀请成功", "invite.used": "通过邀请注册", "invite.unknown": "无效邀请码", "credit.granted": "获得额度奖励", "profile.put": "更新资料", "profile.clear": "清空资料", "profile.connectors": "更新连接列表",
     },
     // drawer
     spendToday: "今天", spendTotal: "累计", requests: "请求", cap: "总额度", noCap: "无上限", left: "剩余", usageToday: "今天", usagePeriod: (d) => `最近 ${d} 天`, usageTotal: "累计",
@@ -52,7 +53,7 @@
     usedLine: (v) => [`${fmt(v.requests)} 次`, `${fmt(v.tokens)} tokens`, v.pictures ? `${fmt(v.pictures)} 张图` : "", v.clips ? `${fmt(v.clips)} 段视频` : ""].filter(Boolean).join(" · "), dur: (s) => (s < 60 ? `${Math.round(s)} 秒` : s < 3600 ? `${Math.round(s / 60)} 分钟` : `${(s / 3600).toFixed(1)} 小时`),
     demoOfAccount: "在线体验记录", demoAccountLine: (v) => `登录 ${fmt(v.signins)} 次 · 体验 ${fmt(v.sessions)} 次 · 首次 ${when(v.first_seen)} · 最近 ${when(v.last_seen)}${v.created ? " · 账号在体验页注册" : ""}`, demoNoneHere: "这个账号没有在线体验过。",
     recorded: "我们记录了什么", recordedNote: "每个账号：手机号 / 邮箱（加密）、注册与最近出现时间、首次和最近来访地址、最近客户端（平台、版本）；每次登录：设备名、方式、地址、客户端；每次请求：模型、token 数、费用、地址、客户端；每条动态：类型、地址、客户端；每台设备：名称、系统、版本、地址。开启「帮助改进」的账号另有对话内容。全部随账号删除。",
-    grant: "加额度", grantPrompt: (who) => `给 ${who} 加多少 tokens？负数扣减。`, credit: "加额度", creditPrompt: (who) => `给 ${who} 加多少元额度？（直接进入总额度，不过期）`, creditNote: "备注（比如 PR #12）", poolLine: (g, l, n, b) => `总额度 ${g}${l === null ? "" : `（剩 ${l}）`} · 邀请了 ${n} 人${b ? " · 领过早期共创奖励" : ""}`, invitedBy: "邀请人", disable: "停用", enable: "恢复", makeMember: "设为成员", unmakeMember: "取消成员",
+    grant: "加额度", grantPrompt: (who) => `给 ${who} 加多少 tokens？负数扣减。`, credit: "加额度", creditPrompt: (who) => `给 ${who} 加多少元额度？负数扣减。（直接进入总额度，不过期）`, creditNote: "备注（比如 PR #12）", setPool: "设置额度", setPoolPrompt: (who, left) => `把 ${who} 的额度设成多少？现在剩 ${left}。\n写法：=5 → 剩余设为 ¥5；总额=20 → 总额度设为 ¥20；+3 / -2 → 加 ¥3 / 扣 ¥2。`, setPoolMany: (n) => `批量设置额度（${n} 人）`, setPoolManyPrompt: (n) => `给筛出来的 ${n} 个账号设置额度。\n写法：=5 → 每人剩余设为 ¥5；总额=20 → 每人总额度设为 ¥20；+3 / -2 → 每人加 ¥3 / 扣 ¥2。成员不受影响。`, setPoolManyConfirm: (w, n) => `对 ${n} 个账号执行「${w}」？`, setPoolDone: (n) => `已设置 ${n} 个账号的额度。`, poolBad: "没看懂。写法：=5、总额=20、+3、-2。", poolLine: (g, l, n, b) => `总额度 ${g}${l === null ? "" : `（剩 ${l}）`} · 邀请了 ${n} 人${b ? " · 领过早期共创奖励" : ""}`, invitedBy: "邀请人", disable: "停用", enable: "恢复", makeMember: "设为成员", unmakeMember: "取消成员",
     memberConfirm: (who) => `把 ${who} 设为成员？成员不受额度限制，费用由你承担。`, listedNote: "在服务器白名单里，改 ALLOWED_IDENTIFIERS 才能取消",
     disableConfirm: (who) => `停用 ${who}？TA 的所有设备会立刻断开，再登录会被拒。`, remove: "删除账号",
     removeConfirm: (who) => `删除 ${who} 的账号、密钥、用量记录和设备？不可恢复。`, hasPassword: "已设密码", noPassword: "未设密码", identifierNote: "明文只在这里解出来看",
@@ -60,6 +61,12 @@
     allowed: "白名单（不限额）", allowedNone: "（空）", sender: "验证码渠道", models: "模型", prices: "单价（¥）", rate: "汇率", rateLine: (r) => `1 美元 = ${r} 元（仅用于显示）`,
     perMinute: (n) => (n > 0 ? `每分钟 ${n} 次` : "不限频"), capLine: (c, u, b) => (c > 0 ? `非成员共 ¥${c}（≈ $${u}）· 邀请双方各 +¥${b}` : "不限花费"), signupOpen: "开放注册", signupClosed: "仅白名单可登录",
     realtime: "实时通话", on: "开", off: "关", pwMin: (n) => `密码至少 ${n} 位`,
+    // runtime settings (relay 0.15): changed here, in force at once, kept across restarts
+    rtTitle: "额度（即时生效）", rtNote: "在这里改，所有客户端立刻按新数字走——新注册拿新额度，账号页、登录页、用完时的提示都读服务器的数字，不用发版、用户不用做任何事。留空恢复环境变量的值。调低只影响之后注册的人，不会从任何人的池子里扣。",
+    rtAllowance: "每个新账号的免费额度（¥）", rtBonus: "邀请奖励（¥，双方各得）", rtSignup: "开放注册", rtSignupOff: "关闭后只有白名单和成员能登录；已登录的人不受影响。",
+    rtEnv: (v) => `环境变量：${v}`, rtSet: "页面已设置", rtSave: "保存", rtSaved: "已保存，已生效。", rtApply: (n) => `把当前额度补给 ${n} 个老账号`, rtApplyNone: "所有账号拿到的额度都不低于当前值。",
+    rtApplyConfirm: (n, c) => `给 ${n} 个拿到的额度低于 ¥${c} 的账号补齐差额？每个账号的流水会记一笔「额度调整」。`, rtApplied: (n) => `已补给 ${n} 个账号。`,
+    rtCreditAll: "给所有人加额度", rtCreditAllPrompt: "给每个受额度限制的账号加多少元？负数扣减。（节日、补偿；成员除外）", rtSetAll: "统一设置所有人额度", rtSetAllPrompt: (n) => `给全部 ${n} 个受限账号设置额度。\n写法：=5 → 每人剩余设为 ¥5；总额=20 → 每人总额度设为 ¥20；+3 / -2 → 每人加 ¥3 / 扣 ¥2。`, rtCreditAllConfirm: (c, n) => `给 ${n} 个账号各加 ¥${c}？`, rtCredited: (n) => `已给 ${n} 个账号加额度。`,
     priceLine: (p) => [p.per_m_input || p.per_m_output ? `输入 ${p.per_m_input} / 输出 ${p.per_m_output} 每百万 tokens` : null,
       p.per_image ? `每张 ${p.per_image}${p.per_image_2k ? `（2k ${p.per_image_2k}）` : ""}` : null, p.per_second ? `每秒 ${p.per_second}` : null].filter(Boolean).join("；"),
     foot: "手机号 / 邮箱只在打开某个账号时用管理口令解出来看；数据库里存的是加密后的值。来访地址和客户端信息随每次登录、请求和动态一起记录，删账号时一并删除。对话文字只有在账号开启了「帮助改进 nanoMuse 的 AI 模型」时才保存，并且只存用户写的、模型回答的和它调用的工具（见「数据控制」）。请不要把这个页面截图发出去。金额按模型服务商的北京地区标价估算。",
@@ -107,13 +114,14 @@
     kSignalsSub: (s) => `${s.sign_ins} sign-ins · ${s.sign_in_failures} failed · ${s.budget_refusals} over budget · ${s.upstream_errors} upstream errors · ${s.calls} calls`,
     byKind: "By kind", byModel: "By model", byDay: (d) => `Spend by day · last ${d} days`, top: (d) => `Top spenders · last ${d} days`, events: "Activity", accounts: "All accounts", config: "Configuration",
     kinds: { chat: "Chat", image: "Pictures", video: "Video", realtime: "Calls", grant: "Tokens granted", credit: "Credit" },
+    lanes: { chat: "chat", gui: "hands" }, laneDefault: (l) => `${l} default`, laneTitle: (l) => `offered in the ${l} picker`, laneDefaultTitle: (l) => `the ${l} picker's default`,
     thWho: "Account", thJoined: "Joined", thSpent: "Spent all / today", thTokens: "Tokens all / today", thReqs: "Requests", thActive: "Last active", thDevices: "Devices",
     never: "never", phone: "phone", email: "e-mail", disabled: "disabled", locked: "locked", member: "member", listed: "listed", password: "password", noAccounts: "Nobody has signed in yet.", search: "Search hint / id / address…",
     reqs: (n) => `${fmt(n)} req`, tokens: (n) => `${fmt(n)} tokens`, seconds: (n) => `${fmt(n)} s`, pictures: (n) => `${fmt(n)} pictures`, inOut: (i, o) => `${fmt(i)} in · ${fmt(o)} out`,
     all: "All", signIns: "Sign-ins", refusals: "Refusals", errors: "Errors", calls: "Calls", passwords: "Passwords",
     eventName: {
       "account.created": "Joined", "sign_in.code": "Signed in with a code", "sign_in.password": "Signed in with the password", "sign_in.session": "Took a session key", "sign_in.failed": "Failed sign-in", "password.set": "Password set", "password.changed": "Password changed",
-      "password.cleared": "Password removed", "sign_out": "Signed out", "sign_out.all": "Signed out everywhere", "budget.refused": "Refused: over budget", "upstream.error": "Upstream error", "call.ended": "Call ended", "contribute.on": "“Help improve” on", "contribute.default": "New account: “help improve” on by default", "contribute.bonus": "Early co-creation bonus +¥10", "contribute.off": "“Help improve” off", "contribute.deleted": "Kept turns deleted", "invite.accepted": "Invited a friend", "invite.used": "Signed up via invite", "invite.unknown": "Unknown invite code", "credit.granted": "Credit granted", "profile.put": "Profile updated", "profile.clear": "Profile cleared",
+      "password.cleared": "Password removed", "sign_out": "Signed out", "sign_out.all": "Signed out everywhere", "pool.set": "Pool set", "pool.set.many": "Pools set", "budget.refused": "Refused: over budget", "upstream.error": "Upstream error", "call.ended": "Call ended", "contribute.on": "“Help improve” on", "contribute.default": "New account: “help improve” on by default", "contribute.bonus": "Early co-creation bonus +¥10", "contribute.off": "“Help improve” off", "contribute.deleted": "Kept turns deleted", "invite.accepted": "Invited a friend", "invite.used": "Signed up via invite", "invite.unknown": "Unknown invite code", "credit.granted": "Credit granted", "profile.put": "Profile updated", "profile.clear": "Profile cleared", "profile.connectors": "Connectors updated",
     },
     spendToday: "Today", spendTotal: "All time", requests: "Requests", cap: "Pool", noCap: "no cap", left: "left", usageToday: "Today", usagePeriod: (d) => `Last ${d} days`, usageTotal: "All time",
     sessions: "Sign-ins (incl. revoked)", revoked: "revoked", via: { code: "code", password: "password", session: "session key" }, lastUsed: "last used", devices: "Devices", firstSeen: "first", lastSeen: "last",
@@ -128,13 +136,18 @@
     usedLine: (v) => [`${fmt(v.requests)} req`, `${fmt(v.tokens)} tokens`, v.pictures ? `${fmt(v.pictures)} pictures` : "", v.clips ? `${fmt(v.clips)} clips` : ""].filter(Boolean).join(" · "), dur: (s) => (s < 60 ? `${Math.round(s)} s` : s < 3600 ? `${Math.round(s / 60)} min` : `${(s / 3600).toFixed(1)} h`),
     demoOfAccount: "The phone in the browser", demoAccountLine: (v) => `${fmt(v.signins)} sign-ins · ${fmt(v.sessions)} demos · first ${when(v.first_seen)} · last ${when(v.last_seen)}${v.created ? " · the account was created on the demo page" : ""}`, demoNoneHere: "This account has not tried the demo.",
     recorded: "What is recorded", recordedNote: "Per account: phone / e-mail (encrypted), joined and last seen, first and last address, last client (platform, version); per sign-in: device name, way in, address, client; per request: model, tokens, cost, address, client; per event: kind, address, client; per device: name, OS, version, address. Accounts with “help improve” on also have the text of their turns. All of it goes with the account when it is deleted.",
-    grant: "Grant", grantPrompt: (who) => `How many tokens for ${who}? Negative takes away.`, credit: "Add credit", creditPrompt: (who) => `How many yuan for ${who}? (straight into the pool; never expires)`, creditNote: "Note (say, PR #12)", poolLine: (g, l, n, b) => `pool ${g}${l === null ? "" : ` (${l} left)`} · ${n} invited${b ? " · took the early co-creation bonus" : ""}`, invitedBy: "invited by", disable: "Disable", enable: "Enable", makeMember: "Make member", unmakeMember: "Unmake member",
+    grant: "Grant", grantPrompt: (who) => `How many tokens for ${who}? Negative takes away.`, credit: "Add credit", creditPrompt: (who) => `How many yuan for ${who}? Negative takes away. (straight into the pool; never expires)`, creditNote: "Note (say, PR #12)", setPool: "Set the pool", setPoolPrompt: (who, left) => `Set ${who}'s pool to what? ${left} left now.\nWrite: =5 → ¥5 left; total=20 → a ¥20 pool; +3 / -2 → ¥3 more / ¥2 less.`, setPoolMany: (n) => `Set the pool for these ${n}`, setPoolManyPrompt: (n) => `Set the pool of the ${n} accounts shown.\nWrite: =5 → ¥5 left each; total=20 → a ¥20 pool each; +3 / -2 → ¥3 more / ¥2 less each. Members are not touched.`, setPoolManyConfirm: (w, n) => `"${w}" for ${n} accounts?`, setPoolDone: (n) => `${n} pool(s) set.`, poolBad: "Not understood. Write =5, total=20, +3 or -2.", poolLine: (g, l, n, b) => `pool ${g}${l === null ? "" : ` (${l} left)`} · ${n} invited${b ? " · took the early co-creation bonus" : ""}`, invitedBy: "invited by", disable: "Disable", enable: "Enable", makeMember: "Make member", unmakeMember: "Unmake member",
     memberConfirm: (who) => `Make ${who} a member? Members have no allowance limit; you pay their bill.`, listedNote: "on the server's list; edit ALLOWED_IDENTIFIERS to remove",
     disableConfirm: (who) => `Disable ${who}? Every device of theirs drops at once and cannot sign in again.`, remove: "Delete account",
     removeConfirm: (who) => `Delete the account, keys, usage and devices of ${who}? This cannot be undone.`, hasPassword: "has a password", noPassword: "no password", identifierNote: "decrypted for this view only",
     allowed: "Members (no cap)", allowedNone: "(none)", sender: "Code sender", models: "Models", prices: "Prices (¥)", rate: "Rate", rateLine: (r) => `1 USD = ${r} CNY (display only)`,
     perMinute: (n) => (n > 0 ? `${n} a minute` : "no rate limit"), capLine: (c, u, b) => (c > 0 ? `¥${c} (≈ $${u}) in all for non-members · +¥${b} an invite, to both sides` : "no spend limit"), signupOpen: "sign-up open", signupClosed: "members only",
     realtime: "Real-time calls", on: "on", off: "off", pwMin: (n) => `passwords ≥ ${n} chars`,
+    rtTitle: "Allowance (in force at once)", rtNote: "Change it here and every client follows at once — new sign-ups get the new allowance, and the account pages, the sign-in pages and the used-up notice all read the server's figures; no release, nothing for anyone to do. Empty puts the environment's value back. A lower figure only changes what new accounts get; nothing is taken from anyone's pool.",
+    rtAllowance: "Free allowance for each new account (¥)", rtBonus: "Invite bonus (¥, to both sides)", rtSignup: "Sign-up open", rtSignupOff: "Closed, only members and the list may sign in; whoever is signed in is unaffected.",
+    rtEnv: (v) => `environment: ${v}`, rtSet: "set here", rtSave: "Save", rtSaved: "Saved and in force.", rtApply: (n) => `Bring ${n} older account${n === 1 ? "" : "s"} up to the current allowance`, rtApplyNone: "Every account has at least the current allowance.",
+    rtApplyConfirm: (n, c) => `Top up the ${n} account(s) that were given less than ¥${c}? Each gets a ledger line saying so.`, rtApplied: (n) => `${n} account(s) topped up.`,
+    rtCreditAll: "Credit everyone", rtCreditAllPrompt: "How many yuan into every limited account's pool? Negative takes away. (a holiday, an apology; members left out)", rtSetAll: "Set everyone's pool", rtSetAllPrompt: (n) => `Set the pool of all ${n} limited accounts.\nWrite: =5 → ¥5 left each; total=20 → a ¥20 pool each; +3 / -2 → ¥3 more / ¥2 less each.`, rtCreditAllConfirm: (c, n) => `¥${c} to each of ${n} accounts?`, rtCredited: (n) => `${n} account(s) credited.`,
     priceLine: (p) => [p.per_m_input || p.per_m_output ? `${p.per_m_input} in / ${p.per_m_output} out per M tokens` : null,
       p.per_image ? `${p.per_image} a picture${p.per_image_2k ? ` (${p.per_image_2k} at 2k)` : ""}` : null, p.per_second ? `${p.per_second} a second` : null].filter(Boolean).join("; "),
     foot: "A phone number or address is decrypted only when you open that account, with the admin token; the database holds ciphertext. Network addresses and the client are recorded with every sign-in, request and event, and go when the account is deleted. The text of a chat is kept only while the account has “Help improve nanoMuse's AI models” on, and only what the person wrote, what the model answered and the tools it called (see Data controls). Do not share screenshots of this page. Money is estimated at the provider's Beijing list prices.",
@@ -611,11 +624,42 @@
     try { await api("POST", "/v1/admin/grant", { account_id: a.id, tokens: n }); } catch (e) { alert(e.message); }
     await Promise.all([load(), detail ? openAccount(a.id) : null]);
   }
+  /** "=5" → what is left; "total=20" / "总额=20" → the lifetime pool; "+3" / "-2" → a difference. */
+  function parsePool(v) {
+    const s = String(v || "").replace(/[\s,¥]/g, "").toLowerCase();
+    let m;
+    if ((m = /^(?:total|pool|总额|总额度)=(\d+(?:\.\d+)?)$/.exec(s))) return { grant_cny: parseFloat(m[1]) };
+    if ((m = /^(?:=|left=|剩=|剩余=)(\d+(?:\.\d+)?)$/.exec(s))) return { left_cny: parseFloat(m[1]) };
+    if ((m = /^([+-])(\d+(?:\.\d+)?)$/.exec(s))) { const d = parseFloat(m[2]) * (m[1] === "-" ? -1 : 1); return d ? { delta_cny: d } : null; }
+    return null;
+  }
+  const poolWords = (c) => c.left_cny !== undefined ? `= ¥${c.left_cny}` : c.grant_cny !== undefined ? `${zh ? "总额" : "total"} ¥${c.grant_cny}` : `${c.delta_cny > 0 ? "+" : "−"}¥${Math.abs(c.delta_cny)}`;
+  async function doSetPool(a) {
+    const v = prompt(T.setPoolPrompt(who(a), money(a.left_cny || 0)), "=5");
+    if (v === null) return;
+    const change = parsePool(v);
+    if (!change) { alert(T.poolBad); return; }
+    const note = prompt(T.creditNote, "") || "";
+    try { await api("POST", "/v1/admin/pool", { account_id: a.id, ...change, note }); } catch (e) { alert(e.message); }
+    await Promise.all([load(), detail ? openAccount(a.id) : null]);
+  }
+  async function doSetPoolMany(list) {
+    const ids = list.filter((a) => !a.member).map((a) => a.id);
+    if (!ids.length) return;
+    const v = prompt(T.setPoolManyPrompt(ids.length), "=5");
+    if (v === null) return;
+    const change = parsePool(v);
+    if (!change) { alert(T.poolBad); return; }
+    if (!confirm(T.setPoolManyConfirm(poolWords(change), ids.length))) return;
+    const note = prompt(T.creditNote, "") || "";
+    try { const r = await api("POST", "/v1/admin/pool/batch", { account_ids: ids, ...change, note }); alert(T.setPoolDone(r.accounts)); } catch (e) { alert(e.message); }
+    await load();
+  }
   async function doCredit(a) {
     const v = prompt(T.creditPrompt(who(a)), "5");
     if (v === null) return;
     const cny = parseFloat(v.replace(/[\s,¥]/g, ""));
-    if (!Number.isFinite(cny) || cny <= 0) return;
+    if (!Number.isFinite(cny) || cny === 0) return;
     const note = prompt(T.creditNote, "") || "";
     try { await api("POST", "/v1/admin/credit", { account_id: a.id, cny, note }); } catch (e) { alert(e.message); }
     await Promise.all([load(), detail ? openAccount(a.id) : null]);
@@ -712,6 +756,18 @@
     box.append(...[rows.length ? body : h("div", { class: "empty" }, T.none), total ? foot : null].filter(Boolean));
     return box;
   }
+  // the pills next to a menu model's id: its kind, then (0.17) the lane(s) a chat model is
+  // for — "chat", "hands" — with the one it is the default pick in marked as such
+  function modelPills(id, s) {
+    const kinds = s.model_kinds || {}, lanes = (s.model_lanes || {})[id] || [], picks = (s.recommended_for || {})[id] || [];
+    const tone = { chat: "blue", image: "violet", video: "cyan", realtime: "ok" }[kinds[id]] || "";
+    const out = [h("span", { class: "pill " + tone, style: "margin-right:6px" }, T.kinds[kinds[id]] || kinds[id] || "")];
+    for (const lane of lanes) {
+      const name = T.lanes[lane] || lane, picked = picks.includes(lane);
+      out.push(h("span", { class: picked ? "pill ok" : "pill", style: "margin-right:6px", title: picked ? T.laneDefaultTitle(name) : T.laneTitle(name) }, picked ? T.laneDefault(name) : name));
+    }
+    return out;
+  }
   function drawDrawer() {
     const box = drawerEl.firstChild;
     if (address) { drawAddress(box); return; }
@@ -745,6 +801,7 @@
         h("div", { class: "acts" },
           s.unlimited ? null : h("button", { class: "btn quiet", onclick: () => doGrant(a) }, T.grant),
           h("button", { class: "btn quiet", onclick: () => doCredit(a) }, T.credit),
+          a.member ? null : h("button", { class: "btn quiet", onclick: () => doSetPool(a) }, T.setPool),
           a.listed ? null : h("button", { class: "btn quiet", onclick: () => doMember(a) }, a.unlimited ? T.unmakeMember : T.makeMember),
           h("button", { class: "btn quiet", onclick: () => doDisable(a) }, a.disabled ? T.enable : T.disable),
           h("button", { class: "btn danger", onclick: () => doDelete(a) }, T.remove))),
@@ -908,7 +965,8 @@
       select(T.fSort, f.sort, Object.entries(T.sortBy), (v) => setPeople({ sort: v })),
       active ? h("button", { class: "chip", onclick: () => { params = new URLSearchParams(); history.replaceState(null, "", "#people"); draw(); } }, `${T.fClear} (${active})`) : null,
       h("span", { class: "cnt" }, T.fCount(shown.length, list.length)),
-      shown.length ? h("button", { class: "btn quiet sm", title: T.csvNote, onclick: () => exportCsv(shown) }, T.exportCsv) : null);
+      shown.length ? h("button", { class: "btn quiet sm", title: T.csvNote, onclick: () => exportCsv(shown) }, T.exportCsv) : null,
+      shown.some((a) => !a.member) ? h("button", { class: "btn quiet sm", onclick: () => doSetPoolMany(shown) }, T.setPoolMany(shown.filter((a) => !a.member).length)) : null);
 
     // the charts, each a filter
     const byAct = ["today", "7d", "30d", "older", "never"].map((k, i) => ({ label: T.act[k], value: shown.filter((a) => activityOf(a) === k).length, tone: ["ok", "blue", "cyan", "grey", "warn"][i], on: f.activity === k, onclick: () => toggle("activity", k, f.activity) }));
@@ -1061,7 +1119,7 @@
           modelRows(models, rate, kinds)),
         h("div", { class: "panel" }, h("h2", {}, T.mTop, h("span", { class: "fine" }, ` · ${T.period(days)}`)), h("div", { class: "pad" }, hranks(top, { format: money }))),
         h("div", { class: "panel" }, h("h2", {}, T.mPrices, h("span", { class: "fine" }, ` · ${T.rateLine(rate)}`)), h("div", { class: "kv" },
-          ...Object.entries(s.prices || {}).flatMap(([id, p]) => [h("b", {}, h("span", { class: "pill " + ({ chat: "blue", image: "violet", video: "cyan", realtime: "ok" }[kinds[id]] || "") }, T.kinds[kinds[id]] || kinds[id] || "")), h("span", {}, h("code", {}, id), " ", T.priceLine(p))])))),
+          ...Object.entries(s.prices || {}).flatMap(([id, p]) => [h("b", {}, ...modelPills(id, s)), h("span", {}, h("code", {}, id), " ", T.priceLine(p))])))),
     ];
   }
   function activityView() {
@@ -1141,16 +1199,80 @@
       h("p", { class: "foot" }, T.hNote),
     ];
   }
+  // ── runtime settings (relay 0.15): the allowance, the invite bonus, sign-up ──
+  // Drafts live here between redraws (every answer redraws the page); a save
+  // posts only the fields that were touched, "" meaning back to the environment.
+  const RT_DRAFT = {};
+  let rtMsg = "", rtBusy = false;
+  async function rtSave() {
+    const body = {};
+    for (const key of ["allowance_cny", "invite_bonus_cny", "signup_open"]) if (key in RT_DRAFT) body[key] = RT_DRAFT[key] === "" ? null : RT_DRAFT[key];
+    if (!Object.keys(body).length) return;
+    rtBusy = true; rtMsg = ""; draw();
+    try { await api("POST", "/v1/admin/settings", body); for (const k of Object.keys(RT_DRAFT)) delete RT_DRAFT[k]; rtMsg = T.rtSaved; } catch (e) { rtMsg = e.message; }
+    rtBusy = false;
+    await load();
+  }
+  async function rtApply(n, cny) {
+    if (!confirm(T.rtApplyConfirm(n, cny))) return;
+    try { const r = await api("POST", "/v1/admin/allowance/apply"); rtMsg = T.rtApplied(r.accounts); } catch (e) { rtMsg = e.message; }
+    await load();
+  }
+  async function rtCreditAll(limitedCount) {
+    const v = prompt(T.rtCreditAllPrompt, "2");
+    if (v === null) return;
+    const cny = parseFloat(v.replace(/[\s,¥]/g, ""));
+    if (!Number.isFinite(cny) || cny === 0) return;
+    if (!confirm(T.rtCreditAllConfirm(cny, limitedCount))) return;
+    const note = prompt(T.creditNote, "") || "";
+    try { const r = await api("POST", "/v1/admin/credit-all", { cny, note }); rtMsg = T.rtCredited(r.accounts); } catch (e) { rtMsg = e.message; }
+    await load();
+  }
+  async function rtSetAll(limitedCount) {
+    const v = prompt(T.rtSetAllPrompt(limitedCount), "=5");
+    if (v === null) return;
+    const change = parsePool(v);
+    if (!change) { rtMsg = T.poolBad; draw(); return; }
+    if (!confirm(T.setPoolManyConfirm(poolWords(change), limitedCount))) return;
+    const note = prompt(T.creditNote, "") || "";
+    try { const r = await api("POST", "/v1/admin/pool/batch", { all: true, ...change, note }); rtMsg = T.setPoolDone(r.accounts); } catch (e) { rtMsg = e.message; }
+    await load();
+  }
+  function runtimePanel() {
+    const rt = settings().runtime || { values: {}, env: {}, overridden: {}, below_allowance: 0 };
+    const v = rt.values || {}, env = rt.env || {}, set = rt.overridden || {};
+    const c = ov.accounts || {};
+    const limited = Math.max(0, Number(c.total || 0) - Number(c.unlimited || 0) - Number(c.disabled || 0));
+    const note = (key) => h("span", { class: "fine" }, (set[key] ? T.rtSet + " · " : "") + T.rtEnv(typeof env[key] === "boolean" ? (env[key] ? T.on : T.off) : env[key]));
+    const num = (key, label) => [h("b", {}, label), h("span", { class: "rt" },
+      h("input", { type: "number", step: "0.5", min: "0", "data-focus": "rt-" + key, value: key in RT_DRAFT ? RT_DRAFT[key] : (v[key] ?? ""), oninput: (e) => { RT_DRAFT[key] = e.target.value; } }), note(key))];
+    const on = "signup_open" in RT_DRAFT ? RT_DRAFT.signup_open : !!v.signup_open;
+    const dirty = Object.keys(RT_DRAFT).length > 0;
+    return h("div", { class: "panel" }, h("h2", {}, T.rtTitle, h("span", { class: "sp" }), h("button", { class: "btn sm", disabled: dirty && !rtBusy ? null : "", onclick: rtSave }, T.rtSave)),
+      h("div", { class: "fine", style: "padding:12px 16px 0" }, T.rtNote),
+      h("div", { class: "kv" },
+        ...num("allowance_cny", T.rtAllowance),
+        ...num("invite_bonus_cny", T.rtBonus),
+        h("b", {}, T.rtSignup), h("span", { class: "rt" }, h("label", { class: "sw" }, h("input", { type: "checkbox", checked: on ? "" : null, onchange: (e) => { RT_DRAFT.signup_open = e.target.checked; draw(); } }), " ", on ? T.on : T.off), note("signup_open"), h("span", { class: "fine" }, T.rtSignupOff))),
+      h("div", { class: "acts", style: "padding:0 16px 12px; display:flex; gap:8px; flex-wrap:wrap; align-items:center" },
+        Number(v.allowance_cny) > 0 && rt.below_allowance > 0
+          ? h("button", { class: "btn quiet sm", onclick: () => rtApply(rt.below_allowance, v.allowance_cny) }, T.rtApply(rt.below_allowance))
+          : h("span", { class: "fine" }, T.rtApplyNone),
+        h("button", { class: "btn quiet sm", onclick: () => rtCreditAll(limited) }, T.rtCreditAll),
+        h("button", { class: "btn quiet sm", onclick: () => rtSetAll(limited) }, T.rtSetAll),
+        rtMsg ? h("span", { class: "fine" }, rtMsg) : null));
+  }
   function settingsView() {
-    const s = settings(), rate = Number(s.usd_cny || 0), kinds = s.model_kinds || {};
+    const s = settings(), rate = Number(s.usd_cny || 0);
     return [
+      runtimePanel(),
       h("div", { class: "panel" }, h("h2", {}, T.config),
         h("div", { class: "kv" },
           h("b", {}, T.kAccounts), h("span", {}, `${s.signup_open ? T.signupOpen : T.signupClosed} · ${T.capLine(s.allowance_cny, s.allowance_usd, s.invite_bonus_cny)} · ${T.perMinute(s.per_minute_requests)} · ${T.pwMin(s.password_min_len || 8)}`),
           h("b", {}, T.realtime), h("span", {}, s.realtime_enabled ? T.on : T.off),
           h("b", {}, T.allowed), h("code", {}, (s.allowed_identifiers || []).join(", ") || T.allowedNone),
           h("b", {}, T.rate), h("span", {}, T.rateLine(rate)),
-          h("b", {}, T.prices), h("span", {}, ...Object.entries(s.prices || {}).map(([id, p]) => h("div", {}, h("span", { class: "pill " + ({ chat: "blue", image: "violet", video: "cyan", realtime: "ok" }[kinds[id]] || ""), style: "margin-right:6px" }, T.kinds[kinds[id]] || kinds[id] || ""), h("code", {}, id), " ", T.priceLine(p)))),
+          h("b", {}, T.prices), h("span", {}, ...Object.entries(s.prices || {}).map(([id, p]) => h("div", {}, ...modelPills(id, s), h("code", {}, id), " ", T.priceLine(p)))),
           h("b", {}, T.sender), h("span", {}, s.sender || "log"),
           h("b", {}, T.version), h("span", {}, ov.version || ""))),
       h("div", { class: "panel" }, h("h2", {}, T.recorded), h("div", { class: "fine", style: "padding:12px 16px" }, T.recordedNote)),

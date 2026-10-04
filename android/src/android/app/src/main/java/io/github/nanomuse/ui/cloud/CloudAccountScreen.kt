@@ -250,6 +250,19 @@ fun CloudAccountScreen(
                     )
                 }
 
+                // -- the ask for a star, the first time this page is seen signed in: the
+                // allowance was just claimed. Once on a phone; gone for good after either button.
+                var starAsk by remember { mutableStateOf(io.github.nanomuse.community.StarPrompt.due(context, io.github.nanomuse.community.StarPrompt.Moment.SIGNED_IN)) }
+                if (starAsk) {
+                    LaunchedEffect(Unit) { io.github.nanomuse.community.StarPrompt.markShown(context, io.github.nanomuse.community.StarPrompt.Moment.SIGNED_IN) }
+                    MuseGap()
+                    io.github.nanomuse.community.StarNudgeCard(
+                        text = stringResource(R.string.nm_star_signed_in),
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        onDone = { starAsk = false },
+                    )
+                }
+
                 // -- allowance ---------------------------------------------------------------
                 MuseGap()
                 MuseCard {
@@ -902,6 +915,7 @@ private fun eventLabel(kind: String): String = when (kind) {
     "invite.accepted" -> stringResource(R.string.nm_cloud_ev_invite_accepted)
     "invite.used" -> stringResource(R.string.nm_cloud_ev_invite_used)
     "credit.granted" -> stringResource(R.string.nm_cloud_ev_credit_granted)
+    "pool.set" -> stringResource(R.string.nm_cloud_ev_pool_set)
     "sign_in.code" -> stringResource(R.string.nm_cloud_ev_sign_in_code)
     "sign_in.password" -> stringResource(R.string.nm_cloud_ev_sign_in_password)
     "sign_in.failed" -> stringResource(R.string.nm_cloud_ev_sign_in_failed)

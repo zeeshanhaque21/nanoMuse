@@ -35,13 +35,19 @@ Permissions, Data controls with export and reset), the full-window first run. Th
 is dsh's — its agent loop, tools, skills, goals, plan mode, compaction, sub-agents, MCP
 — speaking as nanoMuse through the `nanomuse` preset, with:
 
-- **the account**: a phone number or an e-mail and a code (or a password) against
-  [nanoMuse Cloud](cloud.md); the key in dsh's credential store; the account's models as
-  the *nanoMuse Cloud* provider of the harness's own OpenAI-compatible adapter — nothing
-  of ours sits in the model path;
+- **the account**: a phone number or an e-mail and a code (or a password, with a friend's
+  invite code) against [nanoMuse Cloud](cloud.md); the key in dsh's credential store; the
+  account's models as the *nanoMuse Cloud* provider of the harness's own OpenAI-compatible
+  adapter — nothing of ours sits in the model path; Settings → Account is the whole account
+  as the phone has it — the pool in yuan with the ways on when it runs low, the invite code,
+  usage by kind and by model, the password, the devices holding a key, the timeline, deletion
+  — read through the host's pass-through routes (`/nanomuse/cloud/me`, `/sessions`,
+  `/account-events`, `/password`, `/sign-out-all`, `/delete-account`, `/config`);
 - **Hands** on this computer: `nanomuse mcp` from the bundled runtime over stdio, the
   runtime's `computer_screen` and `computer_act` tools with their approvals, so "what is
   on my screen?" and "open the settings and turn the volume down" work out of the box;
+  the connectors the runtime's `config.toml` turns on (mailbox, calendar, address book)
+  arrive over the same server, and Settings → Connectors shows how to set each one up;
 - **the rooms**: Feed, Ideas, Goals and Library as Muse has them, kept by the host in
   `nanomuse/rooms.json` and written by the agent in hidden chats (feed and ideas) or
   chats of their own (goals, with the harness's schedule plugin for their automations;
@@ -58,11 +64,18 @@ is dsh's — its agent loop, tools, skills, goals, plan mode, compaction, sub-ag
 `~/.nanomuse/desktop` (`NANOMUSE_DESKTOP_HOME` moves it) is the app's dsh home: the
 profile under `profiles/nanomuse` (the bundle list, the person's own `cordis.patch.yml`
 where Settings and the sign-in write the `nanoMuse Cloud` provider), dsh's credential
-store with the account key, the sessions, and `desktop.log` with the shell's and the
-Host's lines. A home kept by nanoMuse Harness 0.1.28–0.1.29 under `~/.nanomuse/harness`
+store with the account key, the sessions, `desktop.log` with the shell's and the Host's
+lines, and `port` — the loopback port the Host had last time, tried first on the next
+launch (then 38421, then any free one) so the window's origin, and with it everything
+the browser side keeps in that origin's storage, stays the same from launch to launch. A
+home kept by nanoMuse Harness 0.1.28–0.1.29 under `~/.nanomuse/harness`
 is taken over once. `NANOMUSE_CLOUD_URL` points the account at another relay;
 `NANOMUSE_PY` points the preset at another runtime for the hands. The CLI's own `~/.dsh`
-is not touched.
+is not touched. `nanomuse/hands.json` under the home (mode 0600) is the hands model the
+person picked in Settings → nanoMuse Cloud — provider, model, base URL and the account's token
+— read by the preset into the runtime's `NANOMUSE_GUI_*` environment at the next start,
+and removed on sign-out; `nanomuse/rooms.json` keeps the rooms (feed, goals with their
+steps and progress, which ideas were tried, the library index, memory).
 
 ## macOS signing
 

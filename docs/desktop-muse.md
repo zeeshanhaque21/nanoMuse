@@ -68,11 +68,16 @@ stylesheet over the harness's stable DOM hooks (`data-composer-card`,
 ## The first run
 
 **Muse.** Sign in (a phone number, an SMS code — "sign in or create an account"), a
-loading page, then a carousel asking to allow the agent to use the computer: one card
-per permission (accessibility for clicking and typing; screen recording for
-screenshots), each with an *Allow* button, fine print, *Skip*.
+loading page, then three full-window pages with ‹ › top right and a dots pager: *Allow
+Muse to use your computer?* (accessibility for clicking and typing; screen recording
+for screenshots — each row with an *Allow* button that becomes a green check, fine
+print, *Skip* under the card that turns into a blue *Continue* once both are allowed),
+*Allow Muse to access your files and local apps?* (a *Full Disk Access* status pill, a
+list of local apps each with a read-only/… dropdown, *Continue*), *Turn on voice input*
+(the microphone, *Allow*, *Skip*). Then the main window with the agent's introduction in
+the chat, a card to pick its name, and a connector recommendation.
 
-**nanoMuse on dsh.** The same sheets, full-window, in the harness's `settings.onboarding`
+**nanoMuse on dsh.** The same pages, full-window, in the harness's `settings.onboarding`
 seat (we take the shipped step's id, so a fresh install meets the agent instead of being
 asked for a DeepSeek key):
 
@@ -84,21 +89,35 @@ asked for a DeepSeek key):
 3. **Enter your code** — *A code was sent to …* with *Resend*, six code boxes that verify
    themselves on the sixth digit, *Next*, *Try another way* (a password, for accounts
    that set one: `/v1/auth/login`).
-4. A spinner while the account is adopted (models, name, face), then the **permissions
-   carousel**, ‹ › top right, *Continue* and *Skip* on each: **Allow nanoMuse to use
-   your computer?** on macOS only — *Accessibility* and *Screen recording* rows, each
-   with *Allow* that asks the system through the desktop shell and turns into a green
-   check as the system grants it (polled, and again when the window gets focus; the
-   shell can open the System Settings pane); **Allow nanoMuse to access your files?** —
-   the workspace folder, *Change* opens the native folder picker and creates the
-   workspace; **Your other devices** — this computer, the devices on the account that
-   are online, *Open* for the phone app otherwise.
-5. **nanoMuse is ready** — the face, a beat, and the window fades in.
+4. A spinner while the account is adopted (models, name, face), then the **three
+   pages**, ‹ › top right, dots under the card, *Skip* that becomes *Continue* once the
+   page is allowed: **Allow nanoMuse to use your computer?** — *Accessibility* and
+   *Screen Recording* rows, each with *Allow* that asks the system through the desktop
+   shell and turns into a green check as the system grants it (polled, and again when
+   the window gets focus or the page becomes visible — one hook, `permissions.ts`,
+   behind every place that shows a permission); once *Allow* has been pressed the
+   button reads *Open System Settings*, since a second press cannot bring the system's
+   dialog back. For *Screen Recording* the shell makes one capture attempt before it
+   opens the pane, so nanoMuse is on the pane's list, and when the permission is
+   granted while the app runs a notice says macOS applies it only to freshly started
+   apps, with *Restart now* (`relaunch` over the bridge). On Linux and Windows nothing
+   is gated and both rows are checks from the start. **Allow nanoMuse
+   to access your files?** — the working folder as a pill (*Change* opens the native
+   folder picker and creates the workspace) and the places the agent may touch under
+   the default permission preset (the working folder read and write; the home folder
+   and Downloads read, asking before a write). Muse's per-app dropdowns (Mail, Messages,
+   Notes) are macOS app data we do not read, so there is no such list. **Turn on voice
+   input** — the *Microphone* row, *Allow* through the shell (or the page's own prompt
+   in a plain browser).
+5. The overlay waits on the host's `rooms/kickoff`: the **main chat** is created on the
+   agent's own folder (`~/nanoMuse`, registered as a workspace so the composer is live),
+   the introduction is posted into it (`rooms/intro`: hello, three names to pick from or
+   one of your own through `ask_user_question`, `take_name`, a word about Settings →
+   Connectors, one small question) — once per install — and the window fades into it.
 
 The step completes itself when a model can already answer (the account, a key, a
-provider the person added) and does not show again. In a plain browser (dsh without the
-shell) the computer card is left out: there is no bridge to the system there, and Hands
-on Linux and Windows need no permission.
+provider the person added) and does not show again; Help & support → *See the first run
+again* reopens the pages on purpose (the kickoff does not repeat).
 
 ## The profile and the face
 
@@ -107,14 +126,19 @@ pen (*change avatar* / *edit name*), tabs for the profile, the approval log (wha
 allowed, when, "allowed for this task" / "always allowed"), activity, more. A new face
 is drawn in the chat: four candidates in a grid, pick one, the agent confirms in words.
 
-**nanoMuse on dsh.** The face at the top opens the same panel, 310 px on the right,
-beside the chat (the chat makes room; × or Escape closes it): the avatar at 86 px with a
-pen — *Change look* (the dragon, or an emoji on a colour, written to the account and
-worn on every device) and *Edit name* — the name, *Connected* / *Not signed in* /
-*Offline*, and a segmented control of four tabs: **Activity** (the sessions and the
-hub's notices, *Today* and *Earlier*), **Approvals** (what you allowed or rejected on
-the approval cards, with when; kept on this computer), **Schedule** (opens the harness's
-schedules panel), **Memory** — what the agent remembers about you, one line each: a
+**nanoMuse on dsh.** The face at the top opens the agent's page — the phone's
+`AgentProfileScreen`, 310 px on the right beside the chat (the chat makes room; × or
+Escape closes it): the avatar at 86 px with a pen — **Change avatar** puts the phone's
+words in the composer ("Change your avatar to …", the chat flow below), **Edit name**,
+**Avatar studio…** (the dragon, an emoji on a colour, or a drawn face, written to the
+account and worn on every device) — the name, *online* / *Not signed in* / *Offline* or
+what the agent is doing right now, a share button (a card with the face and the name, as
+a picture to save or copy), and a segmented control of four tabs: **Activity** (the
+sessions and the hub's notices, *Today* and *Earlier*), **Approvals** (the per-app
+*Always allow* grants with **Revoke**, *Manage permissions* → Settings → Computer use,
+then what you allowed or rejected on the approval cards, with when; kept on this
+computer), **Daily** (the routines; *Manage routines* opens the harness's schedules
+panel), **Soul & memory** — what the agent remembers about you, one line each: a
 field to add one, × to forget one, *Import memory* (Muse's sheet: paste what another
 assistant knew, one line per memory), and the agent's description when the account has
 one. The agent writes memory itself with the `remember` tool when you tell it something
@@ -128,9 +152,29 @@ every device of the account. The pictures come from the account's image model th
 the relay (`/v1/images/generations`, `/v1/images/edits`), the browser squares each
 still to 512 px WebP, and the host writes the face to the account (`PUT /v1/me/profile`
 with the `face` map) and pulls it back under `faces/<id>/`. The prompts are the
-runtime's, so a face drawn on the phone or here comes out alike. Asked in a chat
-("change your avatar to an orange cat with a scarf"), the agent opens the studio with
-the words (`draw_new_look`) rather than drawing by itself.
+runtime's, so a face drawn on the phone or here comes out alike.
+
+**A new look from the chat** is the phone's `AvatarFlow`, word for word: "change your
+avatar to an orange cat with a scarf", "把你的形象换成一只橘猫", "become a robot" (the
+same regular expressions, `src/avatar-flow.ts`) are caught before they are sent; a card
+above the composer says what four pictures will cost against today's allowance (the
+phone's `FaceCostDialog`), *Draw* brings the four candidates up numbered in a 2×2 grid,
+and you pick by clicking or in words — "the second one", "第三个", "regenerate" — then
+*Finalizing* draws the other poses, the look goes on for every device, *Share avatar*
+offers the card. Once it is on, the host leaves the phone's memory line (`- <date>: the
+user changed my avatar to "…"`) and asks the agent to say so in one sentence and write
+the `nanomuse-avatar` fence, which the chat shows as a small card with the new face. The
+agent's own `draw_new_look` still opens the studio for anything it wants to propose.
+
+**The face moves.** Muse's avatar is animated per state; here the dragon's four states
+(idle, working, waiting, happy) are the phone app's short clips
+(`assets/dragon-<state>.mp4`), played silently in a loop wherever the face is 44 px or
+larger — the header, the profile panel, the stage's cursor marker — with the still as
+the poster, and the still alone below that size, when the system asks for reduced
+motion, or where a list wants a quiet picture. A drawn face has stills only (the relay
+keeps WebP, not video), so it and an emoji move the way CSS can: a slow breath while
+idle, a sway while the agent works, a small hop when it waits for you. The faces route
+(`/face/<id>/<state>.webp|mp4`) serves a clip when a profile ever brings one.
 
 ## Computer use
 
@@ -144,16 +188,45 @@ with *Allow (this task)*, *Always allow*, *Deny*.
 MCP, so what the model sees is the screenshot it asked for and the status chip says
 *Hands · step N · click "Save"* while it works. The harness's approval card is restyled
 into Muse's permission card — a shield, the headline, the detail, *Allow once* in blue
-first and *Reject* in grey — and every answer is written to the profile panel's
+first and *Reject* in grey — and every answer is written to the agent page's
 *Approvals* tab; the Sentinel's reasons ([sentinel.md](sentinel.md)) are in the
-headline. dsh decides *once* or *rejected*; the standing answer is its permission mode
-(General → the default for new chats). Settings → **Computer use** shows the two macOS
-permissions with *Allow* and *Open System Settings* (through the desktop shell), *Keep
-the screen awake while it works* (the shell holds a power-save blocker while a session
-runs) and the note that anything that sends, pays or deletes is asked first.
+headline. The same question is on the **stage** while the hands work — *Allow once*,
+*Always in <app>* (for the hands' tools; the app is the window title's first part), *Deny*
+(the host's `ApprovalDesk` sits first in the `approval/request` waterfall and answers
+for the card) — and on the **capsule**, a small always-on-top window the shell shows
+when the nanoMuse window is not in front, so you can answer from wherever you are.
+*Always in <app>* writes a `computer_app:<app>` grant: the hands' tools in that app are
+allowed without asking until you revoke the grant, on the agent page or under Settings →
+Computer use → *Always allowed*. Settings → **Computer use** shows the two macOS
+permissions with *Allow* and *Open System Settings* (through the desktop shell; the
+first time the hands are about to start, the shell asks for them in order with a word on
+why, the phone's and Codex's way — Accessibility, then Screen Recording for **both**
+nanoMuse Desktop and the bundled `nanomuse` runtime, which is the binary that captures
+and clicks), *Keep the screen awake while it works* (the shell holds a power-save
+blocker while a session runs) and the note that anything that sends, pays or deletes is
+asked first.
 
-**The live stage** is Muse's, picture-in-picture over the chat (bottom right, 400 px):
-the latest screenshot the agent took, dimmed while it works, × top-left to put it away,
+**Holds — whose turn it is.** When the agent needs you (a password, a captcha, a choice
+it should not make) it calls `computer_act` with `action: "hand_over"` and a `reason`;
+the host opens a *hold* (contract C1: `{type:"hold", tool:"computer", status:"on",
+by:"agent", reason}`), the stage says **Your turn — <reason> — Done**, the capsule says
+it outside the window, and the tool call waits (up to ten minutes) until you press
+**Done**. **I'll take it** on the stage opens a hold yourself (`POST
+/nanomuse/cloud/holds`) so the agent pauses before its next hands call while you use the
+mouse; *Done* resumes. Questions keep *Open*. Stop (the square) still cancels the turn.
+
+**The glow.** While the hands run, the shell puts a transparent, click-through,
+always-on-top window over the whole display (UI-TARS's ScreenMarker): a slow animated
+gradient along the edge — amber while a hold is on — and the agent's face as a small
+cursor sprite where the hands last pointed, with the step's words under it. It cannot
+take focus or a click, it is gone 400 ms after the hands stop, and it, the capsule and
+the nanoMuse window itself while the hands run all have `setContentProtection(true)`,
+so none of them is in the screenshots the runtime takes.
+
+**The live stage** is Muse's, picture-in-picture over the chat (bottom right and 400 px
+to begin with; drag it anywhere, resize it from the bottom-right corner, and the place
+is remembered in `prefs.stage` and kept inside the window): the latest screenshot the
+agent took, dimmed while it works, × top-left to put it away,
 *Expand* top-right (the frame in a sheet), a **Take over** pill while a step runs (it
 cancels the session's turn — the agent lets go, your mouse is yours), a caption bottom-
 left — *looking at the screen · nanoMuse*, *clicked "Save" · Finder*, *typed "hello" ·
@@ -180,26 +253,84 @@ import memory, download your data, reset) · Help · Legal · Sign out.
 **nanoMuse on dsh.** The same shape, from the harness's `sidebar.settings` seat with its
 stock General plugin switched off in the bundle layer:
 
-- **General** — the harness's own rows (permission presets, language, appearance, font
-  size, shortcuts, developer tools…) mount in our page through the `settings.general.item`
-  seat, then *About*: nanoMuse, built on DeepSeek Harness, the bundle's version, the
-  licence; **App behavior** when the desktop shell is there — *Open at login* (a login
-  item; a freedesktop autostart entry on Linux), *Show in the menu bar* / *system tray*
-  (an icon with *Open nanoMuse*, *New chat*, *Quit*), *Quick chat with ⌥ Space*
-  (Ctrl+Alt+Space elsewhere: the window comes up with a fresh chat and the composer
-  focused; pressed while it is in front, it steps aside) — kept in `desktop.json` under
-  the app's home; and *Developer*: *Show DeepSeek Harness controls* (the model picker,
-  the modes, the workspace browser in place of the chats column).
-- **Account** — the nanoMuse account: sign in or the masked identifier, the allowance,
-  the look, the models, *Open Devices*.
-- **Models**, **Agents** — the harness's pages, unchanged.
-- **Connectors** — what the agent can reach from a chat: the built-ins (Hands on this
-  computer — on when the runtime answered, with the reason when it did not; Reach, with
-  how many devices; the rooms' tools; Schedule) and the **MCP servers** behind the
-  preset's tools, each with its tool list (`mcp__<server>__<tool>` read through an
-  agent's view of the registry once a chat has run), *Add a connector* (opens the agent
-  preset, where an MCP server is one row of `@deepseek-ai/dsh-mcp-client`) and the
-  harness's MCP docs.
+- **General** — in Muse's order: the **account card** (the masked identifier or *Sign
+  in*, opening the Account page), **Usage** (the plan and its bar — *Member* /
+  *Unlimited*, or the free allowance with what is left and *Upgrade*), **Language** (the
+  harness's own row in our card), **Appearance** (the harness's light / dark / system
+  switch and Muse's ten **theme colours** as swatches — the accent of the whole app,
+  kept on the agent's profile), **App behavior** when the desktop shell is there —
+  *Open at login* (a login item; a freedesktop autostart entry on Linux), *Show in the
+  menu bar* / *system tray* (an icon with *Open nanoMuse*, *New chat*, *Quit*), *Quick
+  chat with ⌥ Space* (Ctrl+Alt+Space elsewhere: the window comes up with a fresh chat
+  and the composer focused; pressed while it is in front, it steps aside) — kept in
+  `desktop.json` under the app's home; **Shortcuts** (*Quick Chat* with its combination —
+  *Change* records the next one you press, Esc cancels, *Default* puts the platform's back,
+  and a line says so when another app already holds it — and the keyboard reference); **About** (nanoMuse, built on DeepSeek Harness, the bundle's version, the
+  licence, *Check for updates* → the releases page); and *Developer*: *Show DeepSeek
+  Harness controls* (the model picker, the modes, the workspace browser in place of the
+  chats column). The harness's other rows (permission presets, font size, link opening,
+  Enter to send, performance, session log) live under *Advanced → Harness*.
+- **Account** (under *Advanced*) — the nanoMuse account: sign in or the masked
+  identifier, the allowance, the look, the models, *Open Devices*.
+- **Models**, **Agents** — the harness's pages, unchanged, under *Advanced*.
+- **Connectors** — Muse's catalogue shape: a search field, category chips (*All*,
+  *Built in*, *Work*, *Talk*, *Files*, *Developer*, *Data*, *Design*, *Money*,
+  *Search*, *Infrastructure*…), **Connected** rows first and then the catalogue, each row
+  with the service's brand mark on a white tile (the marks are
+  [simple-icons](https://simpleicons.org/), CC0, written into
+  `src/client/brand-marks.ts` by `scripts/brand-marks.mjs`; a letter tile where there is
+  none) and *Connect* at the
+  end; a detail per connector with what it can do — its tools as the server describes
+  them, **one switch per tool** — what gates it (the permission preset, the Sentinel for
+  the hands and the mailbox), the vendor's documentation, and *Disconnect* (asked
+  twice). Three kinds of row:
+  - **Built in** is what the agent can really reach: *Hands — this computer* (on when
+    the runtime answered, with the reason when it did not), *Mailbox*, *Calendar*,
+    *Address book* (the runtime's connectors, on when their tools arrive through
+    `nanomuse mcp`), *Reach — your other devices*, *Web*, *Files*, *Terminal*, the
+    rooms, *Schedule*. *Connect* on the mailbox, the calendar or the address book opens a
+    **consent sheet** in Muse's manner — what the agent gets, who decides, where the
+    credentials live — followed by the steps (`nanomuse vault set …`, the `config.toml`
+    lines, restart) with copy buttons; there is no sign-in button on purpose, the
+    credentials stay in your own vault.
+  - **Services** — the catalogue (`src/connectors-catalogue.ts`, seventy-five remote
+    MCP servers: Notion, Linear, Atlassian, Asana, GitHub, GitLab, Sentry, Vercel,
+    Cloudflare, Supabase, Stripe, PayPal, QuickBooks, Figma, Miro, Canva, Dropbox, Box,
+    Hugging Face, DeepWiki…), each
+    with its address and how it lets a client in. *Connect* asks the server itself
+    (`initialize`): an **open** server is connected at once; a server that speaks **MCP
+    authorization** opens the sign-in page in the system browser — protected-resource
+    and authorization-server metadata, dynamic client registration (RFC 7591), PKCE,
+    `resource` (RFC 8707), the loopback callback at `127.0.0.1:38417/oauth/callback`,
+    refresh before expiry — and the sheet waits with *Open again*, *Try again* and
+    *Start over* (a fresh registration, for a server that forgot ours); a server that
+    wants a **key** asks for it in a sheet that says where the vendor hands it out. A
+    service whose authorization server registers no clients (GitHub, Slack, Discord,
+    HubSpot, Render, Bitrise, PagerDuty, Box — `clientIdRequired` in the catalogue, and
+    any address that turns out that way) gets a sheet of its own: make an OAuth app at
+    the vendor's developer page (linked), give it our callback address (shown, copy
+    button), paste the client id and, if there is one, the secret; the id is kept like a
+    registration, so the next sign-in there does not ask. The
+    rows under the search field also search the public **MCP Registry**
+    (`registry.modelcontextprotocol.io`) once two characters are typed, and **Connect by
+    address** takes any Streamable HTTP URL, with a key or a pre-registered OAuth client
+    under *More options*. Credentials live in `$DSH_HOME/nanomuse/connectors.json`,
+    this computer only, and never reach the model: the agent's `dsh-mcp-client` is
+    pointed at a **loopback proxy** (`/c/<id>/mcp`, guarded by a secret header) that
+    adds the token or key, refreshes it, filters `tools/list` to the switched-on tools
+    and refuses `tools/call` on the rest; the tools appear as `mcp__<service>__<tool>`
+    and the preset row `nanomuse-connectors-tools` mounts one client per connection and
+    follows the page (connect, switch, disconnect — no restart). A connection whose
+    refresh is refused turns to *Needs sign-in* with *Sign in again*; a key is replaced
+    in place.
+  - **Preset** — every MCP server configured in the agent preset by hand
+    (`@deepseek-ai/dsh-mcp-client` rows), read-only here, with *Add a connector*
+    opening the preset.
+
+  What Muse has and this does not: the per-action permission dropdowns (ours is the
+  permission preset plus the tool switches), and services whose MCP server wants a
+  client registered with the vendor beforehand (Zapier, Heroku…) — those are in the
+  catalogue as *key* or *address* rows, not as a sign-in.
 - **Computer use** — the system permissions (macOS), keep awake, the risk note.
 - **File system access** — the folders the agent uses (home, the Library, Downloads,
   nanoMuse's own files; each opens in the file manager), the rules (reading anything you
@@ -214,6 +345,13 @@ stock General plugin switched off in the bundle layer:
   microphone, connectors, other devices with the remote-control state), each row opening
   the page with the switch; how it asks (the permission presets, from the chip above
   the composer); the recent approvals.
+- **Wallet**, **Secure storage**, **Message channels** — Muse's pages, with what is true
+  here: no payment method is held and nothing is bought from a chat (the agent stops at a
+  checkout and the usage lives under General); which files on this computer hold what
+  (the account's login, the agent's profile, the rooms and documents, the faces — each
+  with its path, *Show the folder*) and what is never kept (the system keychain, your
+  passwords); which channels reach the agent (this desktop, the browser, the invite link
+  when signed in, your other devices) and that no third-party messenger is wired in.
 - **Data controls** — *We take your privacy seriously* with the privacy policy, *Help
   improve nanoMuse's AI models* (the relay's switch, with how many turns it kept and
   *Delete*), as on every other app; then *On this computer*: **Import memory**,
@@ -255,15 +393,29 @@ serves `/nanomuse/rooms/*` and streams changes to the browser half:
   one, ♡ and **Discuss** (a side chat opened on the post). The sliders icon opens the
   instructions sheet; a dot on the rail marks posts newer than your last visit. The
   agent can also post from any chat with `feed_post`.
-- **Ideas** — suggestions in groups (*For you* first, then by theme), each a card with
-  what it includes, how it works and **Start now**, which opens a chat with the idea as
-  the brief; started ideas get a green check.
+- **Ideas** — the phone's curated list (`assets/ideas.{en,zh}.json`, the same 24 items
+  in six sections: Travel, Work, Everyday, Learning, Family & friends, More ideas), each
+  row an emoji, a first-person pitch and a line of detail; a row opens a sheet that says
+  what trying it creates — *Starts a conversation*, *Creates a routine · 08:00*,
+  *Creates a goal* — with **Send to chat** (the idea's words in the composer, for you to
+  finish), **Create routine** (a daily schedule at the idea's time in a chat of its own;
+  *Routine created — set the time and details*) or **Start goal** (the goal
+  conversation, seeded with the idea); tried ideas get a green check, ⋯ hides one.
 - **Goals** — *● Tracking* list with categories (health, relationships, money, career,
-  interests, productivity), *Create goal* in the category's words; each goal is a chat
-  of its own that the agent names and keeps a one-line status for (`goals_room_update`),
-  **In progress** automations from the harness's schedule plugin (the agent sets them up
-  in that chat; *Check in* runs one now), and a timeline grouped by day from the chat's
-  turns.
+  interests, productivity), the agent's one-line status, a progress bar once it has
+  reported one and a *Needs attention* flag. **Create goal › <category>** is the
+  phone's flow: "I'd like to create a Health goal." goes into the chat you are in (a
+  fresh one when it is busy) with the phone's shaping note; the agent asks at most three
+  short questions, one at a time — what, why and by when, how often to check — and then
+  writes one `nanomuse-goal` fence, which the chat shows as a *Goal created* card (title,
+  why, steps, *Checks daily at 09:00* / *every N hours*, *See in Goals*) and the host
+  turns into the goal: that chat becomes its home, and a check is scheduled there with
+  the harness's schedule plugin (*Time to check on this goal: …*, *First time round: …*).
+  Every check — and any turn where progress changed — ends with a `nanomuse-goal-update`
+  fence (`goal_id`, `progress`, `status` on_track / attention / done, `note`): a *Goal
+  update* card in the chat with the bar and the note, the goal's status, progress and
+  timeline updated; the agent may also call `goals_room_update`. *Type it out* in the
+  menu still creates a goal from your own words; *Check in* runs a check now.
 - **Library** — shelves (All, Documents, Web; Media: Images, Videos, Podcasts; System
   files at the foot), *Select*, *+ Create…* (a brief → a chat that writes the file under
   `~/nanoMuse/Library` — `构件` in Chinese — with the workspace-write preset), *Recent*
@@ -271,14 +423,19 @@ serves `/nanomuse/rooms/*` and streams changes to the browser half:
   *Open* / *Show in folder* for the rest. Everything the agent delivers with `present`
   lands here, and `library_add` lists a file without delivering it.
 
-Rooms need a model that answers; signed out, they say so. The hidden chats the feed and
-ideas write in are archived once parsed, so the chats column stays yours.
+Rooms need a model that answers; signed out, they say so. The hidden chat the feed is
+written in is archived once parsed, so the chats column stays yours. A `nanomuse-feed`
+fence the agent writes in any chat (the phone's way of posting) lands in the Feed too
+and shows as a *Posted to your feed* card.
 
 ## The hamburger
 
 **Muse.** Settings; report a bug (with a screenshot attached).
 
-**nanoMuse on dsh.** Settings (with its shortcut), Keyboard shortcuts, Schedules and
+**nanoMuse on dsh.** Settings (with its shortcut; a dot on it and on the ••• button
+when a newer release is out), **Update to 0.1.x** when there is one (opens the release
+page), **About nanoMuse** (the version line *nanoMuse Desktop <app> · harness <bundle>*,
+the licence, GitHub / Releases / Docs / Issues), Keyboard shortcuts, Schedules and
 the harness's other panels (Plugins and whatever else is installed), collapse / expand
 the chats column, *Report a problem* — under the desktop shell a screenshot of the
 window goes to Downloads and the GitHub issue page opens with the build's facts filled
@@ -293,6 +450,24 @@ nowhere else.
   desktop's status line counts it; *Reach* lets either side ask the other for something
   ([hub.md](hub.md)).
 - **Any model, your key.** The relay's models for members, a DeepSeek key, or any
-  OpenAI-compatible provider the harness supports.
+  OpenAI-compatible provider the harness supports. Settings → nanoMuse Cloud shows two rows:
+  the **chat model** (the relay's `/v1/models` entries marked `for: ["chat"]`, default
+  `deepseek-v4.1-flash`) and the **hands model** (`for: ["gui"]`, default
+  `qwen3.8-27b`); a DeepSeek entry is shown as sighted only when its id says `v4.1`,
+  `vision` or `ocr`. The hands model is written to `$DSH_HOME/nanomuse/hands.json`
+  (mode 0600) and the preset passes it to the runtime at the next start.
+- **Connectors on every device.** What you connected here (service, label, URL for a
+  custom MCP, how it signs in, which device) is published to the account's profile
+  (contract C3; never a token or a key — the host refuses any field named like one), so
+  the phone and the other computers list it under *On your other devices* with
+  **Connect**, and this computer lists theirs.
+- **Ways to get a model, by region.** With a Chinese UI, a phone sign-in or a relay
+  account in the mainland, the account page lists Bailian first and OpenRouter second;
+  elsewhere the other way round, each with *Get a key*.
+- **Updates.** Once a day, and on *Check for updates* in About, the host asks GitHub's
+  releases API — this fork's own releases, with an optional configured mirror as fallback —
+and compares versions; a
+  newer one shows as a dot, an *Update to 0.1.x* menu item and a *Download* button for
+  this platform's asset in About.
 - **Open source, no closed component.** The bundle is GPL-3.0-or-later; the harness is
   MIT and travels with its notice; the About row says so.

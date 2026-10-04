@@ -2,9 +2,11 @@ import { KeyRound, Loader2, MessageSquareText } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { useT } from "../i18n";
+import { isMainland } from "../region";
 import { cx } from "../util";
 import { markFirstSignIn } from "./FirstSignInSteps";
 import { inputCls, primaryBtn, secondaryBtn } from "./Form";
+import { useCloudConfig } from "./StarNudge";
 
 /**
  * Signing in to nanoMuse Cloud: a code sent to a mainland phone number (SMS) or an e-mail
@@ -55,6 +57,7 @@ export function SignIn({
   autoFocus?: boolean;
 }) {
   const t = useT();
+  const cfg = useCloudConfig();
   const [mode, setMode] = useState<"code" | "password">("code");
   const [identifier, setIdentifier] = useState("");
   const [code, setCode] = useState("");
@@ -155,7 +158,7 @@ export function SignIn({
         <ModeButton active={mode === "password"} onClick={() => setMode("password")} icon={<KeyRound size={14} />} label={t("With a password")} />
       </div>
       <div>
-        <label className="text-[12px] text-muted">{t("Mainland China phone number or e-mail")}</label>
+        <label className="text-[12px] text-muted">{isMainland() ? t("Mainland China phone number or e-mail") : t("E-mail (or a mainland China phone number)")}</label>
         <input
           value={identifier}
           onChange={(e) => {
@@ -207,7 +210,7 @@ export function SignIn({
                 placeholder="ABCD2345"
                 className={cx(inputCls, "mt-1 tracking-[0.2em] uppercase")}
               />
-              <p className="mt-1.5 text-[12px] text-muted">{t("A friend's code counts for a new account: you both get ¥5 more allowance.")}</p>
+              <p className="mt-1.5 text-[12px] text-muted">{t("A friend's code counts for a new account: you both get ¥{invite} more allowance.", { invite: (cfg.invite_bonus_cny ?? 5).toFixed(0) })}</p>
             </div>
           ) : (
             <button type="button" onClick={() => setInviteOpen(true)} className="text-[12px] text-muted underline-offset-2 hover:underline">

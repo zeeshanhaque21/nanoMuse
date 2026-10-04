@@ -10,6 +10,8 @@ export interface Account {
   hint: string
   member: boolean
   tokens: { unlimited: boolean; granted: number; used: number; remaining: number }
+  /** The pool in yuan (relay 0.14+): what was spent, the grant, what is left, and the 80% heads-up. */
+  spend?: { grant?: number; total: number; left: number | null; unlimited: boolean; warn: boolean; usdCny?: number; inviteBonusCny?: number; inviteeBonusCny?: number; ownKeyDocs?: string }
   /** Data controls (relay 0.9); absent on an older relay. */
   contribute?: { on: boolean; samples: number; defaultOn?: boolean; privacyUrl: string }
 }
@@ -18,6 +20,10 @@ export interface Model {
   id: string
   name: string
   kind: string
+  /** `chat`, `gui`, or both (relay 0.1.34+); absent means chat. */
+  for?: string[]
+  recommended?: boolean
+  inputModalities?: string[]
 }
 
 export interface CloudStatus {
@@ -26,6 +32,10 @@ export interface CloudStatus {
   baseURL: string
   account?: Account
   models: Model[]
+  /** The account chat model new chats use; empty when another provider is the default (relay 0.1.34 host). */
+  chatModel?: string
+  /** The model the hands see the screen with. */
+  handsModel?: string
   profile: LiveProfile
   hub: LiveHub
   error?: { code: string; message: string }
@@ -41,9 +51,14 @@ export async function call<T>(path: string, body?: unknown): Promise<T> {
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   })
   if (res.status === 204) return undefined as T
-  const json = (await res.json().catch(() => ({}))) as { error?: { message?: string } }
-  if (!res.ok) throw new Error(json.error?.message ?? `${res.status}`)
+  const json = (await res.json().catch(() => ({}))) as { error?: { code?: string; message?: string } }
+  if (!res.ok) throw Object.assign(new Error(json.error?.message ?? `${res.status}`), { code: json.error?.code ?? `${res.status}` })
   return json as T
+}
+
+/** The relay-style `code` a failed `call` carries (`signed_out`, `not_found`, …), or the HTTP status. */
+export function errorCode(err: unknown): string {
+  return typeof err === 'object' && err !== null && 'code' in err && typeof (err as { code: unknown }).code === 'string' ? (err as { code: string }).code : ''
 }
 
 export const column: Record<string, string | number> = { display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 440 }

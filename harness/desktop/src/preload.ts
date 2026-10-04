@@ -27,6 +27,8 @@ const bridge = {
   requestPermission: (kind: PermissionKind): Promise<PermissionState> => ipcRenderer.invoke("nanomuse:permissions:request", kind),
   /** Open the System Settings pane for one permission (macOS); a no-op elsewhere. */
   openPermissionSettings: (kind: PermissionKind): Promise<void> => ipcRenderer.invoke("nanomuse:permissions:settings", kind),
+  /** Quit and start again (after a permission macOS applies only to new processes). */
+  relaunch: (): Promise<void> => ipcRenderer.invoke("nanomuse:relaunch"),
   /** Open an http(s) link in the default browser. */
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke("nanomuse:open-external", url),
   /** Keep the display awake (while the agent works the computer). */
@@ -36,11 +38,24 @@ const bridge = {
   /** App behaviour (open at login, menu bar icon, quick-chat key): the values, the key's name, what this platform can do. */
   prefs: (): Promise<DesktopPrefs> => ipcRenderer.invoke("nanomuse:prefs"),
   /** Change some of it; the shell applies it at once and answers with the whole. */
-  setPrefs: (patch: Partial<Pick<DesktopPrefs, "openAtLogin" | "menuBar" | "quickChat">>): Promise<DesktopPrefs> => ipcRenderer.invoke("nanomuse:prefs:set", patch),
+  setPrefs: (patch: Partial<Pick<DesktopPrefs, "openAtLogin" | "menuBar" | "quickChat" | "quickChatKey">>): Promise<DesktopPrefs> => ipcRenderer.invoke("nanomuse:prefs:set", patch),
   /** A screenshot of the window to Downloads and the issue page with the build's facts filled in. */
   reportBug: (): Promise<{ screenshot: string; url: string }> => ipcRenderer.invoke("nanomuse:report-bug"),
   /** Show a file in the system's file manager. */
   reveal: (path: string): Promise<void> => ipcRenderer.invoke("nanomuse:reveal", path),
+  // since 0.1.34
+  /** The macOS permissions, asked for in order with a word on why; answers with what is granted now. */
+  guidePermissions: (): Promise<Record<PermissionKind, PermissionState>> => ipcRenderer.invoke("nanomuse:permissions:guide"),
+  /** Keep this window out of screenshots while the hands work. */
+  setContentProtection: (on: boolean): Promise<void> => ipcRenderer.invoke("nanomuse:content-protection", on),
+  /** What the overlays show: the hands' pointer for the glow window, the cards for the capsule. */
+  setOverlay: (state: { hands: { active: boolean; held: boolean; x: number; y: number; kind: string; text: string; face: string } | null; cards: { id: string; kind: "approval" | "hold"; title: string; text: string; actions: { id: string; label: string; tone?: "on" | "no" }[] }[] }): void => ipcRenderer.send("nanomuse:overlay", state),
+  /** A button pressed on the capsule window. */
+  onOverlayAction: (listener: (card: string, action: string) => void): (() => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, payload: { card: string; action: string }) => listener(payload.card, payload.action);
+    ipcRenderer.on("nanomuse:overlay:action", handler);
+    return () => ipcRenderer.off("nanomuse:overlay:action", handler);
+  },
   /** The quick-chat key was pressed (or the menu bar's New chat): start a chat and focus the composer. */
   onQuickChat: (listener: () => void): (() => void) => {
     const handler = () => listener();
@@ -53,7 +68,11 @@ export interface DesktopPrefs {
   openAtLogin: boolean;
   menuBar: boolean;
   quickChat: boolean;
+  /** The combination in force, an Electron accelerator (`Alt+Space`); set it to change, to "" for the default. */
   quickChatKey: string;
+  quickChatDefault: string;
+  /** Another app holds the combination, so nanoMuse did not get it. */
+  quickChatTaken: boolean;
   supports: { openAtLogin: boolean; menuBar: boolean; quickChat: boolean };
 }
 

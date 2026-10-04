@@ -8,11 +8,12 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-system-prompt'
+import type {} from './cloud.ts'
 import type {} from './rooms.ts'
-import { AREAS } from './rooms.ts'
+import { AREAS, languageName } from './rooms.ts'
 
 export const name = 'nanomuse-rooms-tools'
-export const inject = ['tools', 'nanomuseRooms']
+export const inject = ['tools', 'nanomuseRooms', 'nanomuseCloud']
 
 export function apply(ctx: Context): void {
   const rooms = ctx.nanomuseRooms
@@ -150,6 +151,31 @@ export function apply(ctx: Context): void {
     'nanomuse rooms: draw_new_look',
   )
 
+  ctx.effect(
+    () =>
+      ctx.tools.register(
+        defineTool({
+          name: 'take_name',
+          description: 'Take the name the person gave you: it becomes your name on every device (under your face, in the chats). Call it only when they named you or asked you to change your name.',
+          parameters: {
+            name: { type: 'string', required: true, description: 'The name, at most 60 characters.' },
+          },
+          output: {
+            schema: { type: 'object', properties: { name: { type: 'string' } }, additionalProperties: false },
+            render: (_args, value) => [{ type: 'text', text: `Your name is now ${value.name}.` }],
+          },
+          async execute(args) {
+            const name = String(args.name ?? '').trim().slice(0, 60)
+            if (!name) throw new Error('A name is needed.')
+            const profile = await ctx.nanomuseCloud.writeProfile({ name })
+            return { name: profile.name }
+          },
+          presentCall: (args) => ({ card: 'generic', title: `Take the name ${args.name || ''}`, kind: 'other', rawInput: args }),
+        }),
+      ),
+    'nanomuse rooms: take_name',
+  )
+
   ctx.inject(['systemPrompt'], (ctx) => {
     ctx.effect(
       () =>
@@ -159,11 +185,13 @@ export function apply(ctx: Context): void {
           text: () => {
             const goals = rooms.goals
             const lines: string[] = []
+            const persona = rooms.persona
+            if (persona) lines.push('Who you are, as the person wrote it in your IDENTITY.md and SOUL.md (follow it):', persona, '')
             if (goals.length) {
-              lines.push("The person's goals (their Goals room; update them with goals_room_update):")
-              for (const goal of goals.slice(0, 12)) lines.push(`- ${goal.id} · ${goal.title} (${goal.category}, ${goal.status})${goal.summary ? `: ${goal.summary}` : ''}`)
+              lines.push("The person's goals (their Goals room; update them with goals_room_update, or end a check with one fenced block tagged `nanomuse-goal-update` holding {\"goal_id\", \"progress\": 0-100, \"status\": \"on_track|attention|done\", \"note\"} — the app turns it into a card):")
+              for (const goal of goals.slice(0, 12)) lines.push(`- ${goal.id} · ${goal.title} (${goal.category}, ${goal.status}${goal.progress >= 0 ? `, ${goal.progress}%` : ''})${goal.summary ? `: ${goal.summary}` : ''}`)
             } else {
-              lines.push('The person has no goals in their Goals room yet; when they state a long-term aim, offer to track it there (they create it from the room; you then keep it updated with goals_room_update).')
+              lines.push('The person has no goals in their Goals room yet; when they state a long-term aim, offer to track it there. They create one from the room ("Create goal › category"), or you can, when they agree: ask what, why and by when, how often to check, then write EXACTLY ONE fenced block tagged `nanomuse-goal` with {"title", "why", "category", "check_every_hours" (0 = daily), "check_time": "HH:MM", "steps": [...], "first_check"} — the app makes the goal, its chat and its checks from it, and shows it as a card. Do not describe the block.')
             }
             if (rooms.feedInstructions) lines.push(`What the person wants in their Feed: ${rooms.feedInstructions.slice(0, 300)}`)
             const memory = rooms.memory
@@ -173,6 +201,8 @@ export function apply(ctx: Context): void {
             } else {
               lines.push('', 'You remember nothing about the person yet; when they tell you something they will expect you to know next time, keep it with remember.')
             }
+            // the words under the face: the person watches the step's own description there
+            lines.push('', `Where a tool takes a \`description\` or \`step\` argument (bash, pwsh, run_code, the computer_* tools), write there what the step does for the person, in ${languageName(rooms.lang)}, in a few words ("打开携程网站", "Check the login page") — it is shown under your face while the tool runs. Fill it in on every such call.`)
             return lines.join('\n')
           },
         }),

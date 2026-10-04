@@ -135,8 +135,16 @@ def fake_chat(monkeypatch: pytest.MonkeyPatch) -> FakeChat:
 
 
 def llm_for(vision: str = "auto") -> OpenAIChatLLM:
+    # a model id that says nothing about pictures (a DeepSeek chat id would be known blind
+    # before the first request; see model_takes_images), so the endpoint's answer decides
     return OpenAIChatLLM(
-        LLMSettings(api_key="k", base_url="http://chat.test/v1", stream=False, vision=vision)
+        LLMSettings(
+            api_key="k",
+            base_url="http://chat.test/v1",
+            model="test-model",
+            stream=False,
+            vision=vision,
+        )
     )  # type: ignore[arg-type]
 
 
@@ -449,7 +457,8 @@ def test_upload_and_send_with_attachments(settings: Settings):
 
         # over the socket too
         llm.script.append(LLMResponse(content="seen"))
-        with client.websocket_connect("/ws?token=secret-token") as ws:
+        with client.websocket_connect("/ws") as ws:
+            ws.send_json({"kind": "auth", "token": "secret-token"})
             ws.receive_json()  # snapshot
             ws.send_json(
                 {"kind": "send", "thread": "main", "text": "and this", "files": [pic["path"]]}

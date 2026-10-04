@@ -11,21 +11,35 @@
  * step while the main session is blank, as the stock shell did.
  */
 import { useModalLayer } from '@deepseek-ai/dsh-client-ui-primitives'
-import { createElement as h, useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { createElement as h, Fragment, useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { call, type Translate } from './api.ts'
+import { UpdateRow } from './About.tsx'
+import { openStar } from './AccountPage.tsx'
+import { call, type CloudStatus, type Translate } from './api.ts'
+import { Avatar } from './Avatar.tsx'
+import { openLink } from './bridge.ts'
 import { settingsBus } from './bus.ts'
-import { IconArchive, IconClose, IconCpu, IconDatabase, IconDevices, IconFolder, IconHand, IconHelp, IconLink, IconLogOut, IconMic, IconPuzzle, IconScale, IconSettings, IconShield, IconSliders, IconSparkle, IconUser } from './icons.tsx'
+import { IconArchive, IconChevronRight, IconClose, IconCpu, IconDatabase, IconDevices, IconFolder, IconHand, IconHelp, IconKey, IconLink, IconLogOut, IconMessage, IconMic, IconPuzzle, IconScale, IconSettings, IconShield, IconSliders, IconSparkle, IconUser, IconWallet } from './icons.tsx'
+import { openShortcutsReference } from './keys.ts'
 import { useLive } from './live.ts'
 import type { RenderSlot } from './MuseSidebar.tsx'
-import { AppBehaviorRows, DeveloperRows } from './Sections.tsx'
+import { REPO_URL } from './panels.ts'
+import { AppBehaviorRows, ConversationRows, DeveloperRows, HotkeyField } from './Sections.tsx'
+
+// No default homepage: this fork does not point people at a site it cannot verify. Empty hides the link.
+const SITE_URL = ''
 
 /** The pages that make up the everyday group, in Muse's order; the rest are Advanced. */
 export const COMPUTER_SECTION = 'nanomuse-computer'
 export const DATA_SECTION = 'nanomuse-data'
 export const HELP_SECTION = 'nanomuse-help'
 export const LEGAL_SECTION = 'nanomuse-legal'
-const PRIMARY: readonly string[] = ['general', 'nanomuse-cloud', 'models', 'agent-presets', 'nanomuse-connectors', COMPUTER_SECTION, 'nanomuse-files', 'nanomuse-dictation', 'nanomuse-devices', 'nanomuse-permissions', DATA_SECTION, HELP_SECTION, LEGAL_SECTION]
+export const WALLET_SECTION = 'nanomuse-wallet'
+export const STORAGE_SECTION = 'nanomuse-storage'
+export const CHANNELS_SECTION = 'nanomuse-channels'
+export const HARNESS_SECTION = 'nanomuse-harness'
+/** Muse's nav, in its order; the account page, models and presets are Advanced (the account card on General opens the first). */
+const PRIMARY: readonly string[] = ['general', 'nanomuse-connectors', COMPUTER_SECTION, 'nanomuse-files', 'nanomuse-dictation', WALLET_SECTION, STORAGE_SECTION, 'nanomuse-permissions', CHANNELS_SECTION, 'nanomuse-devices', DATA_SECTION, HELP_SECTION, LEGAL_SECTION]
 
 export interface SectionRow {
   id: string
@@ -84,6 +98,10 @@ function navIcon(id: string): ReactNode {
     case 'nanomuse-dictation': return h(IconMic, { size: 16 })
     case 'nanomuse-permissions': return h(IconShield, { size: 16 })
     case DATA_SECTION: return h(IconShield, { size: 16 })
+    case WALLET_SECTION: return h(IconWallet, { size: 16 })
+    case STORAGE_SECTION: return h(IconKey, { size: 16 })
+    case CHANNELS_SECTION: return h(IconMessage, { size: 16 })
+    case HARNESS_SECTION: return h(IconSliders, { size: 16 })
     case HELP_SECTION: return h(IconHelp, { size: 16 })
     case LEGAL_SECTION: return h(IconScale, { size: 16 })
     case 'plugins': return h(IconPuzzle, { size: 16 })
@@ -153,7 +171,7 @@ function SettingsPanel({ t, rows, renderSlot, activeId, onSelect, onClose }: Pan
             h('button', { type: 'button', className: 'nm-close', onClick: onClose },
               h(IconClose, { size: 14 }),
               h('span', { className: 'nm-hidden' }, renderSlot('settings.close', {}, { fallback: t('close') })))),
-          h('div', { className: 'nm-settings-body' },
+          h('div', { className: 'nm-settings-body', key: active },
             active !== undefined ? renderSlot('settings.section', { close: onClose }, { only: active }) : null)))),
     document.body)
 }
@@ -209,6 +227,11 @@ export function MuseSettings(props: MuseSettingsProps): ReactNode {
     setRequested(undefined)
     setCompleted((previous) => (previous.has(id) ? previous : new Set([...previous, id])))
   }, [])
+  // Help → "See the first run again" reopens the flow on purpose.
+  useEffect(() => {
+    settingsBus.openOnboarding = (id) => { store.close(); setRequested(id) }
+    return () => { settingsBus.openOnboarding = undefined }
+  }, [store])
 
   return h('div', { className: 'nm-settings-seat' },
     // A real trigger for anything that looks for one (the rail's fallback, assistive tech).
@@ -231,16 +254,96 @@ export function MuseSettings(props: MuseSettingsProps): ReactNode {
       : null)
 }
 
-/** The General page: the harness's rows, then where this build comes from. */
+/**
+ * The General page, laid out as Muse's: the account card, usage bars, language,
+ * appearance (the mode; no theme-colour swatches, as on the phone), app behaviour,
+ * shortcuts, about. The harness's
+ * other General rows live on the Advanced › Harness page.
+ */
 export function makeGeneralSection(t: Translate, version: string) {
   return function GeneralSection({ renderSlot }: { renderSlot: RenderSlot }): ReactNode {
-    return h('div', { className: 'nm-general' },
-      renderSlot('settings.general.item', {}),
-      h('div', { className: 'nm-row', style: { fontSize: 13 } },
-        h('div', { className: 'nm-row-main' },
-          h('span', { className: 'nm-row-title' }, t('versionTitle')),
-          h('span', { className: 'nm-row-sub' }, t('versionLine', { version })))),
+    const live = useLive()
+    const [status, setStatus] = useState<CloudStatus | undefined>()
+    useEffect(() => {
+      let alive = true
+      call<CloudStatus>('status').then((s) => { if (alive) setStatus(s) }).catch(() => undefined)
+      return () => { alive = false }
+    }, [live.cloud.signedIn])
+    const account = status?.account
+    // the pool in yuan when the relay sends it (0.14+), the token figures otherwise
+    const pool = account?.spend && !account.spend.unlimited && account.spend.grant !== undefined && account.spend.grant > 0 ? account.spend : undefined
+    const poolLeft = pool ? (pool.left ?? Math.max(0, (pool.grant ?? 0) - pool.total)) : 0
+    const fmtYuan = (n: number) => `¥${n.toFixed(n % 1 === 0 ? 0 : 2)}`
+    const used = pool
+      ? Math.min(100, Math.round((pool.total / (pool.grant ?? 1)) * 100))
+      : account && !account.tokens.unlimited && account.tokens.granted > 0 ? Math.min(100, Math.round((account.tokens.used / account.tokens.granted) * 100)) : 0
+    const spent = pool ? poolLeft <= 0 : Boolean(account && !account.tokens.unlimited && account.tokens.granted > 0 && account.tokens.remaining <= 0)
+    return h('div', { className: 'nm-general nm-section' },
+      // the account card
+      h('div', { className: 'nm-card' },
+        h('button', { type: 'button', className: 'nm-row nm-row-button', onClick: () => { settingsBus.openSection?.('nanomuse-cloud') } },
+          h('span', { className: 'nm-row-icon' }, h(Avatar, { size: 28, profile: live.profile, mood: 'idle' })),
+          h('div', { className: 'nm-row-main' },
+            h('span', { className: 'nm-row-title' }, t('gnAccount')),
+            h('span', { className: 'nm-row-sub' }, live.cloud.signedIn ? t('gnAccountSub', { hint: live.cloud.hint }) : t('gnAccountSignIn'))),
+          h('span', { className: 'nm-row-chevron' }, h(IconChevronRight, { size: 16 })))),
+      // usage
+      h('h2', null, t('gnUsage')),
+      h('div', { className: 'nm-card nm-usage' },
+        account
+          ? h(Fragment, null,
+              h('div', { className: 'nm-usage-row' },
+                h('span', { className: 'nm-usage-plan' }, account.member ? t('gnPlanMember') : t('gnPlanFree')),
+                h('span', { className: 'nm-usage-pct' }, account.tokens.unlimited ? t('gnUnlimited') : t('gnUsed', { n: used }))),
+              account.tokens.unlimited ? null : h('div', { className: 'nm-usage-bar', role: 'progressbar', 'aria-valuenow': used, 'aria-valuemin': 0, 'aria-valuemax': 100 }, h('span', { style: { width: `${used}%` } })),
+              h('div', { className: 'nm-usage-fine' }, account.tokens.unlimited ? t('gnUnlimitedSub') : pool ? t('gnLeftYuan', { left: fmtYuan(poolLeft), grant: fmtYuan(pool.grant ?? 0) }) : t('gnRemaining', { n: account.tokens.remaining.toLocaleString() })),
+              // near the end of the pool (the relay's 80% heads-up): the ways on are in the account page
+              pool && !spent && (pool.warn || used >= 80)
+                ? h('button', { type: 'button', className: 'nm-usage-link', style: { background: 'none', border: 0, padding: 0, cursor: 'pointer', font: 'inherit' }, onClick: () => { settingsBus.openSection?.('nanomuse-cloud') } }, t('gnNearlyOut'))
+                : null,
+              account.member || !SITE_URL ? null : h('a', { className: 'nm-usage-link', href: SITE_URL, target: '_blank', rel: 'noopener noreferrer', onClick: (e: { preventDefault(): void }) => { e.preventDefault(); openLink(SITE_URL) } }, t('gnUpgrade')),
+              // the pool is spent: the one ask the project makes
+              spent
+                ? h(Fragment, null,
+                    h('button', { type: 'button', className: 'nm-usage-link', style: { background: 'none', border: 0, padding: 0, cursor: 'pointer', font: 'inherit' }, onClick: () => { settingsBus.openSection?.('nanomuse-cloud') } }, t('gnWaysOn')),
+                    h('a', { className: 'nm-usage-link', href: REPO_URL, target: '_blank', rel: 'noopener noreferrer', onClick: (e: { preventDefault(): void }) => { e.preventDefault(); openStar() } }, t('gnStarOut')))
+                : null)
+          : h('div', { className: 'nm-usage-fine' }, live.cloud.signedIn ? t('loading') : t('gnUsageSignedOut'))),
+      // language: the harness's own row
+      h('div', { className: 'nm-card nm-harness-rows' }, renderSlot('settings.general.item', {}, { only: 'language' })),
+      // appearance: the mode (the harness's switch, which carries its own title)
+      h('div', { className: 'nm-card nm-harness-rows' }, renderSlot('settings.general.item', {}, { only: 'appearance' })),
+      h(ConversationRows, { t }),
       h(AppBehaviorRows, { t }),
+      // shortcuts
+      h('h2', null, t('gnShortcuts')),
+      h('div', { className: 'nm-card' },
+        h('div', { className: 'nm-row' },
+          h('div', { className: 'nm-row-main' },
+            h('span', { className: 'nm-row-title' }, t('gnQuickChat')),
+            h('span', { className: 'nm-row-sub' }, t('gnQuickChatSub'))),
+          h(HotkeyField, { t })),
+        h('button', { type: 'button', className: 'nm-row nm-row-button', onClick: () => openShortcutsReference() },
+          h('div', { className: 'nm-row-main' }, h('span', { className: 'nm-row-title' }, t('menuShortcuts'))),
+          h('span', { className: 'nm-row-chevron' }, h(IconChevronRight, { size: 16 })))),
+      // about
+      h('h2', null, t('gnAbout')),
+      h('div', { className: 'nm-card' },
+        h(UpdateRow, { t, bundle: version }),
+        h('button', { type: 'button', className: 'nm-row nm-row-button', onClick: () => openLink(REPO_URL) },
+          h('div', { className: 'nm-row-main' },
+            h('span', { className: 'nm-row-title' }, t('gnStar')),
+            h('span', { className: 'nm-row-sub' }, t('gnStarSub'))),
+          h('span', { className: 'nm-row-chevron' }, h(IconChevronRight, { size: 16 })))),
       h(DeveloperRows, { t }))
+  }
+}
+
+/** Advanced › Harness: every General row the harness and its plugins add, none lost. */
+export function makeHarnessSection(t: Translate) {
+  return function HarnessSection({ renderSlot }: { renderSlot: RenderSlot }): ReactNode {
+    return h('div', { className: 'nm-general nm-section' },
+      h('p', null, t('hsLead')),
+      h('div', { className: 'nm-card nm-harness-rows' }, renderSlot('settings.general.item', {})))
   }
 }
