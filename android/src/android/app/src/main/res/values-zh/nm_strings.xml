@@ -11,7 +11,20 @@
     <!-- 聊天页头部 -->
     <string name="nm_avatar_content_description">你的助理。点一下可以改名字、图标和风格。</string>
     <string name="nm_status_waiting">等你确认</string>
-    <string name="nm_status_thinking">思考中…</string>
+    <string name="nm_status_replying">正在回复</string>
+    <string name="nm_status_on">正在处理：%1$s</string>
+    <string name="nm_status_working">正在处理</string>
+    <string name="nm_home_not_ready">稍等，聊天还在加载。</string>
+
+    <!-- 求个 Star：首次登录、第一个任务完成、额度用完时 -->
+    <string name="nm_star_title">GitHub 上的一颗 Star 帮得上忙</string>
+    <string name="nm_star_action">去 GitHub 点亮 Star</string>
+    <string name="nm_star_later">以后再说</string>
+    <string name="nm_star_signed_in">欢迎加入。nanoMuse 免费、开源、非营利，做的是一个属于每个人的个人智能体。如果你认同，GitHub 上的一颗 Star 能让下一个人也找到这里。</string>
+    <string name="nm_star_first_task">第一个任务完成了。如果 nanoMuse 帮上了忙，到 GitHub 点一颗 Star，做它的人就知道了。</string>
+    <string name="nm_star_tenth_task">已经一起完成十个任务了。如果 nanoMuse 成了你日常的一部分，一颗 Star 会让更多人愿意试一试。</string>
+    <string name="nm_star_new_look">一张为你画的新面孔。如果你喜欢 nanoMuse 现在的样子，到 GitHub 点一颗 Star，更多人就能遇见它。</string>
+    <string name="nm_star_exhausted">免费额度用完了，谢谢你一路用到这里。如果 nanoMuse 值得，到 GitHub 点一颗 Star，下一个人也能找到它。</string>
     <string name="nm_chat_menu_rename">重命名对话</string>
 
     <!-- 前台服务通知标题（没有工具在跑时） -->
@@ -342,6 +355,9 @@
     <string name="nm_appearance_section_home">首页</string>
     <string name="nm_appearance_header_model_title">在名字下方显示模型</string>
     <string name="nm_appearance_header_model_footer">Muse 只显示名字。打开后名字下方会显示模型组和服务商 · 模型，点它可以切换。关闭时模型在 ••• → 模型和设置里。</string>
+    <string name="nm_appearance_section_chat">对话</string>
+    <string name="nm_appearance_steps_title">显示执行步骤</string>
+    <string name="nm_appearance_steps_footer">关闭时，聊天里只保留回复，头像下面那一行说明它正在做什么。打开后每一步都会出现在聊天里——用到的每个工具、它的推理，以及输入框上方一条可以打开步骤详情的状态条。</string>
     <string name="nm_chat_menu_model">模型</string>
     <string name="nm_model_switched">这个对话已换成 %1$s</string>
     <string name="nm_model_switched_sticky">已换成 %1$s，新对话也用它</string>
@@ -393,14 +409,14 @@
     <string name="nm_avatar_options_keep">先不换了</string>
     <string name="nm_avatar_option_n">第 %1$d 个</string>
     <string name="nm_avatar_option_retry">重试</string>
-    <string name="nm_avatar_options_ready">好啦，几个"%1$s"的形象已经准备好了，选一个你最喜欢的吧！</string>
+    <string name="nm_avatar_options_ready">几个"%1$s"的形象准备好了，选一个你最喜欢的。</string>
     <string name="nm_avatar_drawing_now">我这就去画几版"%1$s"。出图需要一点时间，画好了我会告诉你。</string>
     <string name="nm_avatar_drawing_again">再画一轮，稍等一下。</string>
-    <string name="nm_avatar_adopted">好啦，我的新形象已经换上了，现在是%1$s！</string>
+    <string name="nm_avatar_adopted">换好了，我的新形象是%1$s。</string>
     <string name="nm_avatar_pick_line">第 %1$d 个</string>
     <string name="nm_avatar_cannot_start">现在还画不了新形象：%1$s</string>
     <string name="nm_avatar_memory_line">- %1$s：用户把我的虚拟形象换成了"%2$s"。</string>
-    <string name="nm_avatar_share_text">我的新形象出炉啦！%1$s，分享给朋友们看看吧！</string>
+    <string name="nm_avatar_share_text">我的新形象：%1$s，分享给朋友看看。</string>
     <string name="nm_avatar_share_button">分享形象</string>
     <string name="nm_avatar_share_later">以后再说</string>
     <string name="nm_avatar_share_title">分享我的虚拟形象</string>
@@ -470,10 +486,11 @@
     <string name="nm_hands_need_granted">已允许</string>
     <string name="nm_hands_need_ok">就绪</string>
     <string name="nm_hands_need_set_up">去设置</string>
-    <string name="nm_hands_section_model">看屏幕的模型</string>
-    <string name="nm_hands_model_auto">自动——你选的对话模型能看图就用它，否则用 nanoMuse 云的看屏模型，再否则用视觉模型组</string>
-    <string name="nm_hands_model_footer">每一步都会把一张截图发给这个模型。小一点的视觉模型就够用，也更省钱。云端菜单之外的模型只有你自己选了才会用。</string>
+    <string name="nm_hands_section_model">动手用的模型</string>
+    <string name="nm_hands_model_auto">自动——优先 qwen3.8-27b（nanoMuse 云的，或你自己 key 下的），否则用你选的、能看图的对话模型，再否则用视觉模型组</string>
+    <string name="nm_hands_model_footer">每一步都会把一张截图发给这个模型，它和对话模型是两个独立的设置。小一点的视觉模型就够用，也更省钱。云端菜单之外的模型只有你自己选了才会用。</string>
     <string name="nm_hands_why_chosen">在这里选的</string>
+    <string name="nm_hands_why_default">你自己 key 下的动手默认模型</string>
     <string name="nm_hands_why_chat">你选的对话模型</string>
     <string name="nm_hands_why_group">默认模型组里第一个能看图的</string>
     <string name="nm_hands_why_menu">nanoMuse 云的看屏模型</string>
@@ -496,7 +513,10 @@
     <string name="nm_hands_protected_screen">这个页面受保护，读不到内容。请你自己完成这一步，然后点「继续」。</string>
     <string name="nm_hands_secret_field">这是密码或验证码输入框，请你自己填好，然后点「继续」。</string>
     <string name="nm_hands_approval_title">等你确认</string>
-    <string name="nm_hands_approval_detail">要点「%1$s」——请在 nanoMuse 里或通知中回答。</string>
+    <string name="nm_hands_approval_detail">要点「%1$s」——请回 nanoMuse 确认（会要求验证锁屏）。</string>
+    <string name="nm_hands_approval_here">要点「%1$s」，可以吗？</string>
+    <string name="nm_hands_allow_once">允许</string>
+    <string name="nm_hands_deny">拒绝</string>
     <!-- 光圈旁的动作名（0.1.15） -->
     <string name="nm_hands_fx_tap">点击</string>
     <string name="nm_hands_fx_tap_target">点击「%1$s」</string>
@@ -557,7 +577,7 @@
     <string name="nm_setup_source_title">让哪个模型来回答？</string>
     <string name="nm_setup_source_sub">你的账号已经自带了一个。也可以加上自己的 API key，随时切换。</string>
     <string name="nm_setup_source_cloud">用 nanoMuse Cloud 的模型</string>
-    <string name="nm_setup_source_cloud_sub">Qwen 模型，走阿里云百炼；每个账号都有一份由开发者承担的免费额度，不用配置。</string>
+    <string name="nm_setup_source_cloud_sub">对话用 DeepSeek，动手用 Qwen；每个账号都有一份由开发者承担的免费额度，不用配置。</string>
     <string name="nm_setup_source_own_sub">OpenAI、Anthropic、DeepSeek、百炼等兼容 OpenAI 接口的服务。key 只留在这台手机上。</string>
     <string name="nm_setup_source_fine_print">两种方式不冲突：Cloud 模型始终可用，每个模型组各选各的。</string>
     <string name="nm_setup_password_title">设一个密码</string>
@@ -624,8 +644,9 @@
     <string name="nm_cloud_err_bad_key">服务器已不认识这台手机，请重新登录。</string>
     <string name="nm_cloud_err_out_of_tokens">额度用完了。</string>
     <string name="nm_cloud_err_daily_cap">今天的 token 配额用完了，明天恢复。</string>
-    <string name="nm_cloud_err_allowance">免费额度已用完。邀请一位新用户（你和对方各 +¥5），或在 设置 → 服务商 里添加自己的 key。</string>
-    <string name="nm_cloud_warn_line">免费额度快用完了：还剩 ¥%1$s（共 ¥%2$s）。邀请一位新用户（你和对方各 +¥5），或换成自己的 key——都在「账号」里。</string>
+    <string name="nm_cloud_err_allowance">免费额度已用完。邀请一位新用户（你和对方各 +¥%1$s），或在 设置 → 服务商 里添加自己的 key，推荐阿里云百炼。</string>
+    <string name="nm_cloud_err_allowance_abroad">免费额度已用完。邀请一位新用户（你和对方各 +¥%1$s），或在 设置 → 服务商 里添加自己的 key，海外推荐 OpenRouter：一个账号一把 key，按量付费。</string>
+    <string name="nm_cloud_warn_line">免费额度快用完了：还剩 ¥%1$s（共 ¥%2$s）。邀请一位新用户（你和对方各 +¥%3$s），或换成自己的 key——都在「账号」里。</string>
     <string name="nm_cloud_err_rate_limited">请求太快了，稍等一下。</string>
     <string name="nm_cloud_err_unreachable">连不上 nanoMuse 云，请检查网络。</string>
     <string name="nm_cloud_err_generic">出了点问题。</string>
@@ -660,7 +681,7 @@
     <string name="nm_face_cost_what_clips">换一个形象要画 %1$d 张图和 %2$d 段短视频</string>
     <string name="nm_face_cost_about">%1$s，大约用掉 ¥%2$s 额度。</string>
     <string name="nm_face_cost_left">额度还剩 ¥%1$s。</string>
-    <string name="nm_face_cost_short">剩余额度不够这一次了。邀请一位新用户（你和对方各 +¥5），或在 设置 → 服务商 里添加自己的 key。</string>
+    <string name="nm_face_cost_short">剩余额度不够这一次了。邀请一位新用户（你和对方各 +¥%1$s），或在 设置 → 服务商 里添加自己的 key。</string>
     <string name="nm_face_cost_unknown">%1$s。暂时查不到今天的额度。</string>
     <string name="nm_face_cost_go">开始画</string>
     <string name="nm_face_cost_anyway">仍然试试</string>
@@ -684,7 +705,11 @@
     <string name="nm_ways_sub">两个办法继续用——无论选哪个，登录和多设备功能都不受影响。</string>
     <string name="nm_ways_key_title">换成自己的 key</string>
     <string name="nm_ways_key_body">推荐阿里云百炼：新用户有免费额度，开通约 2 分钟，一个 key 就能对话、画图、生成视频。</string>
+    <string name="nm_ways_key_body_abroad">海外用户用不了百炼，推荐 OpenRouter：一个账号一把 key，按量付费。</string>
     <string name="nm_ways_key_action">去设置</string>
+    <string name="nm_ways_key_action_openrouter">用 OpenRouter 登录</string>
+    <string name="nm_ways_key_other_openrouter">改用 OpenRouter</string>
+    <string name="nm_ways_key_other_bailian">改用阿里云百炼</string>
     <string name="nm_ways_key_guide">图文教程</string>
     <string name="nm_ways_invite_title">邀请朋友：每有一位新用户通过你的链接注册，你 +¥%1$s，对方也 +¥%2$s。</string>
     <string name="nm_ways_invite_share">分享链接</string>
@@ -713,6 +738,7 @@
     <string name="nm_cloud_ev_invite_accepted">邀请了一位新用户</string>
     <string name="nm_cloud_ev_invite_used">通过邀请码注册</string>
     <string name="nm_cloud_ev_credit_granted">获得了额度奖励</string>
+    <string name="nm_cloud_ev_pool_set">额度调整</string>
     <string name="nm_cloud_via_code">验证码登录</string>
     <string name="nm_cloud_via_password">密码登录</string>
     <string name="nm_cloud_last_used">上次使用 %1$s</string>
@@ -779,8 +805,8 @@
     <string name="nm_cloud_allowance_left">剩余 ¥%1$s · $%2$s</string>
     <string name="nm_cloud_allowance_why">起始 ¥%1$s，每邀请一位新用户你 +¥%2$s、对方也 +¥%2$s；用完后换自己的 key 继续。</string>
     <string name="nm_cloud_tokens_line">累计 %1$s tokens · 今天 %2$s</string>
-    <string name="nm_cloud_notice_title">免费 · 开源 · 非盈利 —— 开源共建，做属于所有人的个人智能体</string>
-    <string name="nm_cloud_notice_closing">欢迎反馈问题、提需求、贡献代码——每一次参与，都在让个人智能体离所有人更近一步。</string>
+    <string name="nm_cloud_notice_title">免费 · 开源 · 非盈利</string>
+    <string name="nm_cloud_notice_closing">发现问题、想要新功能、愿意改代码，都欢迎到 GitHub 上提。</string>
     <string name="nm_cloud_notice">nanoMuse 是非盈利的开源社区项目，永久免费。模型自带一份由开发者承担的免费额度，用完换自己的 key。数据不会出售；服务器保存什么写在隐私政策里，「设置 → 数据控制」由你决定；随时可以删除账号。</string>
     <!-- nanoMuse: devices on the hub -->
     <string name="nm_hub_channel">来自你其他设备的消息</string>
@@ -831,4 +857,52 @@
     <string name="nm_devices_refused">中继拒绝了连接——重新登录一下</string>
     <string name="nm_devices_notifications_hint">允许通知，手机才能在后台保持可联。</string>
     <string name="nm_library_share_failed">文件没能分享出去。</string>
+    <!-- 0.1.32：设置 → 连接器——可以让智能体接入的服务（桌面端同一份目录） -->
+    <string name="nm_connectors_title">连接器</string>
+    <string name="nm_connectors_intro">让智能体接入你在用的服务。每一项都是服务商自己的远程 MCP 服务器；大多数用你已有的账号登录，少数需要一个密钥。连接好的服务就是一条 MCP 服务器记录，任何对话里都能用。</string>
+    <string name="nm_connectors_connected_n">已连接 %1$d 个</string>
+    <string name="nm_connectors_manage">在 MCP 中管理</string>
+    <string name="nm_connectors_connected">已连接</string>
+    <string name="nm_connectors_needs_sign_in">需要登录</string>
+    <string name="nm_connectors_connect">连接</string>
+    <string name="nm_connectors_sign_in">登录</string>
+    <string name="nm_connectors_disconnect">断开</string>
+    <string name="nm_connectors_docs">服务商关于此服务器的说明</string>
+    <string name="nm_connectors_how_oauth">在浏览器里用你的 %1$s 账号登录；nanoMuse 会自动向该服务注册，不用填任何东西。令牌只保存在这台手机上。</string>
+    <string name="nm_connectors_how_key">需要该服务的密钥：%1$s。它只保存在这台手机的 MCP 记录里。</string>
+    <string name="nm_connectors_how_none">对所有人开放，不需要登录。</string>
+    <string name="nm_connectors_how_auto">先探测服务器需要什么：不需要、登录，还是密钥。</string>
+    <string name="nm_connectors_key_placeholder">粘贴密钥</string>
+    <string name="nm_handover_title">轮到你了</string>
+    <string name="nm_handover_body">这个页面需要你来：%1$s。就在这里的浏览器里完成——同一个页面、同一个会话——然后点「完成」，它会从你停下的地方接着做。</string>
+    <string name="nm_handover_body_generic">这个页面需要你来——登录或填验证码。就在这里的浏览器里完成，然后点「完成」，它会从你停下的地方接着做。</string>
+    <string name="nm_handover_open">打开页面</string>
+    <string name="nm_handover_done">完成，继续</string>
+    <string name="nm_handover_banner">轮到你了：%1$s。弄好后点「完成」。</string>
+    <string name="nm_handover_banner_generic">这个页面轮到你了。弄好后点「完成」。</string>
+    <string name="nm_connectors_own_title">你自己的服务器</string>
+    <string name="nm_connectors_own_row">MCP 服务器</string>
+    <string name="nm_connectors_own_sub">按地址或命令添加服务器，或导入 JSON 配置。</string>
+    <string name="nm_connectors_elsewhere_title">你的其他设备上</string>
+    <string name="nm_connectors_elsewhere_sign_in">已在%1$s上连接——在这台手机上登录一次，这里也能用。</string>
+    <string name="nm_connectors_elsewhere_only">已在%1$s上连接。不在这台手机的目录里；需要的话到「你自己的服务器」里添加。</string>
+    <string name="nm_connectors_elsewhere_device">另一台设备</string>
+    <string name="nm_connectors_own_n">已有 %1$d 个 · 按地址、命令或 JSON 添加</string>
+    <string name="nm_connectors_how_client">%1$s 不支持自动注册应用，所以需要一次性的小设置：在它的开发者设置里创建一个你自己的 OAuth 应用，回调地址填下面这个，然后把应用的客户端 ID 粘贴到这里（如果有客户端密钥也一并填上）。两者都只保存在这台手机上。</string>
+    <string name="nm_connectors_client_developer">打开 %1$s 的开发者设置</string>
+    <string name="nm_connectors_client_redirect">应用的回调（redirect）地址——点一下复制：</string>
+    <string name="nm_connectors_client_copy">复制</string>
+    <string name="nm_connectors_client_id">OAuth 客户端 ID</string>
+    <string name="nm_connectors_client_secret">OAuth 客户端密钥（如有）</string>
+    <string name="nm_connectors_connected_sub">已作为 MCP 服务器“%1$s”连接。它的工具在每个对话里都可用。</string>
+    <string name="nm_connectors_cat_work">工作</string>
+    <string name="nm_connectors_cat_talk">沟通</string>
+    <string name="nm_connectors_cat_files">文件</string>
+    <string name="nm_connectors_cat_dev">开发</string>
+    <string name="nm_connectors_cat_data">数据</string>
+    <string name="nm_connectors_cat_design">设计</string>
+    <string name="nm_connectors_cat_money">金融</string>
+    <string name="nm_connectors_cat_search">搜索与网页</string>
+    <string name="nm_connectors_cat_infra">基础设施</string>
+    <string name="nm_connectors_cat_misc">更多</string>
 </resources>

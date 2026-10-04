@@ -8,9 +8,11 @@
  */
 import { createElement as h, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import type { Translate } from './api.ts'
-import { IconAlarm, IconBriefcase, IconCheck, IconCheckCircle, IconChevronRight, IconDollar, IconHeartLine, IconMonitor, IconPalette, IconTarget, IconUsers } from './icons.tsx'
+import { IconAlarm, IconBriefcase, IconCheck, IconCheckCircle, IconChevronRight, IconCircleDot, IconDollar, IconHeartLine, IconMonitor, IconPalette, IconSquare, IconTarget, IconUsers } from './icons.tsx'
+import { GOALS_PANEL } from './panels.ts'
 import { nav, roomsCall, useRooms, type Category, type Goal, type GoalAutomation } from './rooms.ts'
-import { dayLabel, Empty, MoreButton, Sheet } from './ui.tsx'
+import { peekWin } from './win.ts'
+import { dayLabel, Empty, MoreButton, RoomToggle, Sheet } from './ui.tsx'
 import type { Words } from './locales.ts'
 
 const CATEGORIES: { id: Category; label: Words; icon: (p: { size: number }) => ReactNode; examples: Words[] }[] = [
@@ -20,6 +22,7 @@ const CATEGORIES: { id: Category; label: Words; icon: (p: { size: number }) => R
   { id: 'career', label: 'catCareer', icon: IconBriefcase, examples: ['exCareer1', 'exCareer2', 'exCareer3'] },
   { id: 'hobbies', label: 'catHobbies', icon: IconPalette, examples: ['exHobby1', 'exHobby2', 'exHobby3'] },
   { id: 'productivity', label: 'catProductivity', icon: IconMonitor, examples: ['exProd1', 'exProd2', 'exProd3'] },
+  { id: 'other', label: 'catOther', icon: IconCircleDot, examples: [] },
 ]
 
 export function makeGoalsPanel(t: Translate) {
@@ -27,6 +30,7 @@ export function makeGoalsPanel(t: Translate) {
     const rooms = useRooms()
     const [openId, setOpenId] = useState<string | undefined>()
     const [creating, setCreating] = useState<Category | undefined>()
+    const [beginning, setBeginning] = useState<Category | undefined>()
     const [showDone, setShowDone] = useState(false)
     const [error, setError] = useState<string | undefined>()
     const open = rooms.goals.find((g) => g.id === openId)
@@ -40,18 +44,31 @@ export function makeGoalsPanel(t: Translate) {
       setOpenId(undefined)
       roomsCall('goals/delete', { id: goal.id }).catch(fail)
     }
+    // a goal's chat opens beside the room, the way Muse splits the window for goals
+    const beside = (sessionId: string) => { nav.openSession(sessionId); nav.split(GOALS_PANEL) }
     const checkIn = (goal: Goal) => {
-      roomsCall<{ sessionId: string }>('goals/check-in', { id: goal.id }).then(({ sessionId }) => { setOpenId(undefined); nav.openSession(sessionId); nav.showChats() }).catch(fail)
+      roomsCall<{ sessionId: string }>('goals/check-in', { id: goal.id }).then(({ sessionId }) => { setOpenId(undefined); beside(sessionId) }).catch(fail)
     }
-    const openChat = (goal: Goal) => { setOpenId(undefined); nav.openSession(goal.sessionId); nav.showChats() }
+    const openChat = (goal: Goal) => { setOpenId(undefined); beside(goal.sessionId) }
+    // a category row begins the planning chat (the phone's flow): "I'd like to create a … goal"
+    // goes into the chat the person is in, the agent asks up to three questions and writes
+    // the goal block, which becomes the goal; typing it out stays one step away in the menu
+    const begin = (category: Category) => {
+      if (beginning) return
+      setBeginning(category)
+      setError(undefined)
+      roomsCall<{ sessionId: string }>('goals/begin', { category, sessionId: peekWin().current ?? '' }).then(({ sessionId }) => beside(sessionId)).catch(fail).finally(() => setBeginning(undefined))
+    }
 
     return h('div', { className: 'nm-room' },
       h('div', { className: 'nm-room-top', 'data-window-drag': true }),
       h('div', { className: 'nm-room-head' },
+        h(RoomToggle, { t, panel: GOALS_PANEL }),
         h('h1', { className: 'nm-room-title' }, t('railGoals')),
         h('div', { className: 'nm-room-actions' },
           h(MoreButton, { label: t('more'), size: 36, items: [
             { id: 'done', label: showDone ? t('goalsHideDone') : t('goalsShowDone', { n: done.length }), onSelect: () => setShowDone((v) => !v) },
+            { id: 'typed', label: t('goalTypeOut'), onSelect: () => setCreating('other') },
           ] }))),
       h('div', { className: 'nm-room-body' },
         h('div', { className: 'nm-room-inner nm-goals' },
@@ -68,23 +85,25 @@ export function makeGoalsPanel(t: Translate) {
                   : null),
           h('section', { className: 'nm-goals-create' },
             h('h2', { className: 'nm-room-h2' }, t('goalsCreate')),
-            CATEGORIES.map((c) => h('button', { key: c.id, type: 'button', className: 'nm-cat-row', onClick: () => setCreating(c.id) },
+            CATEGORIES.map((c) => h('button', { key: c.id, type: 'button', className: 'nm-cat-row', disabled: beginning !== undefined, 'aria-busy': beginning === c.id, onClick: () => begin(c.id) },
               h('span', { className: 'nm-cat-icon' }, h(c.icon, { size: 19 })),
               h('span', { className: 'nm-cat-label' }, t(c.label)),
-              h(IconChevronRight, { size: 16, className: 'nm-row-chevron' })))))),
+              beginning === c.id ? h('span', { className: 'nm-spinner nm-spinner-sm' }) : h(IconChevronRight, { size: 16, className: 'nm-row-chevron' })))))),
       open ? h(GoalCard, { t, goal: open, automations: rooms.automations[open.id] ?? [], lang: rooms.lang, onClose: () => setOpenId(undefined), onCheckIn: () => checkIn(open), onChat: () => openChat(open), onDone: () => setStatus(open, open.status === 'done' ? 'tracking' : 'done'), onDelete: () => remove(open), onFail: fail }) : null,
-      creating ? h(CreateGoal, { t, category: creating, onClose: () => setCreating(undefined), onCreated: (goal) => { setCreating(undefined); nav.openSession(goal.sessionId); nav.showChats() } }) : null)
+      creating ? h(CreateGoal, { t, category: creating, onClose: () => setCreating(undefined), onCreated: (goal) => { setCreating(undefined); beside(goal.sessionId) } }) : null)
   }
 }
 
 function GoalRow({ t, goal, onOpen, onToggle, onCheckIn, onChat, onDelete }: { t: Translate; goal: Goal; onOpen(): void; onToggle(): void; onCheckIn(): void; onChat(): void; onDelete(): void }): ReactNode {
   const done = goal.status === 'done'
   const sub = goal.summary || goal.description.split('\n')[0] || ''
-  return h('div', { className: `nm-goal${done ? ' nm-done' : ''}`, role: 'button', tabIndex: 0, 'aria-label': goal.title, onClick: onOpen, onKeyDown: (e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen() } } },
+  const progress = typeof goal.progress === 'number' && goal.progress >= 0 ? Math.min(100, goal.progress) : -1
+  return h('div', { className: `nm-goal${done ? ' nm-done' : ''}${goal.attention ? ' nm-attention' : ''}`, role: 'button', tabIndex: 0, 'aria-label': goal.title, onClick: onOpen, onKeyDown: (e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen() } } },
     h('button', { type: 'button', role: 'checkbox', 'aria-checked': done, className: `nm-check${done ? ' nm-on' : ''}`, 'aria-label': done ? t('goalReopen') : t('goalMarkDone'), onClick: (e: MouseEvent) => { e.stopPropagation(); onToggle() } }, done ? h(IconCheck, { size: 13, stroke: 2.5 }) : null),
     h('div', { className: 'nm-goal-main' },
-      h('div', { className: 'nm-goal-title' }, goal.title),
-      sub ? h('div', { className: 'nm-goal-sub' }, sub) : null),
+      h('div', { className: 'nm-goal-title' }, goal.title, goal.attention && !done ? h('span', { className: 'nm-goal-flag' }, t('goalAttention')) : null),
+      sub ? h('div', { className: 'nm-goal-sub' }, sub) : null,
+      progress >= 0 && !done ? h('div', { className: 'nm-goal-bar', role: 'progressbar', 'aria-valuenow': progress, 'aria-valuemin': 0, 'aria-valuemax': 100 }, h('span', { style: { width: `${progress}%` } })) : null),
     h(MoreButton, { label: t('more'), quiet: true, size: 28, items: [
       { id: 'checkin', label: t('goalCheckIn'), onSelect: onCheckIn },
       { id: 'chat', label: t('goalOpenChat'), onSelect: onChat },
@@ -124,7 +143,15 @@ function GoalCard({ t, goal, automations, lang, onClose, onCheckIn, onChat, onDo
       { id: 'delete', label: t('goalDelete'), danger: true, onSelect: onDelete },
     ] }) },
     h('div', { className: 'nm-goal-card' },
-      goal.description ? h('p', { className: 'nm-sheet-lead' }, goal.description) : null,
+      goal.description ? h('p', { className: 'nm-sheet-lead' }, goal.steps?.length ? goal.description.split('\n')[0] : goal.description) : null,
+      goal.steps?.length
+        ? h('ul', { className: 'nm-goal-steps' }, goal.steps.map((step, i) => h('li', { key: i }, h(IconSquare, { size: 14 }), h('span', null, step))))
+        : null,
+      typeof goal.progress === 'number' && goal.progress >= 0
+        ? h('div', { className: 'nm-goal-progress' },
+            h('div', { className: `nm-goal-bar${goal.attention ? ' nm-attention' : ''}`, role: 'progressbar', 'aria-valuenow': goal.progress, 'aria-valuemin': 0, 'aria-valuemax': 100 }, h('span', { style: { width: `${Math.min(100, goal.progress)}%` } })),
+            h('span', { className: 'nm-goal-pct' }, `${Math.min(100, goal.progress)}%`, goal.attention ? ` · ${t('goalAttention')}` : ''))
+        : null,
       goal.summary ? h('p', { className: 'nm-goal-summary' }, goal.summary) : null,
       h('div', { className: 'nm-auto-card' },
         h('div', { className: 'nm-auto-head' }, t('goalRunning')),

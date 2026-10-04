@@ -53,8 +53,8 @@ grant / disable / delete). Data (SQLite) lives in `cloud/data/`; back it up
 together with `CLOUD_SECRET`. Tokens have no ceiling by default; the daily
 money cap (`DAILY_CAP_CNY`) is what limits an account, and members escape it.
 
-The production relay, `https://cloud.nanomuse.cn`, is this same code on the box
-that serves nanomuse.cn, behind the showcase's Caddy;
+Upstream's production relay is this same code on the box behind its showcase's
+Caddy; **this fork runs no default relay** — deploy your own from `cloud/`;
 [`cloud/deploy/nanomuse-hk/`](../cloud/deploy/nanomuse-hk/README.md) has the
 compose file, the Caddy site, the backup timer and the deploy script.
 

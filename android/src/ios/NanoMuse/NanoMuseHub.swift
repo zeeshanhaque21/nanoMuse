@@ -21,6 +21,8 @@ struct HubDevice: Identifiable, Equatable {
     let version: String
     let online: Bool
     let lastSeen: Date?
+    /// The hub actions the device answers (`coding.sessions`, `shell`, …); empty when it did not say.
+    let actions: [String]
 
     var isPhone: Bool { kind == "phone" }
     var isComputer: Bool { kind == "computer" }
@@ -33,6 +35,7 @@ struct HubDevice: Identifiable, Equatable {
         os = (json["os"] as? String) ?? ""
         version = (json["version"] as? String) ?? ""
         online = (json["online"] as? Bool) ?? false
+        actions = (json["actions"] as? [String]) ?? []
         if let t = json["last_seen"] as? Double, t > 0 { lastSeen = Date(timeIntervalSince1970: t) } else { lastSeen = nil }
     }
 }
@@ -256,6 +259,9 @@ final class NanoMuseHub: ObservableObject {
             }
         case "event":
             if let id = frame["id"] as? String, let body = frame["body"] as? [String: Any] { eventHandlers[id]?(body) }
+        case "profile":
+            // Another device of the account wrote the agent's look.
+            NanoMuseProfileSync.shared.onHubFrame(frame)
         case "error":
             if let id = frame["id"] as? String, let done = pending.removeValue(forKey: id) {
                 eventHandlers.removeValue(forKey: id)

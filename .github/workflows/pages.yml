@@ -1,9 +1,9 @@
 name: Website
 
 # Publishes site/ to GitHub Pages: https://nano-muse.github.io/nanoMuse/
-# Since 0.1.6 the homepage lives in nano-muse/nano-muse.github.io, served at nanomuse.cn; this
-# project page is a redirect to it, with the earlier page kept at legacy.html (its generated parts —
-# the dragon's five moods, icons, fonts, screenshots — are copied from web/ and docs/ below).
+# This project page is a redirect to the project's own pages site, with the earlier page kept at
+# legacy.html (its generated parts — the dragon's five moods, icons, fonts, screenshots — are copied
+# from web/ and docs/ below). fork: no redirect target outside this fork's own GitHub Pages is used.
 
 on:
   push:

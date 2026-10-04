@@ -44,7 +44,8 @@ All endpoints require ``Authorization: Bearer <token>`` unless ``server.auth = f
 The token is printed (with a QR code, in the link's ``#fragment``) by ``nanomuse serve``.
 The bytes the app shows inline — ``/api/files/*`` and the browser frames — also open with
 a link the client signed with its token (``?exp=&sig=``, :mod:`nanomuse.server.tickets`),
-so no token travels in a URL. ``?token=`` is still taken this release and goes next.
+so no token travels in a URL. ``?token=`` is no longer accepted (0.1.33): a request that
+still carries one gets a 401 with a message saying where the token goes now.
 """
 
 from __future__ import annotations
@@ -72,11 +73,17 @@ from nanomuse.config import Settings
 from nanomuse.hub.client import HubError
 from nanomuse.logger import logger
 from nanomuse.server import tickets
+from nanomuse.server.channels_api import install_channels
 from nanomuse.server.events import MAIN_THREAD
 from nanomuse.server.service import MuseService, goal_to_dict
 from nanomuse.server.update import UpdateCheck
 
 STATIC_DIR = Path(__file__).parent / "static"
+# Said to a client that still puts the token in the URL (taken until 0.1.32).
+LEGACY_TOKEN_MESSAGE = (
+    "the token no longer travels in the URL: send it as 'Authorization: Bearer …' "
+    "(or as the socket's first frame) — update the app, or pair again with a #token= link"
+)
 
 
 def _google_page(title: str, message: str, *, ok: bool) -> HTMLResponse:
@@ -304,6 +311,14 @@ class BrowserControlBody(BaseModel):
     url: str | None = Field(default=None, max_length=2000)
 
 
+class HoldBody(BaseModel):
+    """The user takes the browser, the computer or the phone over for a chat (contract C1)."""
+
+    thread: str = Field(default=MAIN_THREAD, max_length=64)
+    tool: str = Field(pattern="^(browser|computer|phone)$")
+    reason: str | None = Field(default=None, max_length=300)
+
+
 class PushSubscribeBody(BaseModel):
     # the PushSubscription.toJSON() of the browser: {endpoint, expirationTime, keys{p256dh, auth}}
     subscription: dict[str, Any]
@@ -433,8 +448,10 @@ def create_app(settings: Settings, service: MuseService | None = None) -> FastAP
     def auth(request: Request) -> None:
         header = request.headers.get("authorization", "")
         token = header[7:].strip() if header.lower().startswith("bearer ") else None
-        # ``?token=`` is deprecated (it lands in access logs): accepted this release only
-        _check_token(token or request.query_params.get("token"))
+        if token is None and "token" in request.query_params:
+            # ``?token=`` lands in access logs; it was taken until 0.1.32 and is refused now.
+            raise HTTPException(status_code=401, detail=LEGACY_TOKEN_MESSAGE)
+        _check_token(token)
 
     def auth_or_signed(request: Request) -> None:
         """A header as everywhere — or, for the bytes an ``<img>``/``<video>``/``<iframe>``
@@ -934,6 +951,30 @@ def create_app(settings: Settings, service: MuseService | None = None) -> FastAP
     async def stop_hands() -> dict[str, Any]:
         return {"stopped": svc.stop_hands()}
 
+    # ------------------------------------------------------------------ holds (C1)
+    @app.get("/api/holds", dependencies=dep)
+    async def holds_list() -> list[dict[str, Any]]:
+        """The holds that are on: the person has the browser, the screen or the phone."""
+        return svc.holds_view()
+
+    @app.post("/api/holds", dependencies=dep)
+    async def hold_open(body: HoldBody) -> dict[str, Any]:
+        """Take over: the agent's actions of that kind in that chat wait for Done."""
+        try:
+            return svc.open_hold(body.thread, body.tool, body.reason or "")
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.post("/api/holds/{hold_id}/done", dependencies=dep)
+    async def hold_done(hold_id: str) -> dict[str, Any]:
+        """Done: the hold goes off; the waiting tool looks again and continues."""
+        try:
+            return svc.done_hold(hold_id)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
     # ------------------------------------------------------------------ the avatar studio
     def _studio_http(exc: StudioError) -> HTTPException:
         return HTTPException(409, str(exc))
@@ -1009,6 +1050,16 @@ def create_app(settings: Settings, service: MuseService | None = None) -> FastAP
     @app.get("/api/cloud", dependencies=dep)
     async def cloud_status() -> dict[str, Any]:
         return svc.hub.account_view()
+
+    @app.get("/api/cloud/config", dependencies=dep)
+    async def cloud_config() -> dict[str, Any]:
+        """The relay's public figures — the allowance a new account gets, the invite bonus,
+        whether sign-up is open, the repository to star — so the app prints the relay's
+        numbers, not its own (relay 0.15). An older relay or no relay: ``{}``."""
+        try:
+            return await svc.hub.cloud.config()
+        except CloudError:
+            return {}
 
     @app.post("/api/cloud/code", dependencies=dep)
     async def cloud_code(body: CloudCodeBody) -> dict[str, Any]:
@@ -1655,20 +1706,19 @@ def create_app(settings: Settings, service: MuseService | None = None) -> FastAP
     # ------------------------------------------------------------------ websocket
     @app.websocket("/ws")
     async def websocket(ws: WebSocket) -> None:
-        legacy = ws.query_params.get("token")
-        if legacy is not None:
-            # ``?token=`` lands in access logs: taken this release, gone the next
-            try:
-                _check_token(legacy)
-            except HTTPException:
-                await ws.close(code=4401)
-                return
+        if "token" in ws.query_params:
+            # ``?token=`` lands in access logs: taken until 0.1.32, refused now. The socket is
+            # accepted for a moment so the client reads why (an older app sees 4401 either way).
             await ws.accept()
-        else:
-            await ws.accept()
-            if svc.token and not await _ws_first_frame_auth(ws, svc.token):
-                await ws.close(code=4401)
-                return
+            await ws.send_json(
+                {"kind": "error", "code": "legacy_token", "message": LEGACY_TOKEN_MESSAGE}
+            )
+            await ws.close(code=4401, reason="legacy_token")
+            return
+        await ws.accept()
+        if svc.token and not await _ws_first_frame_auth(ws, svc.token):
+            await ws.close(code=4401)
+            return
         queue = svc.bus.subscribe()
         await ws.send_json({"kind": "hello", "state": svc.state()})
         conn_id = f"ws-{uuid.uuid4().hex[:8]}"
@@ -1711,6 +1761,10 @@ def create_app(settings: Settings, service: MuseService | None = None) -> FastAP
 
         @app.get("/{full_path:path}", include_in_schema=False)
         async def spa(full_path: str) -> Response:
+            if full_path.startswith("api/"):
+                # a wrong API path is an error, not the app's HTML with a 200 — clients
+                # (and people with curl) see what happened
+                raise HTTPException(404, f"no such endpoint: /{full_path}")
             candidate = (STATIC_DIR / full_path).resolve() if full_path else None
             if candidate and STATIC_DIR.resolve() in candidate.parents and candidate.is_file():
                 if candidate.name == "sw.js":
@@ -1737,6 +1791,7 @@ def create_app(settings: Settings, service: MuseService | None = None) -> FastAP
                 }
             )
 
+    install_channels(app, svc, dep)  # /api/channels — Feishu, DingTalk, WeCom, Telegram
     return app
 
 

@@ -19,6 +19,8 @@ export interface FeedPost {
   sessionId?: string
 }
 
+export type IdeaKind = 'chat' | 'routine' | 'goal'
+
 export interface Idea {
   id: string
   at: number
@@ -30,6 +32,10 @@ export interface Idea {
   how: string
   prompt: string
   area: string
+  /** What trying it does: words in the chat, a daily routine, or a goal conversation. */
+  kind?: IdeaKind
+  time?: string
+  category?: string
   started?: string
   dismissed?: boolean
 }
@@ -62,6 +68,10 @@ export interface Goal {
   updatedAt: number
   summary: string
   activity: GoalActivity[]
+  steps?: string[]
+  /** 0–100 as the agent last reported, -1 or absent when it never said. */
+  progress?: number
+  attention?: boolean
 }
 
 export type LibraryKind = 'document' | 'web' | 'image' | 'video' | 'audio' | 'file'
@@ -83,6 +93,39 @@ export interface MemoryItem {
   source: 'agent' | 'person' | 'import'
 }
 
+/** One step of a task, as `src/rooms.ts` records it. */
+export interface ActivityStep {
+  at: number
+  kind: 'start' | 'tool' | 'answer' | 'end'
+  name: string
+  title: string
+  detail: string
+  result: string
+  callId: string
+  ok?: boolean
+}
+
+/** What one chat did; the stream carries the records without the steps' texts. */
+export interface ActivityRecord {
+  sessionId: string
+  startedAt: number
+  updatedAt: number
+  endedAt: number
+  status: 'running' | 'done' | 'error' | 'stopped' | 'waiting'
+  request: string
+  words: string
+  current: { name: string; title: string; at: number; own?: boolean } | null
+  steps: ActivityStep[]
+  turns: number
+}
+
+export type DocName = 'identity' | 'soul' | 'memory'
+export interface DocText {
+  text: string
+  updatedAt: number
+  template: boolean
+}
+
 export interface Rooms {
   lang: string
   feed: { instructions: string; generatedAt: number; lastTry: number; posts: FeedPost[] }
@@ -90,6 +133,9 @@ export interface Rooms {
   goals: Goal[]
   library: LibraryItem[]
   memory: MemoryItem[]
+  docs: { identity: string; soul: string; identityAt: number; soulAt: number }
+  activity: ActivityRecord[]
+  introducedAt: number
   busy: { feed: boolean; ideas: boolean }
   automations: Record<string, GoalAutomation[]>
   ready: boolean
@@ -109,6 +155,9 @@ const INITIAL: Rooms = {
   goals: [],
   library: [],
   memory: [],
+  docs: { identity: '', soul: '', identityAt: 0, soulAt: 0 },
+  activity: [],
+  introducedAt: 0,
   busy: { feed: false, ideas: false },
   automations: {},
   ready: false,
@@ -209,8 +258,29 @@ export function fileUrl(id: string, raw = true): string {
 }
 
 /** Where the rooms send the person next: set by the plugin entry, read by the panels. */
-export const nav: { openSession(id: string): void; showChats(): void; startSession(): void } = {
+export const nav: {
+  openSession(id: string): void
+  showChats(): void
+  startSession(): void
+  /** Show a room beside the chat (Muse's split: chat on the left, the room on the right), or close the split. */
+  split(panel: string | null): void
+  /** Put words in the composer for the person to finish (Muse's "I want to create an image of …"). */
+  prefill(text: string): void
+  /** Which panel the frame shows now (null = the chats). */
+  activePanel(): string | null
+  /** The frame's left column, from a room's top-left button. */
+  toggleSidebar(): void
+} = {
   openSession: () => undefined,
   showChats: () => undefined,
   startSession: () => undefined,
+  split: () => undefined,
+  prefill: () => undefined,
+  activePanel: () => null,
+  toggleSidebar: () => undefined,
+}
+
+/** The record of one chat, from the stream's snapshot. */
+export function activityOf(rooms: Rooms, sessionId: string | null | undefined): ActivityRecord | undefined {
+  return sessionId ? rooms.activity.find((r) => r.sessionId === sessionId) : undefined
 }

@@ -5,11 +5,12 @@ Mac runner and handed to TestFlight. This page says what is in the tree, how it 
 the TestFlight pipeline needs, and what is still to be ported from the Android app.
 
 **Status.** The tree, the branding, the nanoMuse Cloud sign-in, the hub client and the pipeline
-were written on a Linux machine. The app **compiles** — the *iOS · build check* workflow below
-builds it unsigned for a device on a Mac runner, and is green as of the trial branch — but it has
-not run on an iPhone or gone through TestFlight yet, so the sign-in flow, the Devices section and
-notifications from other devices are untested at runtime. Expect signing questions in App Store
-Connect on the first TestFlight run, not compile errors.
+were written on a Linux machine. The app **builds, signs and is on TestFlight**: build 0.1.31 (2)
+went through the *iOS · TestFlight* workflow on 2026-10-03, was processed by App Store Connect
+and is with the internal testers (*Where it stands* below). It has not been run on an iPhone by
+the maintainers themselves, so the sign-in flow, the Devices section and notifications from other
+devices are untested at runtime until the first tester reports. The first archive taught the
+pipeline that automatic signing wants a registered device, which is why it signs manually now.
 
 ## Where it lives
 
@@ -67,7 +68,98 @@ Ours, in `NanoMuse/`:
   provider in the app, with a model group of its own that becomes the default when there is none.
   Same wire format and the same rules as the Android client (`io.github.nanomuse.cloud`): one
   instance per relay, nothing of the user's own replaced, a 401 on refresh removes the provider.
-  A *Relay server* field points the app at another relay.
+A *Relay server* field points the app at another relay; it is empty by default and must be set
+  before any relay call, so the app never silently reaches a backend this fork does not talk to.
+  Debug builds can point at another relay. Since 0.1.32 the page is the whole account — the
+  password as the other way in, a friend's invite code, the pool in yuan with the ways on when it
+  runs low (your own key, an invitation, a star once), usage by kind and by model, the devices
+  holding a key, the timeline, deletion — the same sections as the phone's `CloudAccountScreen`.
+- **The agent's steps, the status line.** *Settings → Chat → Steps* keeps the tool capsules out of
+  finished messages unless asked for; the typing line reads *〈name〉 is on it*, not *is thinking*.
+  Both are one-line edits in upstream's `AssistantBlockView` / `ContentView`, marked `// nanoMuse:`.
+- **The Muse shell (0.1.33; iPad too since 0.1.34).** `NanoMuseRoot` replaces upstream's
+  `ContentView` at the root; *Settings → nanoMuse* has the two switches (*Muse home*, *Face and
+  name in the chat header*), and the OpenMinis layout stays one tap away in the drawer. The chat's
+  navigation title becomes **face · name · status line** (`NanoMuseHeader.swift`): the status
+  reads *waiting for you* while a question or an approval is up, then the running tool's
+  `tool_title` — the model's own words for the step, *打开携程网站* — then *writing the reply*,
+  then *On it: 〈brief〉*, and the model's name when idle; while a new face is being drawn it
+  reads the avatar flow's line. The face (`NanoMuseFaces.swift`, the drawn face from Application
+  Support or the dragon from the bundle, five moods with the breath, bob, tilt, pop and shake of
+  the other clients) is tapped into **the agent's page**. The drawer holds the sessions, search,
+  a new side chat, *Pin as the main chat*, *All chats* and the nanoMuse settings.
+- **The agent's page (0.1.34)** (`NanoMuseAgentPage.swift`, Android `ui/profile`): the big face
+  with the pen badge (*Change avatar* puts "Change your avatar to " in the main chat's composer,
+  *Edit name*, *Avatar studio*), the name, *online*, and four panes — **Activity** (what you asked
+  and what the agent did, from the last two days of sessions), **Approvals** (the standing
+  "always allow" answers, revocable), **Daily** (the routines and the goal check-ins with their
+  next run, *Manage routines*), **Soul & memory** (SOUL.md and GLOBAL.md, editable) — and the
+  share sheet (`NanoMuseAvatarShareSheet`, Android `ui/avatar/AvatarShareSheet.kt`).
+- **The avatar, from the chat (0.1.34)** (`NanoMuseAvatarFlow.swift`, Android `avatar/AvatarFlow.kt`):
+  "换成一只橘猫" / "change your avatar to a red panda" is read before the model sees it (the same
+  regexes, tested in `MinisTests/NanoMuseLogicTests.swift`); four candidates come up as a card in
+  the chat, picked by tap or by words (*the second one*, *第三个*, *regenerate*); then *Finalizing
+  poses…*, the new face on, the profile pushed, a line in the memory, the share card. Through the
+  relay with a cost card first (`/v1/estimate`), or through the person's own Bailian key
+  (`NanoMuseImageGen.swift`, DashScope's native image endpoint) when the phone has one; the studio
+  (`NanoMuseAvatarStudio.swift`) uses the same path and lets the image model be picked.
+- **The scheduler (0.1.34)** (`NanoMuseScheduler.swift`): routines — a label, a prompt, a time,
+  daily / weekdays / once or every N hours — run as a headless turn in a conversation of their own
+  (`NanoMuseHeadless`). Honestly: the iPhone runs them when the app is open (every due one on
+  becoming active), asks iOS for a `BGAppRefreshTask` (`io.github.nanomuse.app.scheduler`) when
+  it goes to the background and runs what is due if iOS grants it, and posts a local notification
+  at each due time (*Check-in: 〈goal〉 — open to run it*) whose tap opens the conversation. Every
+  piece of copy about routines says so. *Settings → nanoMuse → Scheduled tasks* lists them all,
+  the goal check-ins and the feed's included.
+- **Goals (0.1.34)** (`NanoMuseGoals.swift`, Android `goals/`): *Create a goal › category* sends
+  the opener to the main chat with a system addendum for a few turns; the model's
+  ` ```nanomuse-goal ` block becomes the goal and its check-in routine, ` ```nanomuse-goal-update `
+  blocks move the progress; cards in the chat (*Goal created*, *Goal update*), the Goals room
+  with progress, steps, pause / check now / done / delete, and the routines beneath.
+- **Feed (0.1.34)** (`NanoMuseFeed.swift`, Android `feed/`): a daily routine writes a few short
+  posts from the memory, the diary and the goals into `feed/<day>/<n>.md` with front matter; the
+  ` ```nanomuse-feed ` fence is how the model hands them over. The Feed room shows them by day,
+  *Discuss* opens a side chat on the post, the sliders hold what the feed is about, the time, the
+  switch and *Write it now*. **Ideas** gained *Create routine* (scheduled at the idea's time, the
+  editor opens) and *Start goal* beside *Send to chat*.
+- **First run and settings (0.1.34)** (`NanoMuseFirstRun.swift`, `NanoMuseSettings.swift`,
+  `NanoMuseCoding.swift`, `NanoMuseSystemFiles.swift`): the four pages of the Android first run
+  (welcome → sign in — free → a password once for a fresh account → which model answers → meet
+  〈name〉), with *I have my own API key* opening the own-key sheet (Bailian / OpenRouter, ordered by
+  region; OpenRouter's sign-in without a paste), and the first conversation afterwards (the
+  opening lines, "what should I call you?", the name chooser from the model's ` ```nanomuse-naming `
+  block, GLOBAL.md and SOUL.md written). *Settings → nanoMuse*: the account, **Coding agents**
+  (Cursor / Codex / Claude Code sessions on the computers of the account over the hub's
+  `coding.*` actions, a message to any of them), **Scheduled tasks**, **System files** (SOUL,
+  GLOBAL, the diary, the feed's instruction, the routines' schedule, *Import memory* from another
+  assistant), Connectors, Data controls, the two shell switches, *Show the welcome again*.
+- **Models (0.1.34)** (`NanoMuseModels.swift`): the relay's menu opens on `deepseek-v4.1-flash`
+  (the one marked recommended *for chat*; `qwen3.8-27b` is the hands' model and never the chat
+  default); a pick made in the chat's picker moves to the front of the Cloud group so new chats
+  follow it, as Android's `followPick`. DeepSeek ids are text-only unless they name `v4.1` or
+  later, `vision` or `ocr` — a `// nanoMuse:` step at the top of `LLMModel.withInferredModality()`.
+- **Connections across devices (0.1.34)** (`NanoMuseSharedConnectors` in
+  `NanoMuseConnectors.swift`): the profile's `connectors` list says which device connected what
+  (id, label, address without the query string, how it signs in, enabled, when, the device) and
+  never a token; this phone puts its own entries, reads the others' back, and the Connectors page
+  lists them under *On your other devices* — *Connected on 〈device〉 — sign in here to use it on
+  this phone*. The ways-on card in the account follows the region: Bailian first in mainland
+  China, *Sign in with OpenRouter* first elsewhere.
+- **Connectors** (`NanoMuseConnectors.swift`): the desktop's catalogue from the bundled
+  `connectors.json` (`node scripts/connectors-json.mjs` keeps it current, `--check` in CI), the
+  MCP authorization flow (initialize → 401 → protected-resource metadata → authorization-server
+  metadata → RFC 7591 registration → upstream's `MCPOAuthController`), key / open / auto services,
+  and the client-id ask with the callback address to copy for the eight services that register no
+  clients. The Settings row that was *MCP Integrations* is **Connectors**; *Your own servers* at
+  its end is upstream's MCP page.
+- **Data controls** (`NanoMuseDataControls.swift`): the relay's switch, the kept-turns count, the
+  privacy page, deletion with a confirmation. **Reach** (`NanoMuseReach.swift`): a sheet per device
+  of the account — open a link, send a note, a shell line, a screenshot — over the hub.
+- **Star asks** at the first and the tenth finished task (`NanoMuseStarWatch`: a session leaving
+  `activeSessions` without an error; a cancelled turn counts too, the stream has no cancel signal)
+  and after a new look, as a card pinned under the header (the message list is a UICollectionView,
+  so nothing can be placed under the last message); the sign-in and spent-allowance moments were
+  already there.
 
 ## Building on a Mac
 
@@ -96,6 +188,39 @@ An external group (public link, up to 10,000 testers) needs Apple's beta review 
 — that is the step we are not waiting for; it can be switched on later in App Store Connect without
 touching the pipeline.
 
+### Where it stands
+
+Set up on 2026-10-03, all of it under the account holder's developer account (team
+`TN43QYW8K4`), nothing of which is in the repository:
+
+- the app record *nanoMuse*, iOS, bundle id `io.github.nanomuse.app`, SKU `nanomuse-ios`,
+  Apple ID `6818802049`; the three extension bundle ids `…app.ShareExtension`,
+  `…app.FileProvider`, `…app.AgentWidget`; the app group `group.io.github.nanomuse.app` and the
+  iCloud container `iCloud.io.github.nanomuse.app`; the capabilities the four `.entitlements`
+  ask for (App Groups, HealthKit with clinical records, HomeKit, iCloud/CloudKit, NFC tag
+  reading, WeatherKit) turned on on the identifiers;
+- the API key *nanoMuse CI* (role App Manager), the Apple Distribution certificate
+  *Apple Distribution: Guangyi Liu* (valid to 2027-10-03) and the four App Store profiles
+  *nanoMuse App Store*, *nanoMuse ShareExtension App Store*, *nanoMuse FileProvider App Store*,
+  *nanoMuse AgentWidget App Store*;
+- the six repository secrets of the table below;
+- the internal TestFlight group *nanoMuse Core* with automatic distribution, so every processed
+  build reaches its testers by itself; the device list is empty on purpose (nothing here needs
+  one);
+- **the first build**: 0.1.31 (2), archived and uploaded by the workflow on 2026-10-03, processed
+  by App Store Connect (`VALID`, export compliance answered by the Info.plist key) and in beta
+  testing with the internal group — the first thing that can be installed from TestFlight;
+- the test information an external group needs, in English and Simplified Chinese: the beta app
+  description, the feedback address, the marketing and privacy-policy links, and *What to Test*
+  on build 2 (none of it names other products); and the external group *nanoMuse Beta*, created
+  **without** a public link and without a build;
+- not done: the beta-review contact (name, phone) and the demo-account decision in *Beta App
+  Review Information*, which are the account holder's to fill, then adding build 2 to the external
+  group — that is the step that submits it to Apple's beta review; a public link once the review
+  has passed; and anything towards the App Store (the app is not going there). The app has not
+  run on a physical iPhone from the maintainers' side yet: the smoke test is the internal
+  testers' first job.
+
 ### Once, in App Store Connect
 
 1. **The app record.** *Apps → + → New App*: platform iOS, name nanoMuse, bundle id
@@ -121,10 +246,43 @@ touching the pipeline.
 | `APP_STORE_CONNECT_ISSUER_ID` | The issuer ID, a UUID |
 | `APP_STORE_CONNECT_KEY_P8` | The full text of `AuthKey_<ID>.p8`, `-----BEGIN PRIVATE KEY-----` to the end |
 | `APPLE_TEAM_ID` | The 10-character team id (*Membership details* in the developer account) |
+| `IOS_DIST_P12_BASE64` | The team's *Apple Distribution* certificate with its private key, a `.p12`, base64 in one line |
+| `IOS_DIST_P12_PASSWORD` | That `.p12`'s password |
 
-No certificate and no provisioning profile is stored anywhere: `xcodebuild -allowProvisioningUpdates`
-with the API key ("cloud signing") creates a managed distribution certificate and the profiles for
-the app and its three extensions on the runner, in a throwaway keychain.
+### The certificate, and why signing is manual
+
+Xcode's automatic signing (`-allowProvisioningUpdates` with the key) was the first plan and does
+not work for a team like this one: an archive is signed with an *iOS App Development* profile
+before the export re-signs it for the store, and a development profile has to list at least one
+device — a team that only ships through TestFlight has registered none, so the archive stops at
+*Your team has no devices from which to generate a provisioning profile*. The lane therefore
+signs manually with the store's own material, which needs no devices: the Apple Distribution
+certificate from the two secrets above, and the four *App Store* provisioning profiles (the app
+and its three extensions) that `get_provisioning_profile` downloads from the account with the key
+at the start of every run — and repairs there if the certificate they name is not the one in the
+keychain.
+
+The certificate was made without a Mac, and can be made again the same way when it expires or
+the key is lost (a team may hold two or three distribution certificates; revoke the old one in
+*Certificates, Identifiers & Profiles → Certificates* first if the limit is reached):
+
+```sh
+umask 077 && cd ~/.private/apple/dist                                # anywhere outside the repository
+openssl genrsa -out dist.key 2048
+openssl req -new -key dist.key -out dist.csr -subj "/emailAddress=<account e-mail>/CN=nanoMuse CI distribution/C=CN"
+# POST /v1/certificates { certificateType: DISTRIBUTION, csrContent: <dist.csr> } with a JWT signed
+# by the API key (the key's role must be App Manager or Admin); save certificateContent, base64, as dist.cer
+openssl x509 -inform DER -in dist.cer -out dist.pem
+openssl rand -base64 24 | tr -d '\n' > dist.p12.pass
+openssl pkcs12 -export -inkey dist.key -in dist.pem -out dist.p12 -passout file:dist.p12.pass   # with OpenSSL 3 add -legacy
+base64 -w0 dist.p12 | gh secret set IOS_DIST_P12_BASE64 -R nano-muse/nanoMuse
+gh secret set IOS_DIST_P12_PASSWORD -R nano-muse/nanoMuse < dist.p12.pass
+```
+
+The private key stays in that folder on the maintainer's machine (and in the secret); nothing
+of it goes into the repository, a log or a chat. The profiles were created once in the account
+with the same API (`POST /v1/profiles`, type `IOS_APP_STORE`, one per bundle id, each naming the
+certificate); the lane makes them again if they are missing.
 
 ### Does it compile?
 
@@ -148,18 +306,30 @@ The runner is `macos-26`; if the label is not available on your GitHub plan, `ma
 
 ## What follows
 
-The Android app is where nanoMuse's shape lives; the iOS app is OpenMinis with our name, plus
-the Cloud sign-in. In the order it makes sense to port, and where the Android code is:
+The Android app is where nanoMuse's shape lives; since 0.1.34 the iPhone carries the same shape
+over OpenMinis — the agent's page, the chat-driven avatar, goals, feed, routines, the first run —
+with iOS's limits on background work spelled out in the copy. Where the Android code is, and
+what became of it here:
 
 | Android (`io.github.nanomuse.*`) | On iOS |
 |---|---|
-| `cloud` — relay client, sign-in, account | Done: `NanoMuse/NanoMuseCloud*.swift` |
-| `ui.onboarding` — the four-page first run with *Sign in — free* | Next: a first-run sheet before the provider list |
-| `ui.home`, `ui.chat`, `ui.settings` — the Muse-style shell, header, tones | SwiftUI views under `NanoMuse/`; the OpenMinis screens stay behind them |
-| `avatar` — the drawn face and its states | Needs the relay's picture model; same request shape as Android (`docs/cloud.md`) |
-| `reach` — the phone drives the computer | The pairing protocol is platform-neutral; the client moves as is |
+| `cloud` — relay client, sign-in, account | Done: `NanoMuse/NanoMuseCloud*.swift`, `NanoMuseAccount*.swift` (0.1.32: password, invite code, the allowance in yuan, usage, sessions, timeline, delete) |
+| `ui.onboarding` — the four-page first run with *Sign in — free* | Done (0.1.34): `NanoMuseFirstRun.swift`, the first conversation included; no Hands page on iOS |
+| `community.StarPrompt` — the star asks | Done: at sign-in, when the allowance is spent, after the first and tenth task, after a new look (`NanoMuseStar`) |
+| `nm.show_steps` — the agent's steps off by default | 0.1.32: `NanoMuseSteps.swift`; finished messages keep to the conversation, a running one shows its steps |
+| `connectors` — the catalogue, `SharedConnectors` | Done: `NanoMuseConnectors.swift` (0.1.33 the catalogue, 0.1.34 the other devices' entries) |
+| `ui.home`, `ui.chat`, `ui.settings`, `ui.profile` — the shell, header, agent page | Done: `NanoMuseShell.swift`, `NanoMuseHeader.swift`, `NanoMuseAgentPage.swift`, `NanoMuseSettings.swift` |
+| `avatar` — the drawn face, the chat-driven change, the studio | Done (0.1.34): `NanoMuseAvatarFlow.swift`, `NanoMuseAvatarStudio.swift`, `NanoMuseImageGen.swift` |
+| `goals`, `feed`, the scheduler | Done (0.1.34) as far as iOS allows: foreground catch-up, `BGAppRefreshTask`, local notifications. No alarm-exact runs while the app is asleep — the copy says so |
+| `coding` — the computers' coding agents over the hub | Done (0.1.34): `NanoMuseCoding.swift`; the computer must run nanoMuse signed in with the same account |
+| `reach` — the phone drives the computer | Done: `NanoMuseReach.swift` over the hub |
 | `hands` — the phone's own screen | No equivalent: iOS does not let an app drive another. App Intents / Shortcuts are the door there |
-| Widgets, notifications, background tasks | Upstream's `AgentWidget` and BGTasks already cover most of it |
+| Widgets | Upstream's `AgentWidget` as it is |
+
+Still to check on a device, in order: the first run end to end with a fresh account; a chat-driven
+avatar change through the relay and through a Bailian key; a routine coming due with the app in
+the background (does iOS grant the refresh on the tester's phone, and how often); a coding session
+against a computer of the account; the connectors list after a second device signs in.
 
 Not in the plan: App Review. TestFlight internal is the distribution until the shell is ported and
 the store listing can be honest about what the iPhone app is.

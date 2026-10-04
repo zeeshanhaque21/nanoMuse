@@ -30,7 +30,9 @@
     GET  /app/                                                  → the web console (static)
     GET  /app/admin/                                            → the operator's page (static; asks for the admin token)
     POST /v1/admin/grant      X-Admin-Token  {account_id | identifier, tokens}
-    POST /v1/admin/credit     X-Admin-Token  {account_id | identifier, cny, note?} → more into the account's pool
+    POST /v1/admin/credit     X-Admin-Token  {account_id | identifier, cny, note?} → more into the account's pool (negative takes away, 0.16)
+    POST /v1/admin/pool       X-Admin-Token  {account_id | identifier, left_cny | grant_cny | delta_cny, note?} → the pool set to any figure (0.16)
+    POST /v1/admin/pool/batch X-Admin-Token  {account_ids | all, left_cny | grant_cny | delta_cny, note?} → the same for a set, or everyone limited (0.16)
     POST /v1/admin/disable    X-Admin-Token  {account_id | identifier, disabled}
     POST /v1/admin/unlimited  X-Admin-Token  {account_id | identifier, unlimited}  → a member: no limit
     POST /v1/admin/delete     X-Admin-Token  {account_id | identifier}
@@ -270,6 +272,11 @@ def create_app(
             return fwd.split(",")[0].strip()
         return request.client.host if request.client else ""
 
+    def client_place(request: Request):
+        """Where the request came from (geo.py), for the region in /v1/me and the "ways on"
+        of a refusal; None when the database is not there or the address is unplaced."""
+        return geo.place(client_ip(request)) if geo.ready else None
+
     @app.middleware("http")
     async def _remember_client(request: Request, call_next):
         # the address and the client software behind this request, for the rows the
@@ -297,6 +304,13 @@ def create_app(
     async def healthz() -> dict:
         return {"ok": True, "version": __version__, "models": [m.id for m in settings.models]}
 
+    @app.get("/v1/config")
+    async def public_config() -> Response:
+        """The figures a client prints before anyone signs in — the allowance, the invite
+        bonus, whether sign-up is open, the links — live from the operator's settings (0.15),
+        so no app needs a release to show a new number. No secrets, no auth, a minute's cache."""
+        return JSONResponse(cloud.public_config(), headers={"Cache-Control": "public, max-age=60"})
+
     # -- sign-up -----------------------------------------------------------------
 
     @app.post("/v1/auth/code", status_code=204)
@@ -322,7 +336,7 @@ def create_app(
         device = str(body.get("device", ""))[:80]
         invite = str(body.get("invite", ""))[:32]
         key, caller, created = await asyncio.to_thread(cloud.verify_code, ident, code, device, invite)
-        me = cloud.me(caller)
+        me = cloud.me(caller, client_place(request))
         return {"api_key": key, "created": created, **me}
 
     @app.post("/v1/auth/login")
@@ -338,7 +352,7 @@ def create_app(
             raise CloudError(400, "password_required", "Enter the password")
         device = str(body.get("device", ""))[:80]
         key, caller = await asyncio.to_thread(cloud.login_password, ident, password, device, client_ip(request))
-        me = cloud.me(caller)
+        me = cloud.me(caller, client_place(request))
         return {"api_key": key, "created": False, **me}
 
     @app.post("/v1/auth/password", status_code=204)
@@ -359,8 +373,8 @@ def create_app(
         return Response(status_code=204)
 
     @app.get("/v1/me")
-    async def me(caller: Caller = Depends(caller_dep)) -> dict:
-        return cloud.me(caller)
+    async def me(request: Request, caller: Caller = Depends(caller_dep)) -> dict:
+        return cloud.me(caller, client_place(request))
 
     @app.get("/v1/me/invite")
     async def me_invite(caller: Caller = Depends(caller_dep)) -> dict:
@@ -394,8 +408,10 @@ def create_app(
 
     @app.put("/v1/me/profile")
     async def me_put_profile(request: Request, caller: Caller = Depends(caller_dep)) -> dict:
-        """A device wrote the name or the look: stored (last writer wins) and every other
-        device of the account hears ``{"type": "profile", "rev"}`` on the hub."""
+        """A device wrote the name or the look (last writer wins), or its ``connectors``
+        (0.17: merged by device — the writer's entries replaced, the others' kept; never a
+        credential, 400 `no_secrets_in_profile`); every other device of the account hears
+        ``{"type": "profile", "rev"}`` on the hub."""
         body = await _json(request)
         device = str(body.pop("device", "") or "")
         out = cloud.put_profile(caller, device, body)
@@ -517,7 +533,7 @@ def create_app(
         spec = cloud.model_for(str(body.get("model", "")), "chat", caller)
         request_id = uuid.uuid4().hex[:16]
         # held at a typical turn's price while it runs; settled when the reply is in
-        cloud.check_budget(caller, request_id=request_id, hold_uy=cloud.chat_reserve_uy(spec))
+        cloud.check_budget(caller, request_id=request_id, hold_uy=cloud.chat_reserve_uy(spec), place=client_place(request))
         body["model"] = spec.upstream
         apply_chat_defaults(body, settings.chat_defaults)
         stream = bool(body.get("stream"))
@@ -719,7 +735,9 @@ def create_app(
         if spec.upstream.startswith("qwen-image"):
             params["prompt_extend"] = False
         request_id = uuid.uuid4().hex[:16]
-        cloud.check_budget(caller, minimum=spec.per_image, cost_uy=spec.image_cost_uy(size), request_id=request_id)
+        cloud.check_budget(
+            caller, minimum=spec.per_image, cost_uy=spec.image_cost_uy(size), request_id=request_id, place=client_place(request)
+        )
         try:
             png = await _dashscope_image(spec.upstream, [{"text": prompt}], params)
             charged = cloud.charge_image(caller, spec, 1, request_id, size=size)
@@ -732,6 +750,7 @@ def create_app(
 
     @app.post("/v1/images/edits")
     async def images_edits(
+        request: Request,
         caller: Caller = Depends(caller_dep),
         model: str = Form(...),
         prompt: str = Form(...),
@@ -754,7 +773,13 @@ def create_app(
         params = {"size": _size_param(size), "prompt_extend": False, "watermark": False} if three_x else {"n": 1, "watermark": False}
         content = [{"image": f"data:{mime};base64," + base64.b64encode(data).decode()}, {"text": prompt}]
         request_id = uuid.uuid4().hex[:16]
-        cloud.check_budget(caller, minimum=spec.per_image, cost_uy=spec.image_cost_uy(_size_param(size)), request_id=request_id)
+        cloud.check_budget(
+            caller,
+            minimum=spec.per_image,
+            cost_uy=spec.image_cost_uy(_size_param(size)),
+            request_id=request_id,
+            place=client_place(request),
+        )
         try:
             png = await _dashscope_image(edit_model, content, params)
             charged = cloud.charge_image(caller, spec, 1, request_id, size=_size_param(size))
@@ -805,7 +830,7 @@ def create_app(
         # reserved while the submission runs; once accepted, the task row holds the clip's
         # price against the allowance (db.pending_video_cost) until the clip is charged
         request_id = uuid.uuid4().hex[:16]
-        cloud.check_budget(caller, minimum=spec.per_clip, cost_uy=clip_cost, request_id=request_id)
+        cloud.check_budget(caller, minimum=spec.per_clip, cost_uy=clip_cost, request_id=request_id, place=client_place(request))
         body["model"] = spec.upstream
         headers = upstream_headers()
         headers["X-DashScope-Async"] = "enable"
@@ -862,7 +887,7 @@ def create_app(
         if request.query_params.get("action") != "getPolicy":
             raise CloudError(400, "bad_request", "action=getPolicy is the only upload call the relay makes")
         spec = cloud.model_for(request.query_params.get("model", ""), "video", caller)
-        cloud.check_budget(caller, minimum=spec.per_clip, cost_uy=spec.video_cost_uy(spec.clip_seconds))
+        cloud.check_budget(caller, minimum=spec.per_clip, cost_uy=spec.video_cost_uy(spec.clip_seconds), place=client_place(request))
         try:
             r = await http.get(
                 settings.dashscope_base.rstrip("/") + "/uploads",
@@ -1147,6 +1172,48 @@ def create_app(
         except (TypeError, ValueError) as e:
             raise CloudError(400, "bad_request", "cny is a number") from e
         return cloud.admin_credit(account_id, cny, str(body.get("note", ""))[:200])
+
+    @app.post("/v1/admin/credit-all", dependencies=[Depends(admin_dep)])
+    async def admin_credit_all(request: Request) -> dict:
+        """{cny, note?}: the same credit into every limited account's pool (0.15)."""
+        body = await _json(request)
+        try:
+            cny = float(body.get("cny", 0))
+        except (TypeError, ValueError) as e:
+            raise CloudError(400, "bad_request", "cny is a number") from e
+        return cloud.admin_credit_all(cny, str(body.get("note", ""))[:200])
+
+    @app.post("/v1/admin/pool", dependencies=[Depends(admin_dep)])
+    async def admin_pool(request: Request) -> dict:
+        """{account_id | identifier, left_cny | grant_cny | delta_cny, note?}: set one account's
+        pool (0.16) — to what should be left now, to a lifetime total, or by a difference up or
+        down. Never below zero."""
+        body = await _json(request)
+        account_id = cloud.admin_resolve(str(body.get("account_id", "")), str(body.get("identifier", "")))
+        return cloud.admin_set_pool(account_id, body)
+
+    @app.post("/v1/admin/pool/batch", dependencies=[Depends(admin_dep)])
+    async def admin_pool_batch(request: Request) -> dict:
+        """{account_ids: [...] | all: true, left_cny | grant_cny | delta_cny, note?}: the same
+        change to a set of accounts, or to every limited one (0.16)."""
+        return cloud.admin_set_pool_many(await _json(request))
+
+    @app.get("/v1/admin/settings", dependencies=[Depends(admin_dep)])
+    async def admin_settings_get() -> dict:
+        """The settings the page may change (0.15): the value in force, the environment's,
+        whether the page set it, and how many accounts a raised allowance would reach."""
+        return cloud.runtime_settings()
+
+    @app.post("/v1/admin/settings", dependencies=[Depends(admin_dep)])
+    async def admin_settings_set(request: Request) -> dict:
+        """{allowance_cny?, invite_bonus_cny?, signup_open?}: set (a value) or clear back to
+        the environment (null). In force at once, kept across restarts."""
+        return cloud.admin_update_settings(await _json(request))
+
+    @app.post("/v1/admin/allowance/apply", dependencies=[Depends(admin_dep)])
+    async def admin_allowance_apply() -> dict:
+        """Bring every account given a smaller allowance up to the current one (0.15)."""
+        return cloud.admin_apply_allowance()
 
     @app.post("/v1/admin/disable", dependencies=[Depends(admin_dep)])
     async def admin_disable(request: Request) -> Response:

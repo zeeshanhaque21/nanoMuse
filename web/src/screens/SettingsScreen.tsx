@@ -13,6 +13,7 @@ import {
   Hand,
   Info,
   LogOut,
+  MessageSquare,
   MessageSquareWarning,
   Monitor,
   Moon,
@@ -33,6 +34,7 @@ import { api, setToken } from "../api";
 import { DRAGON } from "../avatars";
 import { desktopBridge, isDesktopApp } from "../desktop";
 import { setDeveloperTools, useDeveloperTools } from "../devtools";
+import { setShowSteps, useShowSteps } from "../steps";
 import { openOwnKeySetup } from "../components/AllowanceWays";
 import { AVATAR_COLORS } from "../components/AvatarPicker";
 import { IdentityForm, identityBody, identityOf, type Identity } from "../components/IdentityForm";
@@ -113,6 +115,7 @@ export function SettingsScreen() {
   const dirty = !!state.profile && (Object.keys(identity) as (keyof Identity)[]).some((k) => identity[k] !== saved[k]);
   const name = state.profile?.name ?? "nanoMuse";
   const developer = useDeveloperTools();
+  const steps = useShowSteps();
   // One page on a wide window (the sections down the left, the way Muse's desktop settings
   // read); on the phone the list of rows the Android app draws, each opening its own page.
   const wide = useWide() && !state.lite;
@@ -331,6 +334,12 @@ export function SettingsScreen() {
         {show("appearance") && (
         <Section title={t("Appearance")} id="appearance" plain={!wide}>
           <Toggle
+            label={t("Show the agent's steps")}
+            hint={t("Every tool it uses becomes a chip in the chat. Off, the chat keeps to the conversation and the line under the name says what it is on. This device only.")}
+            checked={steps}
+            onChange={setShowSteps}
+          />
+          <Toggle
             label={t("Show thinking")}
             hint={t("Reveal the model's reasoning under each reply when the provider exposes it.")}
             checked={!!s?.agent.show_thinking}
@@ -537,6 +546,8 @@ function SettingsHome({ release, onOpen }: { release: UpdateView | null; onOpen:
           )}
           <MuseDivider />
           <MuseRow icon={<Plug size={22} />} label={t("Connections")} value={s?.connectors.mcp.length ? `${s.connectors.mcp.length} MCP` : undefined} onClick={() => setTab("connections")} />
+          <MuseDivider />
+          <MuseRow icon={<MessageSquare size={22} />} label={t("Chat apps")} onClick={() => setTab("channels")} />
           <MuseDivider />
           <MuseRow icon={<Monitor size={22} />} label={t("Devices")} value={computers.length ? String(computers.length) : none} onClick={() => setTab("devices")} />
           <MuseDivider />

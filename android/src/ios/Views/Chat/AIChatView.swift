@@ -318,6 +318,7 @@ struct AIChatView: View {
     }
 
     @State private var floatingBarHeight: CGFloat = 0
+    @State private var nmCardsHeight: CGFloat = 0 // nanoMuse: the cards above the composer (avatar takes, name chooser)
     @State private var showFileBrowser = false
     // [T-browser-download-ux-v2] Downloads panel + "Show in Files" locate target.
     @State private var showDownloadsPanel = false
@@ -587,6 +588,14 @@ struct AIChatView: View {
                                 }
                         }
                         VStack(spacing: 0) {
+                            // nanoMuse: virtual cards for this chat (avatar price/takes/share, the name chooser).
+                            NanoMuseChatCardsHost(vm: vm)
+                                .frame(maxWidth: maxContentWidth)
+                                .onGeometryChange(for: CGFloat.self) { proxy in
+                                    proxy.size.height
+                                } action: { newH in
+                                    nmCardsHeight = newH
+                                }
                             floatingToolPreview
                                 .shadow(color: Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor(white: 0, alpha: 0.25) : UIColor(white: 0, alpha: 0) }), radius: 6, x: 0, y: 4)
                             #if DEBUG
@@ -2019,7 +2028,13 @@ struct AIChatView: View {
         // a fix of it: the top-crop of the snapshot itself is UIKit-level and
         // out of SwiftUI's reach.
         let cap = max(120, UIScreen.main.bounds.width - 140)
-        if #available(iOS 19, *) {
+        if NanoMuseShellPrefs.museHeader { // nanoMuse: face · name · status line instead of the title stack
+            NanoMuseHeaderTitle( // nanoMuse:
+                vm: vm, soulName: soulName, // nanoMuse:
+                modelName: SessionModelDisplay(store: configStore, draftGroupId: vm.initialGroupId).displayName(for: vm.sessionId) // nanoMuse:
+            ) { showModelPicker = true } // nanoMuse: the text column keeps the model picker reachable
+            .frame(maxWidth: cap) // nanoMuse:
+        } else if #available(iOS 19, *) { // nanoMuse: upstream title unchanged below
             titleView
                 .frame(maxWidth: cap)
         } else {
@@ -2663,7 +2678,7 @@ struct AIChatView: View {
                     screenshotPreview = ChatScreenshotPreview(image: image)
                 },
                 maxContentWidth: maxContentWidth ?? 0,
-                floatingBarHeight: floatingBarHeight,
+                floatingBarHeight: floatingBarHeight + nmCardsHeight, // nanoMuse: the cards above the composer count too
                 inputBarHeight: inputBarHeight
             )
             // Empty/loading overlay for tap-to-dismiss-keyboard.

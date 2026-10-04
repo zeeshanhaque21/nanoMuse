@@ -3942,6 +3942,9 @@ struct ContentView: View {
                     .multilineTextAlignment(.center)
             }
 
+            // nanoMuse: the way in that needs no key — sign in to nanoMuse Cloud, free.
+            NanoMuseCloudCTA()
+
             // Setup steps
             VStack(spacing: 16) {
                 // Step 1 – Add Provider
@@ -7200,6 +7203,9 @@ private struct AppearanceSettingsView: View {
             // block opens expanded (historical behavior, default) or stays
             // collapsed. Only affects the streaming auto-expand; manual taps
             // always work either way.
+            // nanoMuse: the agent's steps (tool capsules) in finished messages, off by default.
+            NanoMuseStepsSection()
+
             Section {
                 Toggle(AppLocalized("Expand Thinking While Streaming"), isOn: $autoExpandThinking)
             } header: {
@@ -7422,6 +7428,15 @@ private struct SettingsSheet: View {
     var body: some View {
         NavigationStack(path: $navPath) {
             List {
+                // nanoMuse: the account, coding agents, routines, system files, connectors and the home switches.
+                Section {
+                    NavigationLink {
+                        NanoMuseSettingsView()
+                    } label: {
+                        Label("nanoMuse", systemImage: "sparkles")
+                    }
+                }
+
                 Section {
                     NavigationLink {
                         ProviderInstancesView()
@@ -7507,10 +7522,10 @@ private struct SettingsSheet: View {
                         }
                     }
                     NavigationLink {
-                        MCPIntegrationsView()
+                        NanoMuseConnectorsView() // nanoMuse: the connectors catalogue; "Your own servers" inside leads to MCPIntegrationsView
                     } label: {
                         Label {
-                            Text("MCP Integrations")
+                            Text(AppLocalized("Connectors")) // nanoMuse: replaces the "MCP Integrations" entry
                         } icon: {
                             Image(systemName: "square.stack.3d.up")
                                 .font(.system(size: 9))

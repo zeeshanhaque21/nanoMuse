@@ -17,7 +17,13 @@ import httpx
 from nanomuse import __version__
 
 CLOUD_KEY = "NANOMUSE_CLOUD_KEY"
-DEFAULT_MODEL = "qwen3.8-27b"
+# The relay's defaults (contract C4): one model for the chat, one for the hands — the GUI
+# operator wants a model that sees pictures and grounds well, the chat wants a fast,
+# cheap one with tools. Two settings; the relay's ``for`` field on each model says which
+# it is meant for, and these are the fallbacks when the relay does not say.
+DEFAULT_CHAT_MODEL = "deepseek-v4.1-flash"
+DEFAULT_GUI_MODEL = "qwen3.8-27b"
+DEFAULT_MODEL = DEFAULT_CHAT_MODEL
 
 MESSAGES = {
     "bad_identifier": "Enter a mainland phone number or an e-mail address.",
@@ -32,7 +38,7 @@ MESSAGES = {
     "account_disabled": "This account is disabled.",
     "model_not_offered": "That model is not offered here.",
     "rate_limited": "Too many requests; slow down a little.",
-    "allowance_exhausted": "The free allowance is used up. Invite a friend (+¥5 for each of you) or add your own model key — your sign-in and your devices keep working either way.",
+    "allowance_exhausted": "The free allowance is used up. Invite a friend (the relay adds to both your allowances) or add your own model key — your sign-in and your devices keep working either way.",
     "daily_cap": "Today's token quota is used up; it comes back tomorrow.",
     "upstream": "The model provider did not answer.",
     "upstream_unconfigured": "nanoMuse Cloud has no model key configured.",
@@ -77,7 +83,6 @@ class CloudClient:
 
     def __init__(self, base_url: str, api_key: str = "", timeout: float = 30.0):
         self.base_url = (base_url or "").strip().rstrip("/")
-        self.api_key = api_key
         self.api_key = api_key
         self._client = httpx.AsyncClient(
             timeout=timeout,
@@ -177,6 +182,12 @@ class CloudClient:
     async def me(self) -> dict[str, Any]:
         return await self._request("GET", "/v1/me")
 
+    async def config(self) -> dict[str, Any]:
+        """The relay's public figures (relay 0.15, ``GET /v1/config``): the allowance a new
+        account gets, the invite bonus, whether sign-up is open, the links. No key needed;
+        an older relay answers 404, which comes back as a :class:`CloudError`."""
+        return await self._request("GET", "/v1/config", token="")
+
     async def profile(self, with_face: bool = True) -> dict[str, Any]:
         """The agent's name and look as the account's devices share it (``rev`` 0 = none yet);
         without the face's pictures when ``with_face`` is false."""
@@ -257,24 +268,71 @@ class CloudClient:
         return await self._request("GET", q)
 
     @staticmethod
-    def recommended_model(models: list[dict[str, Any]]) -> str:
-        """The relay's recommended chat model, else the default when it is offered, else the
-        first chat model."""
-        chat = [
-            m
-            for m in models
-            if (m.get("architecture") or {}).get("output_modalities", ["text"]) == ["text"]
-        ]
-        for m in chat:
-            if (m.get("nanomuse") or {}).get("recommended"):
+    def models_for(models: list[dict[str, Any]], purpose: str = "chat") -> list[dict[str, Any]]:
+        """The relay's models meant for ``purpose`` — ``chat`` or ``gui`` (contract C4).
+
+        A model that carries ``"for": ["chat"]`` / ``["gui"]`` / ``["chat", "gui"]`` (under
+        ``nanomuse``, where the relay keeps its flags, or at the top) is taken at its word.
+        A relay that does not say yet gets the old reading: every text-out model is a chat
+        model, and a chat model whose id says it sees (``qwen*-vl``, ``qwen3.8-*``) is a
+        hands model too."""
+        from nanomuse.llm.vision import model_takes_images
+
+        out = []
+        for m in models:
+            uses = CloudClient._lanes(m)
+            if uses is not None:
+                # said — `[]` is a picture or video model, in no picker
+                if purpose in uses:
+                    out.append(m)
+                continue
+            text_out = (m.get("architecture") or {}).get("output_modalities", ["text"]) == ["text"]
+            if not text_out:
+                continue
+            if purpose == "chat" or model_takes_images(str(m.get("id") or "")):
+                out.append(m)
+        return out
+
+    @staticmethod
+    def _lanes(m: dict[str, Any]) -> list[str] | None:
+        """The lanes a menu entry is for — ``nanomuse.for`` first, a top-level ``for`` as
+        the fallback; ``None`` when the relay did not say (``[]`` is "none": a picture or
+        video model)."""
+        flags = m.get("nanomuse") or {}
+        uses = flags.get("for")
+        if uses is None:
+            uses = m.get("for")
+        if isinstance(uses, str):
+            uses = [uses]
+        return [str(u) for u in uses] if isinstance(uses, list) else None
+
+    @staticmethod
+    def recommended_model(models: list[dict[str, Any]], purpose: str = "chat") -> str:
+        """The relay's recommended model for ``purpose`` (``nanomuse.recommended_for``, or
+        ``recommended`` on a relay that does not split the lanes), else the default when it
+        is offered, else the first one meant for it, else the default anyway."""
+        fitting = CloudClient.models_for(models, purpose)
+        default = DEFAULT_GUI_MODEL if purpose == "gui" else DEFAULT_CHAT_MODEL
+        for m in fitting:
+            flags = m.get("nanomuse") or {}
+            rec_for = flags.get("recommended_for")
+            if isinstance(rec_for, str):
+                rec_for = [rec_for]
+            if isinstance(rec_for, list):
+                if purpose in rec_for:
+                    return str(m["id"])
+                continue
+            if flags.get("recommended") and (purpose == "chat" or not CloudClient._lanes(m)):
                 return str(m["id"])
-        if any(m.get("id") == DEFAULT_MODEL for m in chat):
-            return DEFAULT_MODEL
-        return str(chat[0]["id"]) if chat else DEFAULT_MODEL
+        if any(m.get("id") == default for m in fitting):
+            return default
+        return str(fitting[0]["id"]) if fitting else default
 
 
 __all__ = [
     "CLOUD_KEY",
+    "DEFAULT_CHAT_MODEL",
+    "DEFAULT_GUI_MODEL",
     "DEFAULT_MODEL",
     "MESSAGES",
     "CloudClient",

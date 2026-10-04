@@ -17,6 +17,7 @@ import time
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 from . import client as _client
 from .catalog import Probe
@@ -145,7 +146,8 @@ CREATE TABLE IF NOT EXISTS profiles (
     updated_at    INTEGER NOT NULL,
     device        TEXT NOT NULL DEFAULT '',    -- the device that wrote it (it skips its own echo)
     body          TEXT NOT NULL DEFAULT '{}',  -- name, avatar, emoji, color, style, description
-    face          TEXT NOT NULL DEFAULT ''     -- JSON {mood: base64 WebP} when avatar = "face"
+    face          TEXT NOT NULL DEFAULT '',    -- JSON {mood: base64 WebP} when avatar = "face"
+    connectors    TEXT NOT NULL DEFAULT '[]'   -- 0.17: which device connected which service (never a credential)
 );
 -- 0.11: what each chat model under the operator's key answered when asked (catalog.py):
 -- whether it answers at all, whether it saw the magenta square. Operator data, no person's.
@@ -155,6 +157,14 @@ CREATE TABLE IF NOT EXISTS model_probes (
     vision        INTEGER NOT NULL,            -- 1: it named the colour of the picture
     checked_at    INTEGER NOT NULL,
     note          TEXT NOT NULL DEFAULT ''     -- the refusal, or the answer, trimmed
+);
+-- 0.15: what the operator set from the page while the relay ran — the allowance, the
+-- invite bonus, whether sign-up is open. A key here wins over the environment; a key
+-- removed falls back to it. Read at start and on every change; nothing else lives here.
+CREATE TABLE IF NOT EXISTS settings (
+    key           TEXT PRIMARY KEY,
+    value         TEXT NOT NULL,               -- JSON
+    updated_at    INTEGER NOT NULL
 );
 """
 
@@ -252,6 +262,143 @@ class Database:
         add("devices", "ip", "TEXT NOT NULL DEFAULT ''")
         self._conn.execute("CREATE INDEX IF NOT EXISTS ledger_ip ON ledger(ip) WHERE ip<>''")
         self._conn.execute("CREATE INDEX IF NOT EXISTS api_keys_ip ON api_keys(ip) WHERE ip<>''")
+        # 0.15: the allowance each account was given (the part of grant_uy that is neither
+        # an invite nor the operator's credit), so a raised allowance can be applied to the
+        # accounts that got less. -1 = from before the column; the service fills it with
+        # the allowance of the day (seed_allowances), the one they got for all we know.
+        add("accounts", "allowance_uy", "INTEGER NOT NULL DEFAULT -1")
+        # 0.17: the connectors each device of the account holds — a label and a sign-in kind
+        # per service, never a credential — merged by the device that wrote them
+        add("profiles", "connectors", "TEXT NOT NULL DEFAULT '[]'")
+
+    # -- 0.15: settings the operator changes while the relay runs ------------------------------
+
+    def settings_all(self) -> dict[str, Any]:
+        """Every override the page set, decoded; empty when the environment is all there is."""
+        with self._lock:
+            rows = self._conn.execute("SELECT key, value FROM settings").fetchall()
+        out: dict[str, Any] = {}
+        for r in rows:
+            try:
+                out[r["key"]] = json.loads(r["value"])
+            except ValueError:
+                continue
+        return out
+
+    def settings_put(self, key: str, value: Any) -> None:
+        """Set an override, or remove it (value None) so the environment's value is back."""
+        with self.tx() as c:
+            if value is None:
+                c.execute("DELETE FROM settings WHERE key=?", (key,))
+            else:
+                c.execute(
+                    "INSERT INTO settings(key, value, updated_at) VALUES (?,?,?) "
+                    "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+                    (key, json.dumps(value), now()),
+                )
+
+    def seed_allowances(self, allowance_uy: int) -> int:
+        """Accounts from before the allowance_uy column: the allowance of the day is what
+        they got, as far as anyone knows. Idempotent — only the unset rows (-1) are touched."""
+        with self.tx() as c:
+            cur = c.execute("UPDATE accounts SET allowance_uy=? WHERE allowance_uy<0", (max(0, int(allowance_uy)),))
+            return int(cur.rowcount or 0)
+
+    def below_allowance(self, allowance_uy: int, exclude_hashes: frozenset[str] = frozenset()) -> int:
+        """How many accounts got a smaller allowance than the current one — the ones a raise
+        would reach. Members (flagged, or on the operator's list) do not count: no limit."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id_hash FROM accounts WHERE unlimited=0 AND allowance_uy>=0 AND allowance_uy<?", (int(allowance_uy),)
+            ).fetchall()
+        return sum(1 for r in rows if r["id_hash"] not in exclude_hashes)
+
+    def raise_allowance(self, allowance_uy: int, exclude_hashes: frozenset[str] = frozenset()) -> int:
+        """Bring every account that got a smaller allowance up to this one: the difference
+        goes into its pool, with a ledger line saying so, and the account remembers the new
+        figure so a second run adds nothing. Returns how many accounts it reached. Lowering
+        the allowance never takes anything back — it only changes what the next sign-ups get."""
+        allowance_uy = max(0, int(allowance_uy))
+        t = now()
+        n = 0
+        with self.tx() as c:
+            rows = c.execute(
+                "SELECT id, id_hash, allowance_uy FROM accounts WHERE unlimited=0 AND allowance_uy>=0 AND allowance_uy<?",
+                (allowance_uy,),
+            ).fetchall()
+            for r in rows:
+                if r["id_hash"] in exclude_hashes:
+                    continue
+                diff = allowance_uy - int(r["allowance_uy"])
+                c.execute("UPDATE accounts SET grant_uy=grant_uy+?, allowance_uy=? WHERE id=?", (diff, allowance_uy, r["id"]))
+                c.execute(
+                    "INSERT INTO ledger(account_id, ts, kind, charged, extra) VALUES (?,?,?,?,?)",
+                    (r["id"], t, "credit", 0, json.dumps({"credit_uy": diff, "from": "allowance"})),
+                )
+                n += 1
+        return n
+
+    def credit_all(self, credit_uy: int, note: str = "", exclude_hashes: frozenset[str] = frozenset()) -> int:
+        """The same credit into every limited account's pool at once — a holiday, an apology
+        for a bad day. Members are left out (nothing to add to no limit). Returns the count."""
+        credit_uy = max(0, int(credit_uy))
+        t = now()
+        n = 0
+        with self.tx() as c:
+            rows = c.execute("SELECT id, id_hash FROM accounts WHERE unlimited=0 AND disabled=0").fetchall()
+            for r in rows:
+                if r["id_hash"] in exclude_hashes:
+                    continue
+                c.execute("UPDATE accounts SET grant_uy=grant_uy+? WHERE id=?", (credit_uy, r["id"]))
+                c.execute(
+                    "INSERT INTO ledger(account_id, ts, kind, charged, extra) VALUES (?,?,?,?,?)",
+                    (r["id"], t, "credit", 0, json.dumps({"credit_uy": credit_uy, "from": "operator", "note": note[:200], "all": True})),
+                )
+                n += 1
+        return n
+
+    def set_pool(
+        self,
+        account_id: str,
+        *,
+        grant_uy: int | None = None,
+        left_uy: int | None = None,
+        delta_uy: int | None = None,
+        note: str = "",
+    ) -> int | None:
+        """The operator sets an account's pool (0.16) — to a lifetime total (`grant_uy`), to
+        what should be left right now (`left_uy`: what is spent plus that), or by a difference
+        (`delta_uy`, negative takes away). The pool never goes below zero; what is spent stays
+        spent, so a total under it leaves nothing. One ledger line says what moved and the new
+        total. Returns the new pool, or None when there is no such account."""
+        t = now()
+        with self.tx() as c:
+            row = c.execute("SELECT grant_uy FROM accounts WHERE id=?", (account_id,)).fetchone()
+            if row is None:
+                return None
+            old = int(row["grant_uy"] or 0)
+            if left_uy is not None:
+                spent = c.execute("SELECT COALESCE(SUM(cost_uy),0) FROM ledger WHERE account_id=? AND cost_uy>0", (account_id,)).fetchone()[
+                    0
+                ]
+                new = int(spent) + max(0, int(left_uy))
+            elif grant_uy is not None:
+                new = max(0, int(grant_uy))
+            else:
+                new = max(0, old + int(delta_uy or 0))
+            if new != old:
+                c.execute("UPDATE accounts SET grant_uy=? WHERE id=?", (new, account_id))
+                c.execute(
+                    "INSERT INTO ledger(account_id, ts, kind, charged, extra) VALUES (?,?,?,?,?)",
+                    (account_id, t, "credit", 0, json.dumps({"credit_uy": new - old, "from": "operator", "note": note[:200], "set": new})),
+                )
+            return new
+
+    def limited_account_ids(self, exclude_hashes: frozenset[str] = frozenset()) -> list[str]:
+        """Every account under a limit — not a member, not disabled — for a change made to all."""
+        with self._lock:
+            rows = self._conn.execute("SELECT id, id_hash FROM accounts WHERE unlimited=0 AND disabled=0").fetchall()
+        return [str(r["id"]) for r in rows if r["id_hash"] not in exclude_hashes]
 
     def seed_grants(self, allowance_uy: int) -> int:
         """Accounts from before 0.5 start the new model with what they have spent so far plus
@@ -353,9 +500,9 @@ class Database:
         who = _client.current()
         with self.tx() as c:
             c.execute(
-                "INSERT INTO accounts(id, id_hash, channel, hint, created_at, granted, identifier_enc, grant_uy, "
-                "first_ip, last_ip, last_ua, last_seen_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                (account_id, id_hash, channel, hint, t, grant, identifier_enc, grant_uy, who.ip, who.ip, who.ua, t),
+                "INSERT INTO accounts(id, id_hash, channel, hint, created_at, granted, identifier_enc, grant_uy, allowance_uy, "
+                "first_ip, last_ip, last_ua, last_seen_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (account_id, id_hash, channel, hint, t, grant, identifier_enc, grant_uy, grant_uy, who.ip, who.ip, who.ua, t),
             )
             if grant:
                 c.execute(
@@ -1087,22 +1234,26 @@ class Database:
     def profile(self, account_id: str) -> sqlite3.Row | None:
         with self._lock:
             return self._conn.execute(
-                "SELECT rev, updated_at, device, body, face FROM profiles WHERE account_id=?", (account_id,)
+                "SELECT rev, updated_at, device, body, face, connectors FROM profiles WHERE account_id=?", (account_id,)
             ).fetchone()
 
-    def put_profile(self, account_id: str, device: str, body: str, face: str | None) -> int:
+    def put_profile(self, account_id: str, device: str, body: str | None, face: str | None, connectors: str | None = None) -> int:
         """Store the profile and return its new rev. ``face`` None keeps the stored face
-        (a rename should not cost the pictures a round trip); "" clears it."""
+        (a rename should not cost the pictures a round trip); "" clears it. ``body`` None
+        keeps the stored look (a device writing only its connectors); ``connectors`` None
+        keeps the stored list — the service merges by device before it gets here (0.17)."""
         with self.tx() as c:
-            row = c.execute("SELECT rev, face FROM profiles WHERE account_id=?", (account_id,)).fetchone()
+            row = c.execute("SELECT rev, body, face, connectors FROM profiles WHERE account_id=?", (account_id,)).fetchone()
             rev = (int(row["rev"]) if row else 0) + 1
-            kept = face if face is not None else (str(row["face"]) if row else "")
+            kept_face = face if face is not None else (str(row["face"]) if row else "")
+            kept_body = body if body is not None else (str(row["body"]) if row else "{}")
+            kept_conn = connectors if connectors is not None else (str(row["connectors"]) if row else "[]")
             c.execute(
-                """INSERT INTO profiles(account_id, rev, updated_at, device, body, face) VALUES(?,?,?,?,?,?)
+                """INSERT INTO profiles(account_id, rev, updated_at, device, body, face, connectors) VALUES(?,?,?,?,?,?,?)
                    ON CONFLICT(account_id) DO UPDATE SET
                      rev=excluded.rev, updated_at=excluded.updated_at, device=excluded.device,
-                     body=excluded.body, face=excluded.face""",
-                (account_id, rev, now(), device, body, kept),
+                     body=excluded.body, face=excluded.face, connectors=excluded.connectors""",
+                (account_id, rev, now(), device, kept_body, kept_face, kept_conn),
             )
             return rev
 

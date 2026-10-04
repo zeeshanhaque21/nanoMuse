@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "nanomuse"
-version = "0.1.31"
+version = "0.1.34"
 description = "An open-source personal AI agent inspired by Meta's Muse: it does the work, a Sentinel decides what may run, and it reaches services through APIs, MCP servers, CLIs or the phone's screen. Phone today, web and desktop next. Bring your own model."
 readme = "README.md"
 license = { text = "GPL-3.0-or-later" }
@@ -48,9 +48,22 @@ dependencies = [
 [project.optional-dependencies]
 browser = ["playwright>=1.45"]
 # this computer's screen and hands (docs/every-device.md); xdotool works without them on X11
-hands = ["mss>=9", "Pillow>=10", "pyautogui>=0.9.54", "pyperclip>=1.8"]
+hands = [
+    "mss>=9",
+    "Pillow>=10",
+    "pyautogui>=0.9.54",
+    "pyperclip>=1.8",
+    # macOS window mode (nanomuse/computer/mac_window.py): one app's window, events to its process
+    "pyobjc-framework-Quartz>=10; sys_platform == 'darwin'",
+    "pyobjc-framework-ApplicationServices>=10; sys_platform == 'darwin'",
+]
 dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.5", "mypy>=1.10", "httpx>=0.27", "types-python-dateutil"]
-all = ["nanomuse[browser,hands,dev]"]
+# chat apps (docs/channels.md); Telegram needs nothing beyond httpx
+feishu = ["lark-oapi>=1.5,<2"]
+dingtalk = ["dingtalk-stream>=0.24,<1"]
+wecom = ["wecom-aibot-sdk-python>=0.1.7,<0.2"]
+channels = ["nanomuse[feishu,dingtalk,wecom]"]
+all = ["nanomuse[browser,hands,dev,channels]"]
 
 [project.scripts]
 nanomuse = "nanomuse.cli:app"
@@ -60,9 +73,9 @@ nanomuse-browser = "nanomuse.bridge.cli:browser_main"
 nanomuse-open = "nanomuse.bridge.cli:open_main"
 
 [project.urls]
-Homepage = "https://github.com/nano-muse/nanoMuse"
-Repository = "https://github.com/nano-muse/nanoMuse"
-Issues = "https://github.com/nano-muse/nanoMuse/issues"
+Homepage = "https://github.com/zeeshanhaque21/nanoMuse"
+Repository = "https://github.com/zeeshanhaque21/nanoMuse"
+Issues = "https://github.com/zeeshanhaque21/nanoMuse/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["nanomuse"]

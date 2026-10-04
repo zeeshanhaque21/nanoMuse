@@ -17,6 +17,7 @@ from rich.prompt import Prompt
 from rich.table import Table
 
 from nanomuse import __version__
+from nanomuse.channels.cli import channels_app
 from nanomuse.config import DEFAULT_DATA_DIR, Settings, find_config_file, load_settings
 
 app = typer.Typer(
@@ -57,6 +58,7 @@ app.add_typer(skills_app, name="skills")
 app.add_typer(vault_app, name="vault")
 app.add_typer(config_app, name="config")
 app.add_typer(phone_app, name="phone")
+app.add_typer(channels_app, name="channels")
 
 console = Console()
 
@@ -1493,11 +1495,12 @@ def version() -> None:
 @app.command()
 def mcp(config: ConfigOpt = None) -> None:
     """Serve this computer's screen and hands over MCP on stdio (for another host, e.g.
-    nanoMuse on DeepSeek Harness; see docs/harness.md). Nothing is printed on stdout but
-    the protocol; the config is read for [hands] and [gui] when it exists."""
+    nanoMuse on DeepSeek Harness; see docs/harness.md), plus the connectors config.toml
+    turns on (mailbox, calendar, contacts). Nothing is printed on stdout but the protocol;
+    the config is read for [hands], [gui] and [connectors] when it exists."""
     import sys
 
-    from nanomuse.bridge.mcp_server import hands_tools, serve
+    from nanomuse.bridge.mcp_server import connector_tools, hands_tools, serve
     from nanomuse.config import Settings
 
     try:
@@ -1511,7 +1514,7 @@ def mcp(config: ConfigOpt = None) -> None:
         settings.agent.workspace.mkdir(parents=True, exist_ok=True)
     except OSError:
         pass
-    _run_async(serve(hands_tools(settings)))
+    _run_async(serve(hands_tools(settings) + connector_tools(settings)))
 
 
 # ============================================================================ doctor

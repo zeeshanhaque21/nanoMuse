@@ -5,8 +5,10 @@ import { AllowanceWays } from "../components/AllowanceWays";
 import { PageBar } from "../components/BackBar";
 import { inputCls, primaryBtn, secondaryBtn } from "../components/Form";
 import { SignIn } from "../components/SignIn";
+import { StarNudgeOnce, useCloudConfig } from "../components/StarNudge";
 import { useT, intlLocale } from "../i18n";
 import { useStore } from "../store";
+import { ownKeyLine } from "../region";
 import type { CloudAccount, CloudEvent, CloudMe, CloudSession, UsageRow } from "../types";
 import { cx } from "../util";
 
@@ -26,6 +28,7 @@ export function AccountScreen() {
   const [events, setEvents] = useState<CloudEvent[] | null>(null);
   const [loading, setLoading] = useState(false);
   const signedIn = !!account?.signed_in;
+  const cfg = useCloudConfig();
 
   const load = async () => {
     if (!signedIn) return;
@@ -54,13 +57,18 @@ export function AccountScreen() {
         {!signedIn ? (
           <Section>
             <p className="text-[13.5px] text-muted leading-relaxed">
-              {t("Free. One account for all your devices, with a model and ¥10 of use to start; a code the first time, a password afterwards if you like.")}
+              {t("Free. One account for all your devices, with a model and ¥{allowance} of use to start; a code the first time, a password afterwards if you like.", {
+                allowance: (cfg.allowance_cny ?? 10).toFixed(0),
+              })}
             </p>
             <SignIn onSignedIn={() => toast(t("Signed in to nanoMuse Cloud."))} />
           </Section>
         ) : (
           <>
             <Identity account={account} me={me} />
+            {me && (
+              <StarNudgeOnce moment="signed_in" />
+            )}
             {me && <Allowance me={me} onChanged={() => void load()} />}
             {me?.invite?.code && <Invite me={me} />}
             {me && <Usage me={me} />}
@@ -177,7 +185,8 @@ function Allowance({ me, onChanged }: { me: CloudMe; onChanged: () => void }) {
           {t("¥{allowance} to start, +¥{invite} for each friend you invite — and +¥{invite} for them; after that, your own key keeps the model going.", {
             allowance: (spend.allowance_cny ?? 10).toFixed(0),
             invite: (info.invite_bonus_cny ?? 5).toFixed(0),
-          })}
+          })}{" "}
+          {!exhausted && !warn && ownKeyLine(t, { signed_in: true, channel: me.account.channel, region: me.account.region })}
         </p>
       )}
       {(exhausted || warn) && <AllowanceWays info={info} exhausted={exhausted} onChanged={onChanged} />}
@@ -506,6 +515,7 @@ const EVENT_LABELS: Record<string, string> = {
   "call.ended": "Call ended",
   "upstream.error": "The model provider returned an error",
   "credit.granted": "Allowance added",
+  "pool.set": "Allowance adjusted",
   "invite.accepted": "Signed up with a friend's code",
   "invite.used": "A friend signed up with your code",
   "invite.unknown": "An invite code was not recognised",

@@ -47,9 +47,12 @@ LOG_DIR = Path(os.environ.get("TRAFFIC_LOG_DIR") or HERE.parent / "logs" / "cadd
 LOG_NAME = os.environ.get("TRAFFIC_LOG_NAME") or "nanomuse.cn.log"
 DB_PATH = Path(os.environ.get("TRAFFIC_DB") or "/var/lib/nanomuse-traffic/traffic.db")
 REPO = os.environ.get("TRAFFIC_REPO") or "nano-muse/nanoMuse"
+# The site's own names, left out of the referrers. fork: no default host is named here —
+# this mirror is not deployed by this fork, so the operator sets TRAFFIC_HOSTS for the
+# names their own box serves. Empty means "no known own hosts".
 OWN_HOSTS = {
     h.strip().lower()
-    for h in (os.environ.get("TRAFFIC_HOSTS") or "nanomuse.cn,www.nanomuse.cn").split(",")
+    for h in (os.environ.get("TRAFFIC_HOSTS") or "").split(",")
     if h.strip()
 }
 DAY_OFFSET_S = int(os.environ.get("TRAFFIC_DAY_OFFSET_H") or "8") * 3600

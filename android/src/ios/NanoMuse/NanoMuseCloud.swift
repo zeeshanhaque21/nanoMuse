@@ -78,7 +78,12 @@ enum NanoMuseCloud {
         static let base = "nanomuse.cloud.base"
         static let instance = "nanomuse.cloud.instance_id"
         static let account = "nanomuse.cloud.account"
+        static let fresh = "nanomuse.cloud.fresh_account"
     }
+
+    /// True after a sign-in that created the account, until the first run's password page was answered.
+    static var freshAccount: Bool { UserDefaults.standard.bool(forKey: Keys.fresh) }
+    static func clearFreshAccount() { UserDefaults.standard.removeObject(forKey: Keys.fresh) }
 
     typealias Account = NanoMuseCloudAccount
     typealias CloudError = NanoMuseCloudError
@@ -145,17 +150,42 @@ enum NanoMuseCloud {
     /// Exchange the code for a key and make the relay a usable provider: instance, key, models
     /// and a default group with the recommended chat model (only if the user has none yet).
     /// Returns the account as the relay sees it.
-    static func verify(identifier: String, code: String) async throws -> Account {
-        let device = UIDevice.current
+    static func verify(identifier: String, code: String, invite: String = "") async throws -> Account {
+        var body: [String: Any] = [
+            "identifier": trimmed(identifier),
+            "code": trimmed(code),
+            "device": deviceName,
+        ]
+        // A friend's code: both get credit on a first sign-in (relay 0.12+); older relays ignore it.
+        if !trimmed(invite).isEmpty { body["invite"] = trimmed(invite).uppercased() }
+        let reply = try await call("POST", "/v1/auth/verify", body: body, token: nil)
+        return try await adopt(reply)
+    }
+
+    /// The other way in: the account's password instead of a code (relay 0.12+).
+    static func login(identifier: String, password: String) async throws -> Account {
         let reply = try await call(
-            "POST", "/v1/auth/verify",
-            body: [
-                "identifier": trimmed(identifier),
-                "code": trimmed(code),
-                "device": String("\(device.model) iOS \(device.systemVersion)".prefix(80)),
-            ],
+            "POST", "/v1/auth/login",
+            body: ["identifier": trimmed(identifier), "password": password, "device": deviceName],
             token: nil
         )
+        return try await adopt(reply)
+    }
+
+    /// "iPhone iOS 18.1", what the relay lists under signed-in devices.
+    static var deviceName: String {
+        let device = UIDevice.current
+        return String("\(device.model) iOS \(device.systemVersion)".prefix(80))
+    }
+
+    /// The key this phone holds, if it is signed in.
+    static var apiKey: String? {
+        guard let inst = instance, let key = ProviderKeychainHelper.loadAPIKey(instanceId: inst.id), !key.isEmpty else { return nil }
+        return key
+    }
+
+    /// A sign-in reply → the provider instance, its models, a default group, the cached account.
+    private static func adopt(_ reply: [String: Any]) async throws -> Account {
         guard let apiKey = reply["api_key"] as? String, !apiKey.isEmpty else {
             throw CloudError(code: "bad_reply", message: "The relay sent no key", status: 0)
         }
@@ -188,6 +218,9 @@ enum NanoMuseCloud {
             inst = fresh
         }
         UserDefaults.standard.set(inst.id, forKey: Keys.instance)
+        // A sign-in that created the account owes the first run a password page (NanoMuseFirstRun).
+        if (reply["created"] as? Bool) == true { UserDefaults.standard.set(true, forKey: Keys.fresh) }
+        if let region = reply["region"] as? String, !region.isEmpty { UserDefaults.standard.set(region, forKey: "nanomuse.relay.region") }
 
         // The models the relay serves — the same `/v1/models` call every provider gets; the
         // relay includes modalities so a picture model is recognised as one.
@@ -256,6 +289,18 @@ enum NanoMuseCloud {
             return AppLocalized("This sign-in is no longer valid. Sign in again.")
         case "out_of_tokens":
             return AppLocalized("The starter allowance is used up. Add a provider of your own to keep going.")
+        case "allowance_exhausted":
+            return AppLocalized("The free allowance is used up. Use a key of your own, or invite a friend — both under nanoMuse Cloud in Settings.")
+        case "password_wrong":
+            return AppLocalized("That password is not right.")
+        case "password_required", "no_password":
+            return AppLocalized("This account has no password yet. Sign in with a code and set one under nanoMuse Cloud.")
+        case "password_weak":
+            return AppLocalized("Use eight characters or more.")
+        case "invite_bad":
+            return AppLocalized("That invite code is not one we know. Check it, or leave it empty.")
+        case "signup_closed":
+            return AppLocalized("Sign-up is paused right now. Try again later, or use a key of your own.")
         case "daily_cap":
             return AppLocalized("Today's allowance is used up. It resets tomorrow.")
         case "rate_limited":
@@ -273,23 +318,31 @@ enum NanoMuseCloud {
     /// replaced — someone who already has a key and a group keeps them and gets the relay as
     /// one more provider.
     private static func provisionDefaults(store: ProviderConfigStore, instance: ProviderInstance, models: [[String: Any]]) {
-        let recommended = models.first(where: { model in
-            let meta = model["nanomuse"] as? [String: Any]
-            return (meta?["recommended"] as? Bool) == true && !drawsOnly(model)
-        }) ?? models.first(where: { !drawsOnly($0) })
-        let recommendedChat = recommended?["id"] as? String
+        // Contract C4: the chat opens on the model the relay recommends *for chat*
+        // (`for: ["chat"]`, deepseek-v4.1-flash), never on a hands-only one.
+        let recommendedChat = NanoMuseModelMenu.recommendedChat(models)?["id"] as? String
         let pictureIds = Set(models.filter { drawsOnly($0) }.compactMap { $0["id"] as? String })
 
         let entries = store.entries(for: instance.id).filter { !$0.isHidden }
         let chatEntry = entries.first(where: { $0.model.id == recommendedChat })
             ?? entries.first(where: { !pictureIds.contains($0.model.id) })
         guard let chatEntry else { return }
-        let already = store.modelGroups.contains { $0.memberEntryIds.contains(chatEntry.id) }
-        guard !already else { return }
-        let group = ModelGroup(name: label, memberEntryIds: [chatEntry.id])
-        store.addGroup(group)
-        if store.defaultPrimaryGroupId == nil {
-            store.defaultPrimaryGroupId = group.id
+        // Ours already, with the recommended model or with the person's own choice (a member
+        // who swapped the recommended model for another must not get a second group with the
+        // old one back on signing in again).
+        let already = store.modelGroups.contains { $0.memberEntryIds.contains(chatEntry.id) || ($0.name == label && !$0.memberEntryIds.isEmpty) }
+        if !already {
+            let group = ModelGroup(name: label, memberEntryIds: [chatEntry.id])
+            store.addGroup(group)
+            if store.defaultPrimaryGroupId == nil {
+                store.defaultPrimaryGroupId = group.id
+            }
+        }
+        // The default group must be one that can answer.
+        let def = store.modelGroups.first { $0.id == store.defaultPrimaryGroupId }
+        if def == nil || def?.memberEntryIds.isEmpty == true {
+            store.defaultPrimaryGroupId = (store.modelGroups.first { $0.memberEntryIds.contains(chatEntry.id) }
+                ?? store.modelGroups.first { $0.name == label && !$0.memberEntryIds.isEmpty })?.id
         }
     }
 
@@ -299,7 +352,7 @@ enum NanoMuseCloud {
         return outputs.contains("image") && !outputs.contains("text")
     }
 
-    private static func parseAccount(_ reply: [String: Any]) -> Account {
+    static func parseAccount(_ reply: [String: Any]) -> Account {
         let account = reply["account"] as? [String: Any] ?? [:]
         let tokens = reply["tokens"] as? [String: Any] ?? [:]
         func int64(_ value: Any?) -> Int64 {
@@ -319,9 +372,12 @@ enum NanoMuseCloud {
         )
     }
 
-    private static func clear() {
+    static func clear() {
         UserDefaults.standard.removeObject(forKey: Keys.instance)
         UserDefaults.standard.removeObject(forKey: Keys.account)
+        UserDefaults.standard.removeObject(forKey: Keys.fresh)
+        // another account's devices and their connections are not ours to list
+        NanoMuseProfileSync.shared.forget()
     }
 
     private static func trimmed(_ s: String) -> String {
@@ -346,7 +402,7 @@ enum NanoMuseCloud {
         return URLSession(configuration: config)
     }()
 
-    private static func call(_ method: String, _ path: String, body: [String: Any]?, token: String?) async throws -> [String: Any] {
+    static func call(_ method: String, _ path: String, body: [String: Any]?, token: String?) async throws -> [String: Any] {
         guard !baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw CloudError(code: "relay_unconfigured", message: "Relay server not configured: enter your relay server in Settings", status: 0)
         }
@@ -360,7 +416,7 @@ enum NanoMuseCloud {
         if let token {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
-        if method != "GET" {
+        if method != "GET" && method != "DELETE" {
             request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONSerialization.data(withJSONObject: body ?? [:])
         }

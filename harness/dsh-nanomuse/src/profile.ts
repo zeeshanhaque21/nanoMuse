@@ -16,6 +16,7 @@
  */
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import type { SharedConnector } from './desk.ts'
 import type { Relay, RelayProfile } from './relay.ts'
 
 export const MOODS = ['idle', 'working', 'waiting', 'happy', 'error'] as const
@@ -34,9 +35,11 @@ export interface Profile {
   style: string
   /** The folder under `faces/` when `avatar` is `face`. */
   faceId: string
+  /** The account's connections on every device, as the relay lists them (this device's rows included). */
+  connectors: SharedConnector[]
 }
 
-export const DEFAULT_PROFILE: Profile = { rev: 0, name: 'nanoMuse', avatar: 'dragon', emoji: '', color: '', description: '', style: '', faceId: '' }
+export const DEFAULT_PROFILE: Profile = { rev: 0, name: 'nanoMuse', avatar: 'dragon', emoji: '', color: '', description: '', style: '', faceId: '', connectors: [] }
 
 const FACE_ID = /^[a-f0-9]{6,40}$/
 
@@ -59,10 +62,10 @@ export class ProfileStore {
     return () => this.listeners.delete(listener)
   }
 
-  /** Where a still of the worn face is on disk, or nothing for the dragon and the emoji. */
-  stillPath(faceId: string, mood: string): string | undefined {
+  /** Where a still (or a clip, if a face ever has them) of the worn face is on disk, or nothing for the dragon and the emoji. */
+  stillPath(faceId: string, mood: string, ext: 'webp' | 'mp4' = 'webp'): string | undefined {
     if (!FACE_ID.test(faceId) || !(MOODS as readonly string[]).includes(mood)) return undefined
-    return join(this.dir, 'faces', faceId, `${mood}.webp`)
+    return join(this.dir, 'faces', faceId, `${mood}.${ext}`)
   }
 
   async load(): Promise<void> {
@@ -96,6 +99,7 @@ export class ProfileStore {
       description: light.description,
       style: light.style,
       faceId: '',
+      connectors: light.connectors,
     }
     if (light.avatar === 'emoji') {
       next.avatar = 'emoji'
@@ -171,6 +175,7 @@ function normalize(raw: Partial<Profile>): Profile {
     description: String(raw.description ?? ''),
     style: String(raw.style ?? ''),
     faceId: avatar === 'face' && FACE_ID.test(String(raw.faceId ?? '')) ? String(raw.faceId) : '',
+    connectors: Array.isArray(raw.connectors) ? raw.connectors : [],
   }
 }
 

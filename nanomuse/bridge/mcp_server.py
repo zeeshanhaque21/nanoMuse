@@ -5,7 +5,8 @@ this computer's screen and hands the way it gets any other capability: as an MCP
 on stdio. The two tools are the runtime's own ``computer_screen`` and ``computer_act``
 (:mod:`nanomuse.tools.computer`), with their descriptions and schemas, so a model that
 knows one host knows the other; ``computer_task`` stays home, because the host's model
-runs the loop itself.
+runs the loop itself. The connectors ``config.toml`` turns on — ``read_emails`` /
+``send_email``, ``calendar``, ``contacts`` — come along (:func:`connector_tools`).
 
 What the Sentinel does in the runtime, the bridge does at the model's level: a call the
 runtime would ask the person about — Enter or a submit, a heavy shortcut, a click on words
@@ -34,8 +35,8 @@ from typing import Any
 
 from nanomuse.computer.link import ComputerLink
 from nanomuse.config import Settings
-from nanomuse.schema import RiskLevel, ToolResult
-from nanomuse.tools.base import BaseTool
+from nanomuse.schema import STEP_KEY, RiskLevel, ToolResult
+from nanomuse.tools.base import BaseTool, with_step
 from nanomuse.tools.computer import ComputerAct, ComputerScreen
 
 SERVER_NAME = "nanomuse"
@@ -51,6 +52,37 @@ def hands_tools(settings: Settings, link: ComputerLink | None = None) -> list[Ba
     return [ComputerScreen(link=link), ComputerAct(link=link, gui=settings.gui)]
 
 
+def connector_tools(settings: Settings) -> list[BaseTool]:
+    """The connectors ``config.toml`` turns on — the mailbox, the calendar feeds, the
+    address book — built as :class:`nanomuse.app.NanoMuseApp` builds them, so a host
+    gets ``read_emails`` / ``send_email`` / ``calendar`` / ``contacts`` next to the hands
+    (the desktop's Connectors page lists them as connected once they show up here)."""
+    from nanomuse.calendar.feeds import CalendarFeeds
+    from nanomuse.contacts.book import ContactBook
+    from nanomuse.tools.calendar_tool import Calendar
+    from nanomuse.tools.contacts_tool import Contacts
+    from nanomuse.tools.email_tool import ReadEmails, SendEmail
+    from nanomuse.vault.vault import CredentialVault
+
+    c = settings.connectors
+    if not (c.email.enabled or c.calendar.enabled or c.contacts.enabled):
+        return []
+    vault = CredentialVault(settings.vault_file, settings.vault_key_file)
+    book = ContactBook(
+        c.contacts, vault=vault, own_file=settings.contacts_file, cache_file=settings.contacts_cache
+    )
+    tools: list[BaseTool] = []
+    if c.email.enabled:
+        tools.append(ReadEmails(settings=c.email, vault=vault))
+        tools.append(SendEmail(settings=c.email, vault=vault, book=book))
+    if c.calendar.enabled:
+        feeds = CalendarFeeds(c.calendar, vault=vault, cache_file=settings.calendar_cache)
+        tools.append(Calendar(feeds=feeds, workspace=settings.agent.workspace))
+    if c.contacts.enabled:
+        tools.append(Contacts(book=book))
+    return tools
+
+
 def confirm_secret() -> str:
     """The host's confirmation secret, or ``""`` when the model's own word is accepted."""
     return os.environ.get(CONFIRM_SECRET_ENV, "").strip()
@@ -62,7 +94,7 @@ def ticket(secret: str, args: dict[str, Any]) -> str:
     The plugin and this server compute it the same way (sorted keys, compact JSON, the
     ``confirmed`` field left out), so a ticket confirms these arguments and no others.
     """
-    clean = {k: v for k, v in args.items() if k != CONFIRMED}
+    clean = {k: v for k, v in args.items() if k not in (CONFIRMED, STEP_KEY)}
     body = json.dumps(clean, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hmac.new(secret.encode(), body.encode(), hashlib.sha256).hexdigest()[:32]
 
@@ -78,7 +110,7 @@ def _confirmed(args: dict[str, Any]) -> bool:
 
 def exposed_schema(tool: BaseTool) -> dict[str, Any]:
     """The tool's schema with the bridge's ``confirmed`` field on the ones that need it."""
-    schema: dict[str, Any] = json.loads(json.dumps(tool.parameters))
+    schema: dict[str, Any] = json.loads(json.dumps(with_step(tool.parameters)))
     if tool.risk != RiskLevel.SAFE:
         props = schema.setdefault("properties", {})
         if confirm_secret():
@@ -143,7 +175,7 @@ async def call(tool: BaseTool, args: dict[str, Any]) -> ToolResult:
     refused = gate(tool, args)
     if refused is not None:
         return ToolResult.fail(refused)
-    clean = {k: v for k, v in args.items() if k != CONFIRMED}
+    clean = {k: v for k, v in args.items() if k not in (CONFIRMED, STEP_KEY)}
     try:
         return await tool.execute(**clean)
     except Exception as exc:  # noqa: BLE001 - the host gets a message, not a dead server

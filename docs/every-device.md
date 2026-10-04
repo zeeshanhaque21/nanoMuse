@@ -155,11 +155,47 @@ report, the same Stop. What differs is the dialect and the device:
   `GetForegroundWindow`) so the card and the log say *in Firefox*, not *on the
   screen*.
 - **Permissions.** macOS asks for Screen Recording and Accessibility once;
-  Settings → Hands says so and opens the panes. Linux needs X11 (Wayland has
-  no portable way to move the pointer yet; the page says so). Windows needs
-  nothing.
+  Settings → Hands says so and opens the panes. They are granted to the
+  runtime binary the desktop app bundles, so a reinstall may ask again. Linux
+  needs X11 (Wayland has no portable way to move the pointer yet; the page
+  says so). Windows needs nothing.
+- **Per app.** The first action in an application in a conversation asks:
+  *Let Nova use Safari?* — once, for this conversation, or always. The answer
+  is a Sentinel grant under `computer_app:<bundle id or name>`, so Settings →
+  Permissions lists it and can take it back. `[sentinel] mode = "auto"` skips
+  it like every other ask.
 - **Never** typed by the hands: passwords, PINs, card numbers, one-time codes.
-  The operator asks; the person types.
+  The operator hands the screen over instead — a *Your turn* card with the
+  reason; the person types, presses **Done**, and the operator looks again.
+
+#### Window mode (macOS)
+
+On a Mac the hands can work in **one application's window** instead of the
+whole screen (`[hands] mode`, and *Where* on the Hands card: *Auto* / *One
+window* / *Whole screen*; `nanomuse/computer/mac_window.py`):
+
+- the picture the model sees is that window only (`CGWindowListCreateImage`
+  by window id), scaled for the model; coordinates are pixels of that picture
+  and are mapped back to the window's place on the screen;
+- clicks, drags, scrolls and keys are delivered to the application's process
+  (`CGEventPostToPid`), not to the system cursor — the person keeps the mouse
+  and can work in another window meanwhile; text goes in as unicode keyboard
+  events, so 中文 and emoji arrive as typed; when Accessibility is granted, a
+  button under the point is pressed through the accessibility tree (`AXPress`)
+  rather than by a synthetic click;
+- the agent names the window with `computer_act` → `computer_target` (`app`:
+  a name as the menu bar shows it, or a bundle id) or with `app` on any
+  action; `open_app` makes the opened application the target. *Auto* is
+  window mode as soon as an application is named, the screen until then.
+
+What the person sees: the Hands card says *Working in Safari's window; the
+mouse stays yours*, the desktop stage draws the cursor where the click lands
+(the hands' events carry `x`/`y` in screen pixels), and the approval cards
+name the application. A window that cannot be found, captured (no Screen
+Recording — the capture comes back empty) or driven drops back to the whole
+screen with a note in the observation; nothing stops. Linux and Windows stay
+on the shared screen; `pip install "nanomuse[hands]"` brings the pyobjc
+frameworks on macOS only.
 
 ## The phone
 
@@ -172,7 +208,7 @@ phone's screen only), the desk's Hands events shown while it works, a
 
 ## The browser: a demo on a simulated phone
 
-[nanomuse.cn/web](https://nanomuse.cn/web/) leads to the showcase: a simulated
+Upstream's hosted demo (`nanomuse.cn/web`) leads to the showcase: a simulated
 phone in the browser (MobileGym, with the nanoMuse app brought to the front —
 `demo/mobilegym/apps/nanoMuse`) and, behind it, a private nanoMuse of the
 visitor's own that the showcase gateway starts for the visit — the
@@ -228,8 +264,8 @@ the hands elsewhere — the hub is already enough for them.
 
 Released with 0.1.19: the APK, the desktop installers (`nanoMuse-Desktop-…`,
 [`.github/workflows/desktop-app.yml`](../.github/workflows/desktop-app.yml)),
-the terminal binary, and nanoMuse Web at nanomuse.cn/web (the demo on a
-simulated phone since 0.1.26).
+the terminal binary, and upstream's nanoMuse Web demo (a simulated phone
+since 0.1.26). This fork serves its own releases from GitHub instead.
 
 ## Debugging it all on one machine
 
