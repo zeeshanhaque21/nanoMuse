@@ -16,7 +16,7 @@ import pytest
 from nanomuse.cloud import CloudClient, CloudError
 from nanomuse.config import CloudSettings
 
-CUSTOM = "https://jetson-orin-nano.time-mora.ts.net"
+CUSTOM = "https://relay.example.net"
 ROOT = Path(__file__).resolve().parents[1]
 
 
