@@ -231,8 +231,55 @@ VIRTUAL_ENV=$PWD/.venv-ci uv pip install -e . mypy
   executable name the script looks for: `nanomuse.exe` on win32, `nanomuse` elsewhere -
   for **both** the fixture and the return-value assertion. Getting this wrong leaves the
   `windows-latest` job red on the fork's own regression test.
-- Only `uv`/`python3 -m compileall` compile Python here. **Android and iOS are never
-  compiled locally** (no Gradle/Xcode reachable); say so rather than implying otherwise.
+- Only `uv`/`python3 -m compileall` compile Python here.
+
+### Android and iOS DO compile locally (corrected 2026-10-05)
+
+An earlier version of this file claimed Android and iOS were "never compiled locally (no
+Gradle/Xcode reachable)". **That was wrong, and trusting it made a run report both builds as
+"not verified" when they were in fact available.** Verified on this Mac:
+
+- **Android**: the Gradle project root is `android/src/android/` (NOT `android/`) and it has
+  `gradlew`, `gradle/`, and a git-ignored `local.properties` pointing at
+  `sdk.dir=/Users/zeeshanhaque/Library/Android/sdk`. Gradle 8.11.1, JDK 17 (Zulu) via
+  `export JAVA_HOME=$(/usr/libexec/java_home -v 17)`. Release build:
+  `cd android/src/android && ./gradlew :app:assembleRelease --console=plain`
+- `scripts/release-apk.sh` drives exactly that path, using `android/keystore.properties` and
+  `android/nanomuse-release.jks` (both git-ignored, both present since 2026-10-04).
+- **iOS**: Xcode 27.0 (build 27A266a), selected at `/Applications/Xcode.app`. Xcode runs and
+  resolves the SwiftPM graph, but `xcodebuild` **fails on two missing prebuilt native inputs**:
+  `android/src/ios/Configs/ProviderCustomization.xcconfig` (only a `.example` is tracked; copy
+  it, it is safe to leave the value empty) and `android/deps/frameworks/Rclone.xcframework`
+  (git-ignored, and **absent from the primary checkout too**). Those come from
+  `android/deps/build_ffmpeg.sh`, `build_rclone_ios.sh`, etc. Until they are fetched, the
+  honest iOS ceiling is a **Swift syntax/type parse**, not a full app build:
+  `xcrun swiftc -parse` over `android/src/ios/NanoMuse/*.swift`. Never report iOS as "no
+  toolchain" - report which specific native input is missing.
+- The prebuilt native asset `android/src/android/app/src/main/jniLibs/arm64-v8a/libproot.so`
+  exists in the primary checkout.
+
+### Android release build: the four git-ignored inputs a lease must be given
+
+`assembleRelease` fails on each missing one in turn, which is easy to misread as a broken
+toolchain. Copy all four from the primary checkout before building:
+
+| Path | Why |
+|---|---|
+| `android/src/android/local.properties` | `sdk.dir`; without it Gradle cannot find the SDK |
+| `android/src/android/app/libs/rclone.aar` | git-ignored prebuilt Rclone AAR (~9.5 MB) |
+| `android/src/android/app/src/main/jniLibs/arm64-v8a/libproot.so` | git-ignored prebuilt proot |
+| `android/keystore.properties` + `android/nanomuse-release.jks` | release signing |
+
+`build.gradle.kts` resolves `storeFile` **relative to `app/`**, so the copied
+`keystore.properties` must have its `storeFile` repointed at the lease's own copy of the
+`.jks` (path only - never print or copy the password values). Verified working result:
+`./gradlew :app:assembleRelease` → BUILD SUCCESSFUL, `app-release.apk`, signed
+`CN=nanoMuse fork` (signer SHA-256 `811846ed...`), 0 `nanomuse.cn` in the unpacked APK.
+
+**These toolchains live only in the primary checkout** because `local.properties`, the
+proot/rootfs assets and the gradle caches are git-ignored. A fresh treehouse lease does NOT
+inherit them: wire them in before building (§5 trap). Never report a build as "not verified"
+because a runbook line says so - check the toolchain, then report what actually ran.
 
 ---
 
