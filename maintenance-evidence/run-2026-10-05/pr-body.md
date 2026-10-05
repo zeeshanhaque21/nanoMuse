@@ -135,17 +135,56 @@ raw upstream commit. No fork tag targets upstream's `48fd40d896` (v0.1.35), `743
 (v0.1.36) or `10a699280e` (v0.1.37). New fork releases for 0.1.35-0.1.37 will be tagged on the
 sanitized commit produced by this PR.
 
-## Review status
+## Review status — BLOCKED, not merged
 
-**The required separate fresh-context adversarial review could not be run.** Three spawn
-attempts of the mandated model (`omniroute/opencode/muse-spark-1.3-contributor-free`, plus the
-`oc/` and `opencode-zen/` routes of the same model) all returned
-`[500]: Internal server error` from the provider — a provider outage, not a code problem.
+**The required separate fresh-context adversarial review could not be run, so this PR is
+NOT merged.** The merge gate in the runbook requires it, and I am not going to substitute
+my own work for it.
 
-As the best available substitute, 68 in-session assertions were run over the committed merge
-covering the emptied-default consumers, upstream feature wiring, file-size sanity, credential
-handling, tag provenance and a tree-wide conflict-marker scan. **That is not equivalent to an
-independent review** and is reported as such; CI and human review are the real gate here.
+Evidence the mandated model is unavailable (a provider outage, not a code problem):
+
+| Attempt | Route | Result |
+|---|---|---|
+| Subagent spawn 1 | `omniroute/opencode/muse-spark-1.3-contributor-free` | `[500]: Internal server error (reset after 1m 36s)` |
+| Subagent spawn 2 | `omniroute/oc/muse-spark-1.3-contributor-free` | `[500]: Internal server error` |
+| Subagent spawn 3 | `omniroute/opencode-zen/muse-spark-1.3-contributor-free` | `[500]: Internal server error (reset after 1m 36s)` |
+| Direct probe (`opencode run --yolo --auto`) | `omniroute/opencode/muse-spark-1.3-contributor-free` | hung >7 min with no answer to "reply OK"; terminated |
+
+The runbook allows at most two worker retries before reporting the provider as blocked;
+all attempts were exhausted.
+
+As the best available substitute, **68 in-session assertions** were run over the committed
+merge (`/tmp` scripts, re-runnable) covering: every emptied-default consumer, upstream
+feature wiring, per-file size sanity, credential handling, fork tag provenance, and a
+tree-wide conflict-marker scan. Result: **68 pass, 0 fail.**
+
+**This is explicitly not equivalent to an independent review** — it is the same agent that
+wrote the merge reviewing its own work. What it does establish is that the objective,
+mechanically-checkable claims hold. What it cannot establish is that a human or an
+independent reviewer would find no design defect.
+
+### CI status on the tested head `c99ccf705e`
+
+All 14 checks pass, 0 failures:
+
+```
+success  build · test · pack          success  web app build
+success  Signed-off-by on every commit success  gateway tests
+success  ubuntu-latest · py3.11/3.12/3.13  success  macos-latest · py3.12
+success  windows-latest · py3.12      success  docker build
+success  debug APK · arm64-v8a        success  build and push
+success  what changed (x2)            skipped  release
+```
+
+The first CI run failed on `web app build` → **"Built app is committed"**, because the
+committed bundle had been generated *before* the `DevicesScreen.tsx` sanitization landed.
+That was a real defect this run introduced and caught: the bundle was regenerated with the
+repository's own generator and re-committed in `c99ccf705e`. Two consecutive local builds
+are byte-identical, so the generator is deterministic.
+
+### To unblock
+
+Merge once an independent review lands on this head. Nothing else is outstanding.
 
 ## Fork-only features preserved
 
