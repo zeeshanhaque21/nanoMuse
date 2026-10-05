@@ -1,70 +1,54 @@
-# Release signing keys
+# nanoMuse Android signing key
 
-Offline backups of release signing keys. **This repository is private.**
+The release key for nanoMuse lives at `android/nanomuse-release.jks` in this
+checkout (mode `600`, git-ignored), with its settings in
+`android/keystore.properties` (also git-ignored). Neither file is committed.
 
-Each release asset is a keystore for one app. The matching password is in
-[`SIGNING-CREDENTIALS.md`](SIGNING-CREDENTIALS.md).
+## Backup and full instructions
 
-> **⚠️ Key and password are stored together here.** That means anyone with read
-> access to this repository can sign builds that phones accept as genuine
-> updates, and an Android signing key cannot be rotated for an already-published
-> app. See the warning at the top of `SIGNING-CREDENTIALS.md`. The stronger
-> arrangement is to keep the password only in a password manager and store just
-> the encrypted keystore here.
+The authoritative copy, the password, the certificate fingerprint, and the
+restore procedure are in the **private** repository
+[`Leka-AI/signing-keys`](https://github.com/Leka-AI/signing-keys):
 
-## Why this exists
+| | |
+|---|---|
+| Keystore | release `nanoMuse-0.1.34`, asset `nanomuse-release.jks` (+ `.sha256`) |
+| Password | `SIGNING-CREDENTIALS.md` |
+| Alias | `nanomuse` |
+| Certificate SHA-256 | `811846edf105767ca3e54cdafe5e2cad9e8e3348b1e54aefe6dbee2827512c00` |
+| Fingerprint of the keystore file | `7a473bfecef4cc824e69c4101eeff5c2c55e2588b08619ec470fd0d762b217a0` |
 
-An Android release key is the app's permanent identity. Android requires the
-**same** key to sign every update, so if a key is lost, no future build can ever
-update a copy that is already installed. People would have to uninstall and
-re-install, losing app data.
+That repo also holds the other apps' keys and the **notes for agents** working on
+any of them. Prefer it over this file; this page exists so someone who finds the
+key locally knows where the backup is.
 
-The keystore file on its own is not much of a secret: it is a PKCS12 container
-encrypted by its password. Together with the password it is signing capability.
-Both are treated as high-sensitivity here.
+## Why losing this key breaks the app
 
-## Never
+Android requires the **same** signing key for every update of an installed app.
+An Android signing key cannot be rotated for an already-published app. If this
+key is lost, no future build can update an installed copy: people would have to
+uninstall, losing app data.
 
-- Do not commit a keystore, a `.properties` file, or a password to a **public** repository.
-- Do not attach a keystore to a release in a **public** repository. Actions
-  artifacts are not private either: on a public repo anyone can download them
-  without logging in, and they expire after at most 90 days.
-- Do not put a key in an Actions secret, expecting to get it back: secrets are
-  write-only, so it could be pushed but never retrieved.
-- Do not reuse one key across apps. A key is per-app identity.
-- Do not paste a password or keystore into a shell you are echoing, or leave one
-  in `/tmp`. Stage it in a variable, write it, then truncate.
+Back the key up, and keep the password somewhere that is not only this Mac.
 
-## Contents
+## Verify a build is signed with this key
 
-| Tag | Asset | App | Notes |
-|---|---|---|---|
-| `nanoMuse-0.1.34` | `nanomuse-release.jks` | nanoMuse (Android) | RSA 4096, self-signed, 30-year validity. Created 2026-10-04. Password in [`SIGNING-CREDENTIALS.md`](SIGNING-CREDENTIALS.md). |
+    apksigner verify --print-certs android/src/android/app/build/outputs/apk/release/app-release.apk
 
-## Restoring a key
+Compare the certificate SHA-256 with the value above. `CN=Android Debug` means
+the build is **not** a release build. Do not ship it, and do not pass
+`--allow-debug-key` to `scripts/release-apk.sh` to work around a missing
+keystore.
 
-1. Download the asset from the matching release below.
-2. Verify its SHA-256 against the `.sha256` asset on the same release.
-3. Get the password from [`SIGNING-CREDENTIALS.md`](SIGNING-CREDENTIALS.md) or
-   the owner's password manager.
-4. Place it at `android/nanomuse-release.jks` in the app's checkout, mode `600`.
-5. Write `android/keystore.properties` beside it:
+## Security posture of the backup
 
-       storeFile=nanomuse-release.jks
-       storePassword=<from SIGNING-CREDENTIALS.md>
-       keyAlias=nanomuse
-       keyPassword=<same value>
+2FA is enabled on the owning account (confirmed 2026-10-04). The private repo
+has one collaborator, `zeeshanhaque21`, and no deploy keys.
 
-6. Confirm before relying on it, and check the fingerprint matches the one below:
+The backup stores the key **and** its password in one place, which is weaker
+than splitting them: anyone with read access can sign builds devices accept as
+genuine updates, and that cannot be undone. Moving the password to a password
+manager and keeping only the encrypted keystore in the repo would close that.
 
-       keytool -list -v -keystore android/nanomuse-release.jks
-
-Both `*.jks` and `keystore.properties` are git-ignored in the app repositories.
-
-## Verify a build was signed with the expected key
-
-    apksigner verify --print-certs app-release.apk
-
-nanoMuse's key SHA-256 fingerprint is
-`811846edf105767ca3e54cdafe5e2cad9e8e3348b1e54aefe6dbee2827512c00`.
-A build showing `CN=Android Debug` is **not** a release build.
+2FA protects login only. A leaked personal access token or OAuth grant bypasses
+it entirely, so keep tokens fine-grained and scoped.
