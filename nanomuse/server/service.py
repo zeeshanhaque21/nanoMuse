@@ -35,6 +35,7 @@ from nanomuse.hub.service import HubService
 from nanomuse.llm import BaseLLM
 from nanomuse.logger import logger
 from nanomuse.memory.consolidate import TidyReport, tidy
+from nanomuse.nudges import NudgesPolicy
 from nanomuse.phone import PhoneLink
 from nanomuse.reminders import Reminder
 from nanomuse.schema import Attachment, Message, Role
@@ -44,6 +45,7 @@ from nanomuse.server.events import MAIN_THREAD, EventBus, Timeline, new_id, now_
 from nanomuse.server.failures import failure_notice
 from nanomuse.server.push import PushService
 from nanomuse.server.webui import WebUI, current_thread
+from nanomuse.sync import ConversationSync, parse_mention, system_note
 from nanomuse.tools.browser import Browser
 from nanomuse.tools.coding_tool import CodingAgents
 from nanomuse.tools.reminder_tools import Reminders
@@ -96,8 +98,18 @@ What you know about them:
 
 Write {n} posts. Answer with a JSON array only, no prose. Each item: {{"title": "<max 10 words>", "body": "<60-160 words of Markdown; short paragraphs or a list; no heading>", "area": "<one of: planning, research, goals, money, health, home, learning, people, files, fun>", "prompt": "<a request the user could send you to follow up, or empty>"}}. Write in the user's language ({language})."""
 
-FEED_EVERY_HOURS = 24
+FEED_DEFAULT_TIME = "08:00"  # the daily routine, local time (contract C5)
+FEED_MIN_GAP_HOURS = 4  # a batch asked for by hand shortly before the hour counts as the day's
+FEED_RETRY_S = 3600  # after a failed batch (the model down), the next try an hour later
 FEED_KEEP = 200
+_FEED_TIME = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
+
+
+def _feed_time(value: Any) -> str:
+    """``"8:00"`` → ``"08:00"``; anything that is not ``HH:MM`` → ``""``."""
+    m = _FEED_TIME.match(str(value or "").strip())
+    return f"{int(m.group(1)):02d}:{m.group(2)}" if m else ""
+
 
 STARTER_IDEAS = [
     {
@@ -302,6 +314,10 @@ class Thread:
     device_name: str = ""
     # a chat another device opened here with a `task` over the hub: who asked
     remote_from: dict[str, Any] | None = None
+    # a chat that came in through conversation sync (contract C7): the device that started
+    # it, for the "From Pixel 8" badge; "" for chats started here
+    origin_device: str = ""
+    origin_device_name: str = ""
 
     def meta(self) -> dict[str, Any]:
         meta: dict[str, Any] = {
@@ -318,6 +334,9 @@ class Thread:
             meta["device_name"] = self.device_name
         if self.remote_from:
             meta["remote_from"] = self.remote_from
+        if self.origin_device:
+            meta["origin_device"] = self.origin_device
+            meta["origin_device_name"] = self.origin_device_name
         return meta
 
 
@@ -381,6 +400,11 @@ class MuseService:
         self.connections = Connections(self)
         # this computer on the hub: the Cloud account, the other devices, their side chats
         self.hub = HubService(self)
+        # the same conversations on every device of the account (contract C7; docs/every-device.md)
+        self.sync = ConversationSync(self)
+        # when the app may ask for a star on GitHub: the relay's policy, a day at a time
+        # (contract C1; GET /api/nudges hands it to the web app)
+        self.nudges = NudgesPolicy(self.data_dir, settings.cloud.base_url)
         # a new face from a description, drawn on the chat model's host (docs/avatar.md)
         self.avatar = AvatarStudio(self)
         self.coding = CodingService(self)
@@ -391,6 +415,7 @@ class MuseService:
         self.starting: str = "not started"
         self._tidying = False
         self._writing_feed = False
+        self._feed_failed_at: float | None = None
         self._started = False
         self.started_at = now_iso()
         self.next_goal_pass_at: datetime | None = None
@@ -429,6 +454,7 @@ class MuseService:
         await self._step("tools", self.app.start(), 90)
         self._started = True
         await self._step("cloud account and hub", self.hub.start(), 30)
+        self.sync.start()
         self._scheduler = asyncio.create_task(self._goal_scheduler(), name="goal-scheduler")
         self.starting = ""
         logger.info(
@@ -459,6 +485,7 @@ class MuseService:
         for t in self.threads.values():
             t.timeline.flush()
         if self._started:
+            await self.sync.stop()
             await self.coding.close()
             await self.avatar.close()
             await self.hub.stop()
@@ -584,6 +611,9 @@ class MuseService:
                 thread.device_name = str(m.get("device_name") or m["device"])
             if isinstance(m.get("remote_from"), dict):
                 thread.remote_from = dict(m["remote_from"])
+            if m.get("origin_device"):
+                thread.origin_device = str(m["origin_device"])
+                thread.origin_device_name = str(m.get("origin_device_name") or "")
         self._save_index()
 
     def _save_index(self) -> None:
@@ -600,6 +630,9 @@ class MuseService:
                 m["device_name"] = t.device_name
             if t.remote_from:
                 m["remote_from"] = t.remote_from
+            if t.origin_device:
+                m["origin_device"] = t.origin_device
+                m["origin_device_name"] = t.origin_device_name
             metas.append(m)
         (self.threads_dir / "index.json").write_text(
             json.dumps(metas, ensure_ascii=False, indent=1), "utf-8"
@@ -679,6 +712,7 @@ class MuseService:
         thread = self._make_thread(tid, title.strip() or "Side chat")
         self._save_index()
         self.bus.publish({"kind": "thread", "thread": thread.meta()})
+        self.sync.thread_changed(thread)
         return thread
 
     def rename_thread(self, thread_id: str, title: str) -> Thread | None:
@@ -689,6 +723,7 @@ class MuseService:
         thread.updated_at = now_iso()
         self._save_index()
         self.bus.publish({"kind": "thread", "thread": thread.meta()})
+        self.sync.thread_changed(thread)
         return thread
 
     def delete_thread(self, thread_id: str) -> bool:
@@ -706,6 +741,7 @@ class MuseService:
         self.app.sentinel.end_conversation(thread_id)
         self._save_index()
         self.bus.publish({"kind": "thread_deleted", "thread": thread_id})
+        self.sync.thread_deleted(thread_id)
         return True
 
     def stop_thread(self, thread_id: str) -> bool:
@@ -789,8 +825,24 @@ class MuseService:
                 # asked by another device over the hub; shown as a bubble with its name
                 event_data["via"] = label
                 thread.purposes[text] = f"asked from {label}" if label else "asked from a device"
+            note = ""
+            if source == "user" and text.startswith("@"):
+                # "@Pixel 8 open the calendar": the work is for that device (contract C7, rule
+                # 8). The bubble shows the text without the mention and whom it is for; the
+                # agent gets one system note in front and hands the task over with `delegate`.
+                mention = parse_mention(text, self.hub.others(), self.hub.device_id)
+                if mention is not None and (mention.text or attachments):
+                    text = mention.text
+                    event_data["text"] = text
+                    event_data["to_device"] = mention.device_id
+                    event_data["to_device_name"] = mention.device_name
+                    note = system_note(mention.device_name, mention.device_id)
             event = self.ui.emit(event_data)
+            if note:
+                text = f"[{note}]\n\n{text}" if text else f"[{note}]"
             self.bus.publish({"kind": "thread", "thread": thread.meta()})
+            # the person's words reach the account's other devices now (C8), not after the turn
+            self.sync.message_sent(thread)
             if not attachments and self.ui.answer_question(thread_id, text):
                 return event
             # nanoMuse: a request for a new look (or the pick among four candidates) is the
@@ -920,6 +972,8 @@ class MuseService:
                 event = existing
         if purpose and event and event.get("text") and not event.get("quiet"):
             self._push_background(event)
+        # the turn is done: its texts go to the account's other devices in a moment
+        self.sync.turn_finished(thread)
 
     # ------------------------------------------------------------------ approvals
     def decide(
@@ -1484,6 +1538,22 @@ class MuseService:
             "mail_poll_minutes": self.settings.triggers.mail_poll_minutes,
         }
 
+    async def _run_feed_routine(self) -> None:
+        """The feed's daily routine (contract C5): a batch at its time, whatever the
+        proactivity setting — it is quiet (one notification, no chat message), the person
+        turned it on in the Feed, and a model has to be there. A failed batch is tried again
+        an hour later, not every tick."""
+        if not self.feed_posts_due() or not self.settings_view()["llm_ready"]:
+            return
+        if self._feed_failed_at and time.monotonic() - self._feed_failed_at < FEED_RETRY_S:
+            return
+        try:
+            await self.write_feed_posts()
+            self._feed_failed_at = None
+        except Exception as exc:  # noqa: BLE001 — the model may be down; the routine keeps its day
+            self._feed_failed_at = time.monotonic()
+            logger.info("feed routine: batch not written: {}", exc)
+
     async def _goal_scheduler(self) -> None:
         self.schedule_next_pass()
         while True:
@@ -1495,6 +1565,7 @@ class MuseService:
                 await self._poll_mail()
                 self._prune_fired()
                 self._announce_wake()
+                await self._run_feed_routine()
                 due = self.next_goal_pass_at or datetime.now(UTC)
                 remaining = (due - datetime.now(UTC)).total_seconds()
                 if remaining > 0:
@@ -1510,9 +1581,6 @@ class MuseService:
                 if self.memory_tidy_due():
                     # housekeeping takes this tick; the goal pass is next time
                     await self.tidy_memory()
-                    continue
-                if self.feed_posts_due():
-                    await self.write_feed_posts()
                     continue
                 goal = self._pick_goal_for_pass()
                 if goal is not None:
@@ -1726,30 +1794,75 @@ class MuseService:
         return self.data_dir / "feed_posts.json"
 
     def feed_posts(self) -> dict[str, Any]:
-        """The posts written for the user so far, newest first, and their feed instructions."""
+        """The posts written for the user so far, newest first, their feed instructions, and
+        the daily routine: ``daily`` (on by default) at ``time`` (``HH:MM``, local; 08:00)."""
         path = self._feed_file()
+        data: dict[str, Any] = {}
         if path.exists():
             try:
-                data = json.loads(path.read_text("utf-8"))
-                if isinstance(data, dict):
-                    data.setdefault("instructions", "")
-                    data.setdefault("generated_at", None)
-                    data.setdefault("posts", [])
-                    return data
+                loaded = json.loads(path.read_text("utf-8"))
+                if isinstance(loaded, dict):
+                    data = loaded
             except (OSError, json.JSONDecodeError):
                 pass
-        return {"instructions": "", "generated_at": None, "posts": []}
+        data.setdefault("instructions", "")
+        data.setdefault("generated_at", None)
+        data.setdefault("posts", [])
+        data["daily"] = data.get("daily") is not False
+        data["time"] = _feed_time(data.get("time")) or FEED_DEFAULT_TIME
+        return data
 
     def _save_feed(self, data: dict[str, Any]) -> None:
         data["posts"] = data["posts"][:FEED_KEEP]
         self._feed_file().write_text(json.dumps(data, ensure_ascii=False), "utf-8")
 
-    def set_feed_instructions(self, text: str) -> dict[str, Any]:
+    def set_feed_instructions(
+        self, text: str | None = None, *, daily: bool | None = None, time: str | None = None
+    ) -> dict[str, Any]:
+        """The feed's preferences: what to write about, and the daily routine (on or off, and
+        when). A ``time`` that is not ``HH:MM`` is refused with :class:`ValueError`."""
         data = self.feed_posts()
-        data["instructions"] = text.strip()[:2000]
+        if text is not None:
+            data["instructions"] = text.strip()[:2000]
+        if daily is not None:
+            data["daily"] = bool(daily)
+        if time is not None:
+            clean = _feed_time(time)
+            if not clean:
+                raise ValueError("time must be HH:MM")
+            data["time"] = clean
         self._save_feed(data)
         self.bus.publish({"kind": "feed_posts"})
         return data
+
+    def feed_scheduled_at(self, now: datetime | None = None) -> datetime:
+        """The most recent moment the daily routine was due (today's ``time`` once it has
+        passed, yesterday's before that), in local time."""
+        now = now or datetime.now().astimezone()
+        hour, minute = (int(p) for p in self.feed_posts()["time"].split(":"))
+        today = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        return today if today <= now else today - timedelta(days=1)
+
+    def first_feed_day(self) -> bool:
+        """Right after the first conversation (the app set up, a model there), the first feed
+        day is written in the background — a person opening the Feed finds it filled rather
+        than a promise. Nothing when posts exist already or no model can be reached; the
+        model's answer never counts as a task (contract C1: a background run)."""
+        s = self.settings_view()
+        if not s["llm_ready"] or self.feed_posts()["posts"] or self._writing_feed:
+            return False
+
+        async def write() -> None:
+            try:
+                await self.write_feed_posts()
+            except Exception as exc:  # noqa: BLE001 — the daily routine tries again
+                logger.info("first feed day not written: {}", exc)
+
+        try:
+            asyncio.get_running_loop().create_task(write())
+        except RuntimeError:  # pragma: no cover - no loop (a direct call outside the server)
+            return False
+        return True
 
     def delete_feed_post(self, post_id: str) -> bool:
         data = self.feed_posts()
@@ -1762,12 +1875,19 @@ class MuseService:
         return True
 
     def feed_posts_due(self) -> bool:
-        """New posts are due once a day while background work is on — and only once there
-        is something to write from (memory, a goal, or instructions from the user)."""
+        """A new feed day is due when the daily routine is on, its time has passed since the
+        last batch, and there is something to write from (the first conversation done,
+        memory, a goal, or instructions from the user)."""
         if self._writing_feed:
             return False
         data = self.feed_posts()
-        known = bool(data["instructions"]) or bool(self.app.goals.list("active"))
+        if not data["daily"]:
+            return False
+        known = (
+            bool(data["instructions"])
+            or bool(self.app.goals.list("active"))
+            or bool(self.connections.data.get("onboarded"))
+        )
         if not known and self.app.memory is not None:
             known = self.app.memory.count() >= 5
         if not known:
@@ -1776,10 +1896,14 @@ class MuseService:
         if not last:
             return True
         try:
-            age = datetime.now(UTC) - datetime.fromisoformat(last)
+            written = datetime.fromisoformat(last)
         except ValueError:
             return True
-        return age >= timedelta(hours=FEED_EVERY_HOURS)
+        if written.tzinfo is None:
+            written = written.replace(tzinfo=UTC)
+        if datetime.now(UTC) - written < timedelta(hours=FEED_MIN_GAP_HOURS):
+            return False  # "Write it now" shortly before the hour is today's batch
+        return written < self.feed_scheduled_at()
 
     def _feed_context(self) -> list[str]:
         lines: list[str] = []

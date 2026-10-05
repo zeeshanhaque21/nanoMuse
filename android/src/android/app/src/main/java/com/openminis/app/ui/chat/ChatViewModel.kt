@@ -3627,6 +3627,27 @@ class ChatViewModel(
 
     init {
         loadSession()
+        // nanoMuse: rows synced from the account's other devices land in this chat while it is
+        // open — reloaded from the database between turns, never under a running one; what
+        // arrives during a turn is shown the moment the turn ends (C8: no reload by hand).
+        viewModelScope.launch {
+            var nmPulledWhileStreaming = false
+            launch {
+                io.github.nanomuse.sync.ConversationSync.pulled.collect { ids ->
+                    if (realSessionId.ifEmpty { sessionId } !in ids) return@collect
+                    if (_isStreaming.value) nmPulledWhileStreaming = true else reloadSessionFromDb()
+                }
+            }
+            _isStreaming.collect { streaming ->
+                if (!streaming && nmPulledWhileStreaming) {
+                    // a breath after the end: the turn's last rows are still being written
+                    kotlinx.coroutines.delay(1_500)
+                    if (_isStreaming.value) return@collect
+                    nmPulledWhileStreaming = false
+                    reloadSessionFromDb()
+                }
+            }
+        }
         // [T-session-paused-badge-active-false-positive] Drive the session-list
         // PAUSED badge directly off canResume — the authoritative "this session
         // is interrupted (tap Resume)" flag. This is the single chokepoint over
@@ -6179,6 +6200,7 @@ class ChatViewModel(
             bodyPartsJson = queuedPaste?.partsJson,
         )
         val userEntity = chatRepository.appendMessage(sid, "user", userPartsJson)
+        io.github.nanomuse.sync.ConversationSync.sent() // nanoMuse: pushed at send (C8)
         agentHistory.add(
             LLMMessage(
                 role = LLMMessage.Role.USER,
@@ -6325,6 +6347,7 @@ class ChatViewModel(
                 bodyPartsJson = drainPaste?.partsJson,
             )
             chatRepository.appendMessage(sid, "user", userPartsJson)
+            io.github.nanomuse.sync.ConversationSync.sent() // nanoMuse: pushed at send (C8)
 
             agentHistory.add(LLMMessage(
                 role = LLMMessage.Role.USER,
@@ -6358,14 +6381,35 @@ class ChatViewModel(
         }
     }
 
+    // nanoMuse: StarPrompt counts a task only for a turn the person started (composer, idea or
+    // goal card) after the first conversation was over. The screens mark that just before
+    // sendMessage; routines, the feed and goal checks (HeadlessChatRunner) never do, and the
+    // screen takes the flag back when the stream ends.
+    @Volatile private var nmCountableTurn = false
+
+    fun nmMarkPersonTurn() {
+        val fc = nmFirstConversation
+        val sid = realSessionId.ifEmpty { sessionId }
+        nmCountableTurn = io.github.nanomuse.community.StarPrompt.Gate.countsAsTask(
+            personStarted = true,
+            firstConversationOver = !fc.isBoundTo(sid) || fc.phase == io.github.nanomuse.onboarding.Phase.DONE,
+        )
+    }
+
+    /** Whether the turn that just ended was one of the person's; reading it clears it. */
+    fun nmTakeCountableTurn(): Boolean = nmCountableTurn.also { nmCountableTurn = false }
+
     fun sendMessage(text: String) {
         // nanoMuse: "change your avatar to …" (and a pick while the options are
         // up) is handled in the app, not by the model.
-        if (nmInterceptAvatar(text)) return
+        if (nmInterceptAvatar(text)) { nmCountableTurn = false; return }
+        // nanoMuse: "@Mac …" opens a turn for that device — the mention comes out of the text,
+        // a one-turn note sends the work there through nanomuse-pc (contract C7, rule 8).
+        val nmText = io.github.nanomuse.sync.DeviceMention.apply(context, realSessionId.ifEmpty { sessionId }, text)
         // nanoMuse: during the first conversation the text goes to the model as
         // it is; the model says what it meant in a `nanomuse-naming` block and
         // nmAfterTurn moves the phase (see FirstConversation).
-        sendMessage(text, skipContextCheck = false)
+        sendMessage(nmText, skipContextCheck = false)
     }
 
     // ─── nanoMuse: changing the face from the chat ─────────────────────────
@@ -6718,11 +6762,17 @@ class ChatViewModel(
         val fc = nmFirstConversation
         if (!fc.isBoundTo(sid)) return
         val reply = _messages.value.lastOrNull { it.role == "assistant" }?.content
+        val phaseBefore = fc.phase
         if (fc.afterTurn(reply)) {
             // The chooser sits under the latest question, so it moves down when the model
             // steered back after a detour.
             _messages.value = _messages.value.filterNot { it.id == nmNamingCardId }
             nmShowNamingCard()
+        }
+        // The agent has its name and a model just answered: the first feed day is written
+        // in the background, once per install (FeedFlow).
+        if (phaseBefore != io.github.nanomuse.onboarding.Phase.DONE && fc.phase == io.github.nanomuse.onboarding.Phase.DONE) {
+            io.github.nanomuse.feed.FeedFlow.writeFirstDay(context)
         }
     }
     // ───────────────────────────────────────────────────────────────────────
@@ -6877,6 +6927,7 @@ class ChatViewModel(
                 bodyPartsJson = pasted?.partsJson,
             )
             val persistedUser = chatRepository.appendMessage(activeSessionId, "user", userPartsJson)
+            io.github.nanomuse.sync.ConversationSync.sent() // nanoMuse: the person's line reaches the other devices at send (C8)
 
             val userMsg = ChatMessage(
                 id = persistedUser.id,

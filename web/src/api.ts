@@ -22,6 +22,7 @@ import type {
   IdeasData,
   MemoryChange,
   MemoryItem,
+  NudgesView,
   PushInfo,
   Reminder,
   ReminderKind,
@@ -32,6 +33,7 @@ import type {
   StateSnapshot,
   StudioSession,
   StudioView,
+  SyncState,
   TestResult,
   ThreadMeta,
   TidyReport,
@@ -167,6 +169,13 @@ export const api = {
   cloudContribute: (on: boolean) => request<{ on: boolean; samples: number; default_on?: boolean; privacy_url?: string }>("/api/cloud/contribute", json({ on })),
   cloudDeleteSamples: () => request<{ deleted: number }>("/api/cloud/samples", { method: "DELETE" }),
   cloudUseAsModel: (model = "") => request<Record<string, unknown>>("/api/cloud/use-as-model", json({ model })),
+  // ---- conversations synced between the account's devices (contract C7)
+  syncState: () => request<SyncState>("/api/sync/state"),
+  /** off tells the relay, which deletes what it stores; on pushes this device's chats again */
+  syncSetState: (enabled: boolean) => request<SyncState>("/api/sync/state", { method: "PUT", body: JSON.stringify({ enabled }) }),
+  /** "Delete synced conversations": the relay's store emptied, the switch and the local chats kept */
+  syncDelete: () => request<SyncState>("/api/sync/delete", json({})),
+  syncPull: () => request<SyncState & { applied: number }>("/api/sync/pull", json({})),
   /** the avatar studio: whether a face can be drawn, and the session under way */
   avatarView: () => request<StudioView>("/api/avatar"),
   /** a session; `thread` "" runs it from the studio screen, without a card in the chat */
@@ -260,8 +269,9 @@ export const api = {
   activity: (n = 150) => request<ActivityData>(`/api/activity?n=${n}`),
   feed: (limit = 60) => request<FeedItem[]>(`/api/feed?limit=${limit}`),
   feedPosts: () => request<FeedPostsData>("/api/feed/posts"),
-  setFeedInstructions: (instructions: string) =>
-    request<FeedPostsData>("/api/feed/instructions", { method: "PUT", body: JSON.stringify({ instructions }) }),
+  /** The feed's preferences; only the fields given change (`daily`/`time` are the 08:00 routine). */
+  setFeedInstructions: (body: { instructions?: string; daily?: boolean; time?: string }) =>
+    request<FeedPostsData>("/api/feed/instructions", { method: "PUT", body: JSON.stringify(body) }),
   refreshFeedPosts: () => request<FeedPostsData>("/api/feed/posts/refresh", { method: "POST" }),
   deleteFeedPost: (id: string) => request<{ ok: boolean }>(`/api/feed/posts/${id}`, { method: "DELETE" }),
   upcoming: () => request<UpcomingData>("/api/upcoming"),
@@ -287,7 +297,10 @@ export const api = {
     return res.text();
   },
   settings: () => request<SettingsView>("/api/settings"),
-  update: () => request<UpdateView>("/api/update"),
+  /** Installed and latest release (a day's cache on the runtime; `refresh` asks now). */
+  update: (refresh = false) => request<UpdateView>(`/api/update${refresh ? "?refresh=1" : ""}`),
+  /** When the app may ask for a star (contract C1): the relay's policy, through the runtime. */
+  nudges: () => request<NudgesView>("/api/nudges"),
   updateSettings: (body: Record<string, unknown>) =>
     request<SettingsView>("/api/settings", { method: "PUT", body: JSON.stringify(body) }),
   // connections: secrets go into the vault on the server; only names ever come back
@@ -381,7 +394,7 @@ export const api = {
   vaultSet: (name: string, value: string) =>
     request<string[]>(`/api/vault/${encodeURIComponent(name)}`, { method: "PUT", body: JSON.stringify({ value }) }),
   vaultDelete: (name: string) => request<{ ok: boolean }>(`/api/vault/${encodeURIComponent(name)}`, { method: "DELETE" }),
-  onboarded: (done = true) => request<{ onboarded: boolean }>("/api/onboarded", json({ done })),
+  onboarded: (done = true) => request<{ onboarded: boolean; feed_started?: boolean }>("/api/onboarded", json({ done })),
   // browser view
   browserControl: (thread: string, body: BrowserControl) =>
     request<{ url: string; title: string; hold?: HoldEvent | null }>(`/api/browser/${encodeURIComponent(thread)}/control`, json(body)),

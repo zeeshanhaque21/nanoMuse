@@ -11,6 +11,9 @@ interface BaseEvent {
   about?: string;
   /** The device a message came from; "call": said on a voice call in 0.1.20–0.1.21. */
   via?: "call" | string;
+  /** on the relay (contract C7): pushed from here, or pulled from another device of the account */
+  synced?: boolean;
+  mid?: string;
 }
 
 /** A file attached to a message: in the workspace under attachments/. */
@@ -28,6 +31,12 @@ export interface UserEvent extends BaseEvent {
   files?: AttachmentInfo[];
   /** the name of the device this was asked from, when another device opened this chat over the hub */
   via?: string;
+  /** `@<device>` in front of the message: the device the turn was handed to (contract C7 rule 8) */
+  to_device?: string;
+  to_device_name?: string;
+  /** a synced message written on another device of the account */
+  via_device?: string;
+  via_device_name?: string;
 }
 
 export interface AssistantEvent extends BaseEvent {
@@ -269,6 +278,25 @@ export interface ThreadMeta {
   device_name?: string;
   /** a chat another device opened here with a task over the hub */
   remote_from?: { device: string; name: string; kind: string; conversation: string };
+  /** a synced chat that was started on another device of the account ("From Pixel 8") */
+  origin_device?: string;
+  origin_device_name?: string;
+}
+
+/** GET /api/sync/state: conversations synced between the account's devices (contract C7). */
+export interface SyncState {
+  /** the switch on this device */
+  enabled: boolean;
+  /** signed in to nanoMuse Cloud, so syncing can happen at all */
+  available: boolean;
+  /** the relay refused the key: nothing moves until the next sign-in */
+  paused: boolean;
+  cursor: number;
+  last_pull_at: string | null;
+  last_push_at: string | null;
+  error: string;
+  /** the relay's own view; null when it could not be asked */
+  relay: { enabled: boolean; cursor: number; counts: { conversations: number; messages: number }; limits: { messages: number; text_bytes: number } } | null;
 }
 
 /** A device of the account on the hub (docs/hub.md). */
@@ -676,6 +704,9 @@ export interface FeedPostsData {
   instructions: string;
   generated_at: string | null;
   posts: FeedPost[];
+  /** The daily routine (contract C5): on by default, at `time` (`HH:MM`, local; 08:00). */
+  daily: boolean;
+  time: string;
   error?: string;
 }
 
@@ -692,13 +723,30 @@ export interface ToolInfo {
   description: string;
 }
 
+/** `GET /api/update`: the installed and the latest release (contract C2). */
 export interface UpdateView {
   current: string;
   enabled: boolean;
   latest: string | null;
   newer: boolean;
+  /** The release page of the latest. */
   url: string;
+  /** The download page (this fork's GitHub releases). */
+  download_url?: string;
+  /** When the runtime last asked (ISO, UTC), or null before the first check. */
+  checked_at?: string | null;
+  /** Where the answer came from: `github`, `mirror`, or null. */
+  source?: string | null;
   error?: string | null;
+}
+
+/** `GET /api/nudges`: the star-ask policy (contract C1) as the runtime holds it. */
+export interface NudgesView {
+  policy: unknown;
+  fetched_at: number | null;
+  source: "default" | "relay" | "me" | string;
+  stale: boolean;
+  error: string | null;
 }
 
 export interface SettingsView {
@@ -1195,6 +1243,8 @@ export type WsMessage =
   | { kind: "thread"; thread: ThreadMeta }
   | { kind: "thread_deleted"; thread: string }
   | { kind: "thread_cleared"; thread: string }
+  /** a synced message deleted on another device (contract C7 tombstone) */
+  | { kind: "event_removed"; thread: string; id: string }
   | { kind: "goals" }
   | { kind: "memory" }
   | { kind: "reminders" }

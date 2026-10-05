@@ -36,7 +36,10 @@ import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-settings'
 import type { ToolDispatchExecution, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
-import { ToolCallId } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, ToolCallId, type ContentBlock } from '@deepseek-ai/dsh-llm'
+import type { Session, SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
+import type { SessionCreateRequest } from '@deepseek-ai/dsh-api-session-controller/types'
+import type {} from '@deepseek-ai/dsh-api-session-controller'
 import type {} from '@deepseek-ai/dsh-user-approval'
 import z from '@deepseek-ai/schemastery'
 import { mountGuarded } from './admit.ts'
@@ -44,7 +47,11 @@ import { brief, REMOTE_ACTIONS, run as runAction, type RemoteAction } from './ac
 import { HubClient, HubError, type Caller, type HubDevice } from './hub.ts'
 import { ProfileStore, type Profile } from './profile.ts'
 import { Relay, RelayError, type Account, type Estimate, type Invite, type ProfileWrite, type RelayModel, type SignIn } from './relay.ts'
-import { TaskRunner } from './task.ts'
+import { TaskRunner, textOf } from './task.ts'
+import { RemoteStore, SyncEngine, SyncRelay, type RemoteLine, type SessionLine, type SyncState } from './sync.ts'
+import { AvatarMotion, ANIMATED, type MotionMood, type MotionView } from './motion.ts'
+import { DEFAULT_VIDEO_MODEL, hostOf, KNOWN_DASHSCOPE_MODELS, looksLikeVideoModel, probe as probeVideoModel, speaksDashScope, type VideoEndpoint } from './video.ts'
+import { checkMove, checkScreenshot, isBlack, runtimeInfo, type MoveCheck, type RuntimeInfo, type ScreenshotCheck } from './hands-check.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -250,6 +257,12 @@ export interface LiveState {
   handsModel: string
   /** The last update check, when one ran. */
   update: UpdateInfo | null
+  /** The face's clips: which exist (with a cache key) and how the drawing goes (desk-b). */
+  motion: MotionView
+  /** When the hands last saw an all-black screen (macOS: Screen Recording missing, or granted after the app started); 0 when they have not. */
+  blackScreenAt: number
+  /** Conversation sync (C8): `rev` moves with every change pulled or pushed; the session that is the account's main conversation. */
+  sync: { rev: number; mainSession: string }
 }
 
 /** How long after the last hands call the stage keeps its frame. */
@@ -270,12 +283,40 @@ interface State {
   trusted?: Record<string, { name: string; at: number }>
   /** The session each other device's conversation lives in (`<device id>\n<conversation>` → session id). */
   taskSessions?: Record<string, string>
+  /** Conversations synced between the account's devices (C7, C8): the cursor, the ids, what the relay knows. */
+  sync?: SyncState
   /** The hands model the person chose; absent means the account's default. */
   handsModel?: string
   /** "Always allow" given on the stage, per app. */
   grants?: Grant[]
   /** The last update check and when it ran, so the badge survives a restart and the check runs once a day. */
   update?: UpdateInfo
+  /** Settings → Media (desk-b): the video model and whether a new face is animated. */
+  media?: MediaState
+}
+
+/** The Media settings as stored. `videoModel` empty means the endpoint's default; `off` means no clips. */
+export interface MediaState {
+  videoModel?: string
+  /** Absent means on. */
+  animate?: boolean
+  /** The last check of which video models the own key reaches: by host, with the models and when. */
+  checked?: Record<string, { models: string[]; at: number }>
+}
+
+/** The `videoModel` value that means "no clips" (the phone's `VIDEO_OFF`). */
+export const VIDEO_OFF = 'off'
+/** How long a video-model check against a provider is trusted. */
+const VIDEO_CHECK_TTL_MS = 24 * 60 * 60_000
+
+/** What Settings → Media shows. */
+export interface MediaView {
+  /** The image model the account would draw with (Cloud), empty when signed out or none. */
+  imageModel: string
+  /** The video source: `cloud`, an own-key provider, or none. */
+  video: { source: 'cloud' | 'provider' | 'none'; label: string; model: string; models: { id: string; name: string }[]; off: boolean; reason: string }
+  animate: boolean
+  motion: MotionView
 }
 
 /** One check a day, at most, by itself; the About row may ask any time. */
@@ -334,6 +375,18 @@ export function refusalOf(result: ToolExecutionResult): string | undefined {
   return hit.slice(start + 'Not done — '.length).trim()
 }
 
+/** Every text of a tool result's error, joined: what the runtime said went wrong. */
+function errorText(result: ToolExecutionResult): string {
+  const texts: string[] = []
+  for (const block of result.content ?? []) {
+    const b = block as { type?: unknown; text?: unknown }
+    if (b.type === 'text' && typeof b.text === 'string') texts.push(b.text)
+  }
+  const m = (result.error as { message?: unknown } | undefined)?.message
+  if (typeof m === 'string') texts.push(m)
+  return texts.join('\n')
+}
+
 function declined(step: string, why: string): ToolExecutionResult {
   const text = `Not done — ${step}. The person did not approve this step on their permission card (${why}); do not retry it. Ask them what to do instead, or carry on without it.`
   return { isError: true, error: { message: text, info: { name: 'HandsDeclined', code: 'REJECTED' } }, content: [{ type: 'text', text }] }
@@ -365,16 +418,32 @@ export default class NanomuseCloud extends Service {
   private signedInCache = false
   /** Tasks from other devices, once the session API is up. */
   private tasks: TaskRunner | undefined
+  /** Conversations synced between the account's devices (contract C7), once the session API is up. */
+  private sync: SyncEngine | undefined
+  /** The other devices' turns kept for the transcript (C8), by session. */
+  private kept: RemoteStore | undefined
   /** Approvals the stage may answer (C2) and holds of the hands (C1). */
   private readonly approvalDesk = new ApprovalDesk(() => this.broadcast(), (req) => this.granted(req.toolName))
   private readonly holdDesk = new HoldDesk(() => this.broadcast())
   private updateCheck: Promise<UpdateInfo> | undefined
   private lastSharedConnectors = ''
+  /** The face's clips (desk-b). */
+  readonly motion: AvatarMotion
+  private blackScreenAt = 0
 
   constructor(ctx: Context, private readonly config: Config) {
     super(ctx, 'nanomuseCloud')
     this.relay = new Relay(config.baseURL)
     this.profile = new ProfileStore(this.dir(), this.relay)
+    this.motion = new AvatarMotion({
+      dir: join(this.dir(), 'avatar', 'motion'),
+      endpoint: () => this.videoEndpoint(),
+      animate: () => this.state.media?.animate !== false,
+      faceId: () => this.faceId(),
+      still: (mood) => this.faceStill(mood),
+      onChange: () => this.broadcast(),
+      log: (level, text) => this.ctx.logger[level](text),
+    })
     this.hub = new HubClient({
       url: this.relay.hubURL,
       key: () => this.token(),
@@ -398,6 +467,10 @@ export default class NanomuseCloud extends Service {
     }
     await this.profile.load()
     this.profile.onChange(() => this.broadcast())
+    // The face's clips follow the face (C3): a face drawn here or pulled from the account drops the
+    // old clips and, with the Media setting on and a video model at hand, is animated again.
+    await this.motion.init().catch((error: unknown) => this.ctx.logger.warn('nanomuse: avatar clips not read: %s', message(error)))
+    this.profile.onChange(() => void this.animateNewFace().catch((error: unknown) => this.ctx.logger.warn('nanomuse: avatar motion: %s', message(error))))
     this.hub.onState(() => this.broadcast())
     this.hub.onDevices(() => this.broadcast())
     this.hub.onProfile(() => void this.pullProfile().catch((error: unknown) => this.ctx.logger.warn('nanomuse: profile pull failed: %s', message(error))))
@@ -451,6 +524,80 @@ export default class NanomuseCloud extends Service {
       ctx.effect(() => () => {
         this.tasks = undefined
       }, 'nanomuse cloud: tasks off')
+      // The account's conversations, the same on every device (C7, C8): the person's words go up as
+      // they are sent and the model's when the turn ends; the other devices' conversations are chats
+      // here, their turns kept in the host's own store for the transcript and handed to the model as context.
+      const kept = new RemoteStore(join(dshHome(), 'nanomuse', 'sync-remote.json'), (error) => this.ctx.logger.warn('nanomuse cloud: remote turns not saved: %s', message(error)))
+      this.kept = kept
+      const sync = new SyncEngine({
+        relay: new SyncRelay(this.config.baseURL),
+        sessions: {
+          list: async () => {
+            const { items } = await ctx.sessionController.list({}, new AbortController().signal)
+            const rows = await Promise.all(
+              items
+                .filter((s) => !s.parentSessionId && s.origin !== 'subagent')
+                .map(async (s) => ({ id: String(s.sessionId), title: await this.sessionTitle(ctx, s.sessionId), blank: s.blank, createdAt: s.updatedAt, updatedAt: s.updatedAt })),
+            )
+            return rows
+          },
+          lines: (sessionId) => this.sessionLines(ctx, sessionId),
+          create: async (title) => {
+            // In the home workspace (`~/nanoMuse`), as the first conversation is: a session the
+            // browser cannot place in a workspace shows a disabled composer and no transcript.
+            const folder = join(homedir(), 'nanoMuse')
+            await mkdir(folder, { recursive: true }).catch(() => undefined)
+            const registry = ctx.get('workspaceRegistry') as { create(path: string, title?: string): Promise<{ id: string }> } | undefined
+            const workspaceId = await registry?.create(folder, 'nanoMuse').then((w) => w.id).catch(() => undefined)
+            const created = await ctx.sessionController.create(
+              workspaceId ? { agentPreset: 'nanomuse', workspaceId: workspaceId as NonNullable<SessionCreateRequest['workspaceId']> } : { agentPreset: 'nanomuse', cwd: folder },
+            )
+            await ctx.sessionController.rename({ sessionId: created.sessionId, title }).catch(() => undefined)
+            return String(created.sessionId)
+          },
+          rename: async (sessionId, title) => {
+            await ctx.sessionController.rename({ sessionId: sessionId as SessionId, title })
+          },
+          keep: async (sessionId, line) => kept.add(sessionId, line),
+          forget: async (sessionId, mid) => kept.remove(sessionId, mid),
+          inject: async (sessionId, text) => {
+            const resolved = await ctx.sessionController.resolveAgent(sessionId as SessionId)
+            if ('error' in resolved) throw new Error(String(resolved.error))
+            // model-facing: a `nanomuse-sync` source, so the push (`sessionLines`, `user` sources only) never sends it back
+            resolved.agent.inject(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'nanomuse-sync', role: 'user', mid: '', device: '', deviceName: '', at: Date.now() } }))
+          },
+        },
+        token: () => this.token(),
+        deviceId: () => this.state.deviceId ?? '',
+        isTaskSession: (sessionId) => Object.values(this.state.taskSessions ?? {}).includes(sessionId),
+        load: () => this.state.sync,
+        save: async (state) => {
+          this.state.sync = state
+          await this.writeState()
+        },
+        onChange: () => this.broadcast(),
+        log: (level, text) => this.ctx.logger[level](text),
+      })
+      this.sync = sync
+      ctx.effect(
+        () =>
+          ctx.on('session/event', (session: Session, event: SessionEvent) => {
+            // `session/title` is dsh-session-title's event (not a dependency here): matched by name
+            const id = String(session.id)
+            if (event.type === 'turn/end') sync.turnEnded(id)
+            else if (event.type === 'user/message' && (event.data as { source?: { kind?: string } }).source?.kind === 'user') sync.messageSent(id)
+            else if ((event as { type: string }).type === 'session/title') sync.sessionRenamed(String(session.id))
+          }),
+        'nanomuse cloud: sync turns',
+      )
+      ctx.effect(() => this.hub.onSync((cursor, from) => sync.onFrame({ cursor, from })), 'nanomuse cloud: sync frame')
+      if (this.state.account) sync.start()
+      ctx.effect(() => () => {
+        sync.stop()
+        this.sync = undefined
+        this.kept = undefined
+        void kept.flush()
+      }, 'nanomuse cloud: sync off')
       if (this.hub.connected) this.hub.restart()
     })
 
@@ -493,6 +640,8 @@ export default class NanomuseCloud extends Service {
             if (refused) result = await this.confirmStep(ctx, exec, refused)
           }
           if (exec.name.startsWith('mcp__nanomuse__computer_') && !result.isError) this.frameFromMcp(result.value, sessionId)
+          // A black capture (macOS: Screen Recording missing for the app, or granted after it started) puts a relaunch notice up.
+          if (exec.name.startsWith('mcp__nanomuse__computer_') && result.isError && isBlack(errorText(result))) this.sawBlackScreen()
           return result
         } finally {
           this.ended(exec.callId)
@@ -644,18 +793,11 @@ export default class NanomuseCloud extends Service {
     const rows = sharedConnectors(connectors.view().connections, this.deviceName(), this.state.deviceId ?? '')
     const key = JSON.stringify(rows.map(({ at: _at, ...rest }) => rest))
     if (key === this.lastSharedConnectors) return
-    const current = this.profile.current()
-    const write: ProfileWrite = {
-      name: current.name,
-      avatar: current.avatar,
-      emoji: current.emoji,
-      color: current.color,
-      style: current.style,
-      description: current.description,
-      connectors: rows,
-      device_id: this.state.deviceId ?? '',
-    }
-    await this.relay.putProfile(token, write, this.writerId())
+    // Only the connectors: the relay keeps the look as it is for a write that carries nothing
+    // else. (0.1.36 sent the look this device wore too, so a desktop that had just signed in,
+    // still wearing the default, renamed the account's muse back to "nanoMuse" and took a drawn
+    // face off every device before its first pull landed.)
+    await this.relay.putConnectors(token, rows, this.state.deviceId ?? '', this.writerId())
     this.lastSharedConnectors = key
     await this.profile.pull(token, true).catch(() => undefined)
   }
@@ -726,7 +868,25 @@ export default class NanomuseCloud extends Service {
       grants: this.state.grants ?? [],
       handsModel: this.handsModel(),
       update: this.state.update ?? null,
+      motion: this.motion.view(),
+      blackScreenAt: this.blackScreenAt,
+      sync: this.sync ? { rev: this.sync.view().rev, mainSession: this.sync.state.mainSession } : { rev: 0, mainSession: '' },
     }
+  }
+
+  /** The session that holds the account's main conversation (C8), '' before one is known. */
+  syncMainSession(): string {
+    return this.sync?.state.mainSession ?? ''
+  }
+
+  /** How many turns from the account's other devices a session here shows (C8). */
+  syncRemoteLines(sessionId: string): number {
+    return this.kept?.linesOf(sessionId).length ?? 0
+  }
+
+  /** The main chat named by the host (the first conversation): the session it ends up in. */
+  async setSyncMain(sessionId: string): Promise<string> {
+    return this.sync ? this.sync.setMain(sessionId) : sessionId
   }
 
   /** Step one: a code to the phone or the mailbox. */
@@ -779,6 +939,10 @@ export default class NanomuseCloud extends Service {
     this.ctx.logger.info('nanomuse cloud: signed in as %s (%s)', signIn.account.hint, signIn.account.channel)
     await this.profile.pull(signIn.apiKey, true).catch((error: unknown) => this.ctx.logger.warn('nanomuse: profile pull failed: %s', message(error)))
     this.hub.restart()
+    if (this.sync) {
+      this.sync.start()
+      await this.sync.accountChanged(signIn.account.id)
+    }
     this.broadcast()
     return this.status()
   }
@@ -837,10 +1001,197 @@ export default class NanomuseCloud extends Service {
     return token
   }
 
-  /** What four candidates and four poses would cost today. */
+  /** What four candidates and four poses would cost today — and the four clips, when the account would draw them (C3). */
   async studioEstimate(): Promise<Estimate> {
     const token = await this.studioToken()
-    return this.relay.estimate(token, STUDIO_PICTURES)
+    const ep = await this.videoEndpoint()
+    const clips = ep && ep.instanceId === PROVIDER_ID && this.state.media?.animate !== false ? ANIMATED.length : 0
+    return this.relay.estimate(token, STUDIO_PICTURES, clips)
+  }
+
+  // ---- Settings → Media: the video model and the face's clips (desk-b) -------------------
+
+  /** A face arrived (drawn here or on another device): its clips, when the setting and a video model allow; one line in the log when not. */
+  private async animateNewFace(): Promise<void> {
+    const face = this.faceId()
+    const before = this.motion.view().faceId
+    const started = await this.motion.faceChanged()
+    if (started) this.ctx.logger.info('nanomuse: avatar motion: drawing the clips of the new face')
+    else if (face && face !== before && this.state.media?.animate !== false && !(await this.videoEndpoint())) {
+      this.ctx.logger.info('nanomuse: avatar motion: no video model (the account lists none and no Model Studio key is set; OpenRouter and the like have no video) — the face keeps still')
+    }
+  }
+
+  /** The id of the face worn now; empty for the dragon or an emoji. */
+  private faceId(): string {
+    const p = this.profile.current()
+    return p.avatar === 'face' ? p.faceId : ''
+  }
+
+  /** A mood's still of the worn face, as the video model's first frame (the account's 512 px WebP). */
+  private async faceStill(mood: MotionMood): Promise<{ bytes: Uint8Array; mime: string; name: string } | undefined> {
+    const id = this.faceId()
+    const path = id ? this.profile.stillPath(id, mood, 'webp') : undefined
+    if (!path) return undefined
+    try {
+      const bytes = await readFile(path)
+      return bytes.length ? { bytes: new Uint8Array(bytes), mime: 'image/webp', name: `${mood}.webp` } : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  /** The account's video models, as the relay lists them. */
+  private cloudVideoModels(): RelayModel[] {
+    return (this.state.models ?? []).filter((m) => m.kind === 'video')
+  }
+
+  /**
+   * Where a clip would be drawn: the account when signed in and it lists a video model (the
+   * relay mirrors Model Studio's `/api/v1` paths), else an own Model Studio key among the
+   * providers the person added. Nothing when the setting says off, or no key speaks DashScope
+   * (OpenRouter and the like have no video API).
+   */
+  async videoEndpoint(): Promise<VideoEndpoint | undefined> {
+    const media = this.state.media ?? {}
+    if (media.videoModel === VIDEO_OFF) return undefined
+    const token = this.signedInCache ? await this.token() : undefined
+    const cloud = this.cloudVideoModels()
+    if (token && cloud.length) {
+      const wanted = media.videoModel && cloud.some((m) => m.id === media.videoModel) ? media.videoModel : (cloud.find((m) => m.recommended) ?? cloud[0])?.id
+      if (wanted) return { host: this.relay.origin, apiKey: token, model: wanted, label: 'nanoMuse Cloud', instanceId: PROVIDER_ID }
+    }
+    const own = await this.dashScopeProvider()
+    if (!own) return undefined
+    const known = this.state.media?.checked?.[own.host]
+    const models = known && Date.now() - known.at < VIDEO_CHECK_TTL_MS ? known.models : []
+    let model = media.videoModel && (!models.length || models.includes(media.videoModel)) ? media.videoModel : ''
+    if (!model) model = models[0] ?? DEFAULT_VIDEO_MODEL
+    return { host: own.host, apiKey: own.apiKey, model, label: own.label, instanceId: own.id }
+  }
+
+  /** The first provider row the person added that points at Model Studio, with its key. */
+  private async dashScopeProvider(): Promise<{ id: string; host: string; apiKey: string; label: string } | undefined> {
+    let rows: Record<string, unknown> = {}
+    try {
+      const row = this.ctx.settings.describe().find((d) => d.ns === LLM_ROW)
+      const value = row?.value as { providers?: Record<string, unknown> } | undefined
+      rows = value?.providers ?? {}
+    } catch {
+      return undefined
+    }
+    for (const [id, raw] of Object.entries(rows)) {
+      if (id === PROVIDER_ID || !raw || typeof raw !== 'object') continue
+      const p = raw as { displayName?: unknown; baseURL?: unknown; apiKeyEnv?: unknown; apiKey?: unknown }
+      const baseURL = typeof p.baseURL === 'string' ? p.baseURL : ''
+      if (!baseURL || !speaksDashScope(baseURL)) continue
+      let apiKey = ''
+      if (typeof p.apiKeyEnv === 'string' && p.apiKeyEnv) {
+        try {
+          apiKey = (await this.ctx.credentials.resolve(credentialRef(p.apiKeyEnv)))?.value ?? ''
+        } catch {
+          apiKey = ''
+        }
+      }
+      if (!apiKey && typeof p.apiKey === 'string') apiKey = p.apiKey
+      if (!apiKey) continue
+      return { id, host: hostOf(baseURL), apiKey, label: typeof p.displayName === 'string' && p.displayName ? p.displayName : id }
+    }
+    return undefined
+  }
+
+  /** The Media page: models, the switch, the clips. */
+  async media(): Promise<MediaView> {
+    const media = this.state.media ?? {}
+    const off = media.videoModel === VIDEO_OFF
+    const cloud = this.cloudVideoModels()
+    const signedIn = this.signedInCache && Boolean(this.state.account)
+    const view: MediaView = {
+      imageModel: signedIn ? this.imageModel() : '',
+      video: { source: 'none', label: '', model: '', models: [], off, reason: '' },
+      animate: media.animate !== false,
+      motion: this.motion.view(),
+    }
+    if (signedIn && cloud.length) {
+      const ep = off ? undefined : await this.videoEndpoint()
+      view.video = { source: 'cloud', label: 'nanoMuse Cloud', model: ep?.model ?? '', models: cloud.map((m) => ({ id: m.id, name: m.name || m.id })), off, reason: '' }
+      return view
+    }
+    const own = await this.dashScopeProvider()
+    if (own) {
+      const known = media.checked?.[own.host]
+      const ids = known && Date.now() - known.at < VIDEO_CHECK_TTL_MS ? known.models : KNOWN_DASHSCOPE_MODELS
+      const ep = off ? undefined : await this.videoEndpoint()
+      view.video = { source: 'provider', label: own.label, model: ep?.model ?? '', models: ids.map((id) => ({ id, name: id })), off, reason: known ? '' : 'unchecked' }
+      return view
+    }
+    view.video.reason = signedIn ? 'no_cloud_video' : 'no_provider'
+    return view
+  }
+
+  /** Settings → Media: the video model (`off` for none) and the animate switch. */
+  async setMedia(patch: { videoModel?: string; animate?: boolean }): Promise<MediaView> {
+    const next: MediaState = { ...this.state.media }
+    if (patch.videoModel !== undefined) {
+      const id = patch.videoModel.trim()
+      if (id && id !== VIDEO_OFF && !looksLikeVideoModel(id) && !KNOWN_DASHSCOPE_MODELS.includes(id) && !this.cloudVideoModels().some((m) => m.id === id)) {
+        throw new RelayError(400, 'bad_model', 'Not a video model')
+      }
+      if (id) next.videoModel = id
+      else delete next.videoModel
+    }
+    if (patch.animate !== undefined) {
+      if (patch.animate) delete next.animate
+      else next.animate = false
+    }
+    this.state = { ...this.state, media: next }
+    await this.writeState()
+    this.broadcast()
+    return this.media()
+  }
+
+  /** Which of the known Model Studio video models the own key reaches (one empty task each; nothing is billed). */
+  async checkVideoModels(): Promise<string[]> {
+    const own = await this.dashScopeProvider()
+    if (!own) throw new RelayError(409, 'no_provider', 'No Model Studio key among the providers')
+    const found: string[] = []
+    for (const id of KNOWN_DASHSCOPE_MODELS) {
+      if ((await probeVideoModel(own.host, own.apiKey, id)) === true) found.push(id)
+    }
+    const checked = { ...this.state.media?.checked, [own.host]: { models: found, at: Date.now() } }
+    this.state = { ...this.state, media: { ...this.state.media, checked } }
+    await this.writeState()
+    this.broadcast()
+    return found
+  }
+
+  /** Settings → Computer use: a test screenshot or a small mouse move through a fresh `nanomuse mcp`. */
+  async handsCheck(kind: 'screenshot' | 'move'): Promise<ScreenshotCheck | MoveCheck> {
+    const runtime = await runtimeInfo()
+    if (!runtime.ok) {
+      const error = runtime.problem === 'not-found' ? 'No nanomuse runtime: NANOMUSE_PY is not set and `nanomuse` is not on PATH' : `NANOMUSE_PY points at ${runtime.path}, which ${runtime.problem === 'missing' ? 'does not exist' : 'is not executable'}`
+      return kind === 'screenshot' ? { ok: false, black: false, error } : { ok: false, accessibility: false, error }
+    }
+    const options = { command: runtime.path, args: ['mcp'], env: { NANOMUSE_MCP_CONFIRM: process.env.NANOMUSE_MCP_CONFIRM ?? '' }, timeoutMs: 45_000 }
+    const result = kind === 'screenshot' ? await checkScreenshot(options) : await checkMove(options)
+    if (kind === 'screenshot') {
+      const shot = result as ScreenshotCheck
+      if (shot.black) this.sawBlackScreen()
+      else if (shot.ok && this.blackScreenAt) {
+        this.blackScreenAt = 0
+        this.broadcast()
+      }
+    }
+    return result
+  }
+
+  runtime(): Promise<RuntimeInfo> {
+    return runtimeInfo()
+  }
+
+  private sawBlackScreen(): void {
+    this.blackScreenAt = Date.now()
+    this.broadcast()
   }
 
   /** One candidate, drawn from the words; PNG bytes as the model gave them. */
@@ -1079,6 +1430,8 @@ export default class NanomuseCloud extends Service {
     }
     const { deviceId, deviceName, remoteControl } = this.state
     this.state = { ...(deviceId ? { deviceId } : {}), ...(deviceName ? { deviceName } : {}), ...(remoteControl === true ? { remoteControl } : {}) }
+    this.sync?.stop()
+    this.sync?.signedOut()
     this.signedInCache = false
     this.lastSharedConnectors = ''
     await this.writeState()
@@ -1294,10 +1647,81 @@ export default class NanomuseCloud extends Service {
         ...(raw.remoteControl === true ? { remoteControl: true } : {}),
         ...(raw.trusted && typeof raw.trusted === 'object' ? { trusted: trustedOf(raw.trusted) } : {}),
         ...(raw.taskSessions && typeof raw.taskSessions === 'object' ? { taskSessions: raw.taskSessions } : {}),
+        ...(raw.sync && typeof raw.sync === 'object' ? { sync: raw.sync } : {}),
       }
     } catch {
       return {}
     }
+  }
+
+  /** The session's title as the chats column shows it: the latest `session/title` event, else its first prompt. */
+  private async sessionTitle(ctx: Context, sessionId: SessionId): Promise<string> {
+    try {
+      const inspection = await ctx.sessionController.inspect(sessionId)
+      let title = ''
+      let first = ''
+      for (const event of inspection.events as ReadonlyArray<{ type: string; data: unknown }>) {
+        if (event.type === 'session/title') title = String((event.data as { title?: string }).title ?? '')
+        else if (!first && event.type === 'user/message' && (event.data as { source?: { kind?: string } }).source?.kind === 'user') first = textOf((event.data as { content?: readonly ContentBlock[] }).content)
+      }
+      return (title || first).replace(/\s+/g, ' ').trim().slice(0, 120)
+    } catch {
+      return ''
+    }
+  }
+
+  /** The person's prompts and the model's final texts of one session, for the sync engine. */
+  private async sessionLines(ctx: Context, sessionId: string): Promise<SessionLine[]> {
+    try {
+      const inspection = await ctx.sessionController.inspect(sessionId as SessionId)
+      const lines: SessionLine[] = []
+      // the final assistant text of a turn is the last `assistant/message` before its `turn/end`
+      let lastAssistant: SessionLine | undefined
+      for (const event of inspection.events) {
+        if (event.type === 'user/message') {
+          const data = event.data as unknown as { id?: string; content?: readonly ContentBlock[]; source?: { kind?: string } }
+          if (data.source?.kind !== 'user') continue
+          const text = textOf(data.content)
+          if (text && !text.startsWith('[Asked from ')) lines.push({ id: String(data.id ?? `u${event.seq}`), role: 'user', text, at: event.time })
+        } else if (event.type === 'assistant/message') {
+          const data = event.data as unknown as { message?: { id?: string; content?: readonly ContentBlock[] }; interrupted?: true }
+          const text = textOf(data.message?.content)
+          if (text && data.interrupted !== true) lastAssistant = { id: String(data.message?.id ?? `a${event.seq}`), role: 'assistant', text, at: event.time }
+        } else if (event.type === 'turn/end') {
+          if (lastAssistant) lines.push(lastAssistant)
+          lastAssistant = undefined
+        }
+      }
+      return lines
+    } catch {
+      return []
+    }
+  }
+
+  /**
+   * The turns from the account's other devices kept for one session (C8), for the browser
+   * half's bubbles: in time order, each with the key of the first prompt typed here that is
+   * younger than it (`before`, the row's `data-chat-node-key`), so the bubble is shown
+   * before that prompt; none when the turn is the newest thing in the chat.
+   */
+  private async remoteLines(ctx: Context, sessionId: string): Promise<Array<RemoteLine & { id: string; before: string | null }>> {
+    const lines = this.kept?.linesOf(sessionId) ?? []
+    if (lines.length === 0) return []
+    const prompts: Array<{ key: string; time: number }> = []
+    const sc = ctx.get('sessionController')
+    if (sc) {
+      try {
+        const inspection = await sc.inspect(sessionId as SessionId)
+        for (const event of inspection.events) {
+          if (event.type !== 'user/message') continue
+          const data = event.data as unknown as { id?: string; source?: { kind?: string } }
+          if (data.source?.kind === 'user') prompts.push({ key: `13:input-message${String(data.id ?? '')}`, time: event.time })
+        }
+      } catch {
+        // a session that cannot be read: the bubbles go after whatever is shown
+      }
+    }
+    return lines.map((line) => ({ ...line, id: line.mid, before: prompts.find((p) => p.time > line.at)?.key ?? null }))
   }
 
   private async writeState(): Promise<void> {
@@ -1451,6 +1875,35 @@ export default class NanomuseCloud extends Service {
         return send(res, 200, await this.setContribute(body.on !== false))
       }
       if (req.method === 'POST' && route === '/data/delete-samples') return send(res, 200, await this.deleteSamples())
+      // Conversations synced between the account's devices (C7, C8): the switch, the delete, the main chat, the rows from elsewhere.
+      if (route === '/sync/state' || route.startsWith('/sync/')) {
+        const sync = this.sync
+        if (!sync) return send(res, 503, { error: { code: 'not_ready', message: 'The session API is not up yet' } })
+        if (req.method === 'GET' && route === '/sync/state') {
+          await sync.relayStatus()
+          return send(res, 200, sync.view())
+        }
+        if (req.method === 'POST' && route === '/sync/state') {
+          const body = await json(req)
+          return send(res, 200, await sync.setEnabled(body.enabled !== false))
+        }
+        if (req.method === 'POST' && route === '/sync/delete') return send(res, 200, await sync.deleteRemote())
+        if (req.method === 'POST' && route === '/sync/pull') return send(res, 200, { applied: await sync.pull(), ...sync.view() })
+        if (req.method === 'POST' && route === '/sync/main') {
+          // the session the column named, or the one the account's main conversation already lives in
+          const body = await json(req)
+          return send(res, 200, { sessionId: await sync.setMain(String(body.sessionId ?? '')) })
+        }
+        if (req.method === 'GET' && route === '/sync/remote') {
+          const sessionId = url.searchParams.get('session') ?? ''
+          return send(res, 200, { lines: sessionId ? await this.remoteLines(this.ctx, sessionId) : [], hidden: sync.view().hidden })
+        }
+        if (req.method === 'POST' && route === '/sync/archived') {
+          const body = await json(req)
+          await sync.archived(Array.isArray(body.sessionIds) ? body.sessionIds.map(String) : [])
+          return send(res, 204)
+        }
+      }
       if (req.method === 'POST' && route === '/profile/refresh') return send(res, 200, await this.pullProfile(true))
       if (req.method === 'POST' && route === '/devices/refresh') {
         this.hub.refreshDevices()
@@ -1522,6 +1975,43 @@ export default class NanomuseCloud extends Service {
         this.broadcast()
         return send(res, 204)
       }
+      // Settings → Media and the face's clips (desk-b)
+      if (req.method === 'GET' && route === '/media') return send(res, 200, await this.media())
+      if (req.method === 'POST' && route === '/media') {
+        const body = await json(req)
+        const patch: { videoModel?: string; animate?: boolean } = {}
+        if (typeof body.videoModel === 'string') patch.videoModel = body.videoModel
+        if (typeof body.animate === 'boolean') patch.animate = body.animate
+        return send(res, 200, await this.setMedia(patch))
+      }
+      if (req.method === 'POST' && route === '/media/check') return send(res, 200, { models: await this.checkVideoModels() })
+      if (req.method === 'POST' && route === '/media/animate') {
+        const body = await json(req)
+        if (!this.faceId()) return send(res, 409, { error: { code: 'no_face', message: 'No drawn face to animate' } })
+        if (!(await this.videoEndpoint())) return send(res, 409, { error: { code: 'no_video_model', message: 'No video model to draw clips with' } })
+        const started = await this.motion.animateAll(body.force === true)
+        return send(res, 200, { started, motion: this.motion.view() })
+      }
+      if (req.method === 'POST' && route === '/media/cancel') {
+        this.motion.cancel()
+        return send(res, 204)
+      }
+      if (req.method === 'POST' && route === '/media/dismiss') {
+        this.motion.clearProgress()
+        return send(res, 204)
+      }
+      // Settings → Computer use: the runtime and the "try it" checks (desk-b)
+      if (req.method === 'GET' && route === '/hands/runtime') return send(res, 200, await this.runtime())
+      if (req.method === 'POST' && route === '/hands/check') {
+        const body = await json(req)
+        const kind = body.kind === 'move' ? 'move' : 'screenshot'
+        return send(res, 200, await this.handsCheck(kind))
+      }
+      if (req.method === 'POST' && route === '/hands/black-screen/clear') {
+        this.blackScreenAt = 0
+        this.broadcast()
+        return send(res, 204)
+      }
       return send(res, 404, { error: { code: 'not_found', message: `No ${req.method ?? ''} ${route}` } })
     } catch (error: unknown) {
       if (error instanceof RelayError) {
@@ -1556,12 +2046,16 @@ export function stageAction(args: unknown): StageAction {
   const kind = typeof a.action === 'string' ? a.action : 'act'
   const keys = Array.isArray(a.keys) ? a.keys.filter((k): k is string => typeof k === 'string').join('+') : ''
   const text = kind === 'key' ? keys : kind === 'open_app' ? String(a.app ?? '') : typeof a.text === 'string' ? a.text : ''
+  // `box: [x1, y1, x2, y2]` stands in for x, y when the model gave a box (computer_act): its centre
+  const box = Array.isArray(a.box) && a.box.length === 4 ? a.box.map(num) : []
+  const [bx1 = -1, by1 = -1, bx2 = -1, by2 = -1] = box
+  const boxed = box.length === 4 && box.every((v) => v >= 0)
   return {
     kind,
     label: typeof a.label === 'string' ? a.label.replace(/\s+/g, ' ').trim().slice(0, 80) : '',
     text: text.replace(/\s+/g, ' ').trim().slice(0, 80),
-    x: num(a.x),
-    y: num(a.y),
+    x: boxed && a.x === undefined ? (bx1 + bx2) / 2 : num(a.x),
+    y: boxed && a.y === undefined ? (by1 + by2) / 2 : num(a.y),
     at: Date.now(),
   }
 }

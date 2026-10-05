@@ -10,11 +10,12 @@ import { Markdown, splitBlocks } from "../components/Markdown";
 import { MuseHeader, MuseRoundButton } from "../components/MuseHeader";
 import { MoreMenu } from "../components/TabHeader";
 import { localLabel, useT } from "../i18n";
+import { mentionSuggestions, mentionTarget } from "../mention";
 import { useStore } from "../store";
 import type { AttachmentInfo, HubDevice, SkillInfo, ThreadMeta, TimelineEvent, UserEvent } from "../types";
 import { cx, timeDivider, timeShort } from "../util";
 import { MuseSheet } from "./MuseSheet";
-import { countTask, momentForTask, StarNudgeOnce, type StarMoment } from "../components/StarNudge";
+import { countDay, countTask, StarNudgeOnce } from "../components/StarNudge";
 import { useShowSteps } from "../steps";
 
 export function ChatScreen() {
@@ -38,9 +39,12 @@ export function ChatScreen() {
   const stickToBottom = useRef(true);
   const [showJump, setShowJump] = useState(false);
 
-  // A task this browser saw through: busy → idle with a reply at the end of the list. Every one
-  // is counted; the first and the tenth are the moments for a word about a star.
-  const [taskMoment, setTaskMoment] = useState<StarMoment | null>(null);
+  // A task this browser saw through (contract C1): busy → idle, the turn started by the person
+  // here (a `user` bubble, not a background notice or another device's ask) and ended with a
+  // reply. The first conversation never counts: tasks start once the first run is complete.
+  // The count reached is the moment for a word about a star when the policy names it.
+  const [taskCount, setTaskCount] = useState<number | null>(null);
+  const onboarded = state.settings?.onboarded === true;
   const sawBusy = useRef(false);
   useEffect(() => {
     if (thread?.busy) {
@@ -49,12 +53,14 @@ export function ChatScreen() {
     }
     if (!sawBusy.current) return;
     sawBusy.current = false;
-    const last = [...events].reverse().find((e) => e.type === "assistant" || e.type === "user" || e.type === "notice");
-    if (last?.type === "assistant" && last.text) {
-      const m = momentForTask(countTask());
-      if (m) setTaskMoment(m);
-    }
-  }, [thread?.busy, events]);
+    if (onboarded && personStartedTurn(events)) setTaskCount(countTask());
+  }, [thread?.busy, events, onboarded]);
+  // the app was opened today: the 7th and the 30th day are moments too
+  const [dayCount, setDayCount] = useState<number | null>(null);
+  useEffect(() => {
+    const { days, fresh } = countDay();
+    if (fresh) setDayCount(days);
+  }, []);
 
   const onScroll = useCallback(() => {
     const el = listRef.current;
@@ -182,7 +188,8 @@ export function ChatScreen() {
         {(thread?.busy || status.state !== "idle") && !stream?.text && status.state !== "waiting" && (
           <TypingIndicator label={thread?.queued ? t("{n} queued", { n: thread.queued }) : undefined} />
         )}
-        {!thread?.busy && status.state === "idle" && taskMoment && <StarNudgeOnce moment={taskMoment} className="mx-1 my-2" />}
+        {!thread?.busy && status.state === "idle" && taskCount !== null && <StarNudgeOnce moment="tasks" n={taskCount} className="mx-1 my-2" />}
+        {!thread?.busy && status.state === "idle" && dayCount !== null && <StarNudgeOnce moment="days_used" n={dayCount} className="mx-1 my-2" />}
         {showJump && (
           <button
             type="button"
@@ -305,8 +312,16 @@ function UserBubble({ event, onOpenFile }: { event: UserEvent; onOpenFile: (path
         <span className="mb-1 flex items-center gap-1 text-[11.5px] font-medium text-muted">
           <Phone size={11} /> {t("said on a call")}
         </span>
+      ) : event.via ? (
+        <span className="mb-1 text-[11.5px] font-medium text-muted">{t("asked from {device}", { device: event.via })}</span>
+      ) : event.to_device_name || event.to_device ? (
+        <span className="mb-1 flex items-center gap-1 text-[11.5px] font-medium text-accent">
+          <MonitorSmartphone size={11} /> {t("to {device}", { device: event.to_device_name || event.to_device || "" })}
+        </span>
       ) : (
-        event.via && <span className="mb-1 text-[11.5px] font-medium text-muted">{t("asked from {device}", { device: event.via })}</span>
+        (event.via_device_name || event.via_device) && (
+          <span className="mb-1 text-[11.5px] font-medium text-muted">{t("From {device}", { device: event.via_device_name || event.via_device || "" })}</span>
+        )
       )}
       {pictures.length > 0 && (
         <div className="mb-1 flex max-w-full flex-wrap justify-end gap-1.5">
@@ -613,6 +628,14 @@ function Composer({
     setText(`/${sk.name} `);
     ref.current?.focus();
   };
+  // "@" at the start names another device of the account: the turn runs there (contract C7 rule 8)
+  const hubDevices = state.hub?.devices ?? [];
+  const mentions = mentionSuggestions(text, hubDevices);
+  const target = mentions.length === 0 ? mentionTarget(text, hubDevices) : null;
+  const pickDevice = (d: HubDevice) => {
+    setText(`@${d.name} `);
+    ref.current?.focus();
+  };
 
   const submit = (e?: FormEvent) => {
     e?.preventDefault();
@@ -652,6 +675,26 @@ function Composer({
             </li>
           ))}
         </ul>
+      )}
+      {mentions.length > 0 && (
+        <ul className="mb-2 max-h-72 overflow-y-auto rounded-3xl border border-border/70 bg-surface shadow-lg divide-y divide-border/70" role="listbox" aria-label={t("Devices")}>
+          {mentions.map((d) => (
+            <li key={d.id}>
+              <button type="button" onClick={() => pickDevice(d)} className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-surface-2/70 active:bg-surface-2">
+                <span className="shrink-0 text-accent">{d.kind === "computer" ? <Monitor size={16} /> : <Smartphone size={16} />}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[14px] font-medium">@{d.name}</span>
+                  <span className="block truncate text-[12.5px] text-muted">{d.online ? t("Runs this there and reports back") : t("Offline")}</span>
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {target && (
+        <div className="flex items-center gap-1.5 px-2 pb-1 text-[12px] text-muted">
+          <MonitorSmartphone size={12} /> {t("This goes to {device}.", { device: target.name })}
+        </div>
       )}
       {pending.length > 0 && (
         <div className="mb-1 flex gap-2.5 overflow-x-auto px-1 pt-2.5 pb-1 pr-3" role="list" aria-label={t("Attachments")}>
@@ -720,6 +763,11 @@ function Composer({
             if (e.key === "Tab" && matches.length > 0 && matches[0]) {
               e.preventDefault();
               pick(matches[0]);
+              return;
+            }
+            if (e.key === "Tab" && mentions.length > 0 && mentions[0]) {
+              e.preventDefault();
+              pickDevice(mentions[0]);
               return;
             }
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -930,4 +978,25 @@ function requestBrief(events: TimelineEvent[]): string {
   const cut = folded.slice(0, 36);
   const at = cut.lastIndexOf(" ");
   return (at > 16 ? cut.slice(0, at) : cut).trimEnd() + "…";
+}
+
+/**
+ * The turn that just ended was the person's: walking back from the end, a reply with words,
+ * then the bubble that started it — `user` (typed, dictated, an idea tapped) counts; a
+ * background notice (a routine, the feed, a goal check-in) or an ask from another device
+ * does not.
+ */
+export function personStartedTurn(events: TimelineEvent[]): boolean {
+  let replied = false;
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i];
+    if (e.type === "assistant") {
+      if (!e.text || e.quiet) return false;
+      replied = true;
+      continue;
+    }
+    if (e.type === "user") return replied && !e.via;
+    if (e.type === "notice") return false;
+  }
+  return false;
 }

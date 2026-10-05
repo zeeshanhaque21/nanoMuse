@@ -23,6 +23,8 @@ build/
 dist/
 .venv/
 venv/
+# local pinned-interpreter venv used for CI-type checks (mypy); never committed
+.venv-ci/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/

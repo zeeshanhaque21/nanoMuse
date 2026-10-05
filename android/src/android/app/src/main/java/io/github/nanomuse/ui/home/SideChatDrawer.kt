@@ -95,6 +95,8 @@ fun SideChatDrawer(
     val codingComputers = remember(hubDevices) {
         hubDevices.count { it.online && it.actions.contains("coding.sessions") && it.id != io.github.nanomuse.hub.Hub.deviceId(context) }
     }
+    // nanoMuse: a chat from another device of the account is the same chat here (contract C8) — no
+    // badge per chat; the turns written elsewhere carry "From Pixel 8" in the bubble instead
     var query by remember { mutableStateOf("") }
     val sideChats = remember(sessions, mainSessionId, query) {
         sessions
@@ -332,14 +334,15 @@ private fun SideChatRow(
                 .combinedClickable(onClick = onClick, onLongClick = { menu = true })
                 .padding(horizontal = 14.dp, vertical = 11.dp),
         ) {
-            Text(
-                text = session.title?.takeIf { it.isNotBlank() } ?: stringResource(R.string.nm_drawer_untitled),
-                fontSize = 15.sp,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = session.title?.takeIf { it.isNotBlank() } ?: stringResource(R.string.nm_drawer_untitled),
+                    fontSize = 15.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             Spacer(Modifier.size(10.dp))
             Text(
                 text = relativeDay(session.updatedAt),

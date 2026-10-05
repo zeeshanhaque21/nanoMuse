@@ -128,11 +128,25 @@ html[data-nm-platform='darwin']:not([data-nm-fullscreen]) .nm-rail-top { height:
 /* macOS, no title bar: the empty tops of the rail, the column and the chat are drag handles.
    Windows draws its caption buttons over the top right corner (titleBarOverlay, 40px): the same
    drag handles, and the chat's header keeps clear of the buttons. Linux has its system bar. */
-html:is([data-nm-platform='darwin'], [data-nm-platform='win32']) [data-window-drag], html:is([data-nm-platform='darwin'], [data-nm-platform='win32']) .nm-ob, html:is([data-nm-platform='darwin'], [data-nm-platform='win32']) [data-slot="conversation.session.header"] > :first-child { -webkit-app-region: drag; }
+html:is([data-nm-platform='darwin'], [data-nm-platform='win32']) [data-window-drag], html:is([data-nm-platform='darwin'], [data-nm-platform='win32']) .nm-ob { -webkit-app-region: drag; }
 html:is([data-nm-platform='darwin'], [data-nm-platform='win32']) :is([data-window-drag], .nm-ob, [data-slot="conversation.session.header"]) :is(button, a, input, select, textarea, [contenteditable], [role="button"], [role="dialog"], [role="menu"]) { -webkit-app-region: no-drag; }
-html[data-nm-platform='darwin']:not([data-nm-fullscreen]) .nm-main-top { height: 12px; }
+/* The chat's header is not a drag region (the shell marks its <header data-window-drag>; that
+   and its leading box are reset here): the only handle over the chat is .nm-header-drag, an
+   empty strip above the face (MuseHeader). Chromium builds the window's drag map as
+   union(drag boxes) − union(no-drag boxes), so a box that is never "drag" needs no carve-out —
+   which is what kept failing for the face on macOS. The face also sits below the macOS title
+   bar band (traffic lights at y 18 → ~36px), which the system handles before the page. */
+html:is([data-nm-platform='darwin'], [data-nm-platform='win32']) header[data-window-drag]:has(.nm-header), html:is([data-nm-platform='darwin'], [data-nm-platform='win32']) [data-conversation-header-leading] { -webkit-app-region: initial; }
+.nm-header-drag { position: absolute; left: 0; right: 0; top: 0; height: 10px; z-index: 1; }
+html[data-nm-platform='darwin']:not([data-nm-fullscreen]) .nm-header-drag { height: 36px; }
+html[data-nm-platform='darwin']:not([data-nm-fullscreen]) .nm-header { top: 40px; }
+html[data-nm-platform='darwin']:not([data-nm-fullscreen]) .nm-header-back { top: 42px; }
+html[data-nm-platform='darwin']:not([data-nm-fullscreen]) header[data-window-drag]:has(.nm-header) { min-height: 136px; }
 html[data-nm-platform='win32']:not([data-nm-fullscreen]) .nm-rail-top { height: 24px; }
-html[data-nm-platform='win32']:not([data-nm-fullscreen]) .nm-main-top { height: 12px; }
+html[data-nm-platform='win32']:not([data-nm-fullscreen]) .nm-header-drag { height: 22px; right: 150px; }
+html[data-nm-platform='win32']:not([data-nm-fullscreen]) .nm-header { top: 26px; }
+html[data-nm-platform='win32']:not([data-nm-fullscreen]) .nm-header-back { top: 28px; }
+html[data-nm-platform='win32']:not([data-nm-fullscreen]) header[data-window-drag]:has(.nm-header) { min-height: 122px; }
 html[data-nm-platform='win32']:not([data-nm-fullscreen]) [data-slot="conversation.session.header"] > :first-child { padding-right: 150px; min-height: 40px; }
 html[data-nm-platform='win32']:not([data-nm-fullscreen]) .nm-ob-pager { top: 48px; }
 .nm-rail-avatar { width: 44px; height: 44px; margin: 2px 0 10px; border: 0; padding: 0; border-radius: 50%; background: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center; }
@@ -180,11 +194,27 @@ html[data-nm-platform='darwin']:not([data-nm-fullscreen]) .nm-col-top { height: 
 .nm-chat-more:hover { background: var(--dsw-alias-bg-layer-3); color: var(--dsw-alias-label-primary); }
 .nm-chat-row:hover .nm-chat-title { padding-right: 22px; }
 .nm-chat-edit { flex: 1; min-width: 0; height: 30px; margin: 2px 4px; padding: 0 8px; border: 1px solid var(--nm-blue); border-radius: 7px; background: var(--nm-field); color: var(--dsw-alias-label-primary); font: inherit; font-size: 14px; outline: none; }
+/* a turn of the conversation written on another device of the account (C8): the person's bubble on the
+   right like the harness's own, the Muse's on the left, "From Pixel 8" under either (RemoteBubbles.ts) */
+.nm-remote { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
+.nm-remote-user { align-items: flex-end; }
+.nm-remote-assistant { align-items: flex-start; }
+.nm-remote-bubble { max-width: 100%; padding: 10px 16px; border-radius: var(--dsw-radius-xl, 16px); font-size: var(--dsh-content-font-size, 14px); line-height: calc(22px + var(--dsh-content-font-delta, 0px)); white-space: pre-wrap; word-break: break-word; color: var(--dsw-alias-label-primary); }
+.nm-remote-user .nm-remote-bubble { background: var(--dsw-specific-bubble, var(--nm-hover)); }
+.nm-remote-assistant .nm-remote-bubble { padding-left: 0; padding-right: 0; }
+.nm-remote-from { font-size: 11px; color: var(--dsw-alias-label-tertiary); padding: 0 4px; }
+/* a session with no turn of its own yet (the chat's "hero" layout centres the composer): the other
+   devices' turns sit above the composer, bottom-aligned like a transcript, inside the scrolling body */
+[data-conversation-content][data-content-phase="hero"] > [data-conversation-scroll]:has(.nm-remote) { justify-content: flex-end; }
+[data-conversation-content][data-content-phase="hero"] > [data-conversation-scroll] > .nm-remote { flex: 0 0 auto; width: min(var(--dsh-chat-content-width, 680px), 100%); align-self: center; box-sizing: border-box; padding: 0 var(--dsh-composer-side-clearance, 16px); }
+[data-conversation-content][data-content-phase="hero"] > [data-conversation-scroll] > .nm-remote:first-child { margin-top: 16px; }
 
 /* ---- the pinned agent header over the conversation -------------------- */
 header[data-window-drag]:has(.nm-header) { position: relative; min-height: 108px; }
-.nm-header { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 3px; pointer-events: none; z-index: 2; max-width: min(60%, 520px); }
-.nm-header > * { pointer-events: auto; }
+/* Centred with auto margins, not translateX(-50%): the window's drag-region map is built from
+   untransformed boxes, and a transformed, pointer-events:none box over a drag region left the
+   face unclickable on macOS. The header block itself is the no-drag island (see desk-a below). */
+.nm-header { position: absolute; left: 0; right: 0; top: 12px; width: fit-content; margin: 0 auto; display: flex; flex-direction: column; align-items: center; gap: 3px; z-index: 2; max-width: min(60%, 520px); }
 .nm-header-face { position: relative; width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; border: 0; padding: 0; background: transparent; cursor: pointer; box-shadow: 0 0 0 2px transparent; transition: box-shadow 300ms; }
 .nm-header-face.nm-live { box-shadow: 0 0 0 2px var(--nm-accent); }
 .nm-header-face.nm-wait { box-shadow: 0 0 0 2px var(--dsw-alias-state-warn-primary, #d98c1f); }
@@ -1043,6 +1073,125 @@ html[data-nm-profile] .nm-ac { left: calc(50% - 155px); }
 .nm-ac-final-img { width: 160px; height: 160px; border-radius: 16px; object-fit: cover; }
 .nm-ac-done p { margin: 0 0 4px; font-size: 14px; line-height: 1.45; }
 .nm-ac-share-canvas { width: 100%; max-width: 360px; aspect-ratio: 1; border-radius: 14px; display: block; margin: 10px auto 0; box-shadow: 0 6px 24px rgba(0,0,0,0.18); }
+
+/* desk-a */
+/* Belt and braces: the face, the name and the status line are a no-drag island on macOS and
+   Windows alike (the header itself is no longer a drag region, see the platform block above);
+   the face on the rail and the drawer's own face too. Plain boxes, no transform and no
+   pointer-events games: Chromium maps drag regions from layout. */
+html:is([data-nm-platform='darwin'], [data-nm-platform='win32']) :is(.nm-header, .nm-header-face, .nm-header-back, .nm-rail-face, button:has(> .nm-rail-face)) { -webkit-app-region: no-drag; }
+
+/* The first run (C4): the phone's pages, one at a time, the dots and the gear on top. */
+.nm-ob { align-items: stretch; justify-content: flex-start; flex-direction: column; }
+.nm-fr-top { position: relative; flex: none; height: 56px; display: flex; align-items: center; justify-content: center; }
+html[data-nm-platform='darwin']:not([data-nm-fullscreen]) .nm-fr-top { height: 64px; }
+.nm-fr-dots { display: flex; gap: 7px; }
+.nm-fr-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dsw-alias-label-dimmed); opacity: 0.45; transition: opacity 200ms, background 200ms; }
+.nm-fr-dot.nm-on { background: var(--dsw-alias-label-primary); opacity: 1; }
+.nm-fr-gear { position: absolute; right: 16px; top: 50%; transform: translateY(-50%); width: 34px; height: 34px; border: 0; border-radius: 50%; background: transparent; color: var(--dsw-alias-label-secondary); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; -webkit-app-region: no-drag; }
+.nm-fr-gear:hover { background: var(--nm-hover); color: var(--dsw-alias-label-primary); }
+.nm-fr-scroll { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 8px 24px 32px; }
+.nm-fr-page { width: min(420px, 100%); gap: 14px; margin: auto 0; }
+.nm-fr-page .nm-ob-sub { margin: -4px 0 2px; }
+.nm-fr-primary { margin-top: 4px; }
+/* The app's mark as a page hero (sign-in, permissions): the tile on the page background, its own hairline edge, nothing added (docs/brand.md). */
+.nm-fr-hero-mark { flex: none; display: block; width: 72px; height: 72px; }
+.nm-ob-form > .nm-fr-hero-mark { margin-bottom: 2px; }
+
+/* The Devices page as cards (0.1.37): this computer first, the others in a grid (one column
+   narrow, two from 560px of page), 16 px corners, a hairline so the card holds in both themes. */
+.nm-dv .nm-page-inner { gap: 12px; container-type: inline-size; }
+.nm-dv-head { display: flex; flex-direction: column; gap: 6px; }
+.nm-dv-count { margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--dsw-alias-label-tertiary); }
+.nm-dv-card { box-sizing: border-box; min-width: 0; border-radius: 16px; background: var(--nm-card); box-shadow: 0 0 0 1px var(--nm-divider); padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.nm-dv-top { display: flex; align-items: flex-start; gap: 12px; }
+.nm-dv-glyph { flex: none; width: 44px; height: 44px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-secondary); }
+.nm-dv-glyph.nm-on { background: color-mix(in srgb, var(--nm-blue) 12%, transparent); color: var(--nm-blue); }
+.nm-dv-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.nm-dv-name-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.nm-dv-name { font-size: 15px; font-weight: 600; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nm-dv-sub { font-size: 12.5px; line-height: 1.45; color: var(--dsw-alias-label-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nm-dv-sub.nm-wrap { white-space: normal; }
+.nm-dv-rename { display: flex; align-items: center; gap: 8px; }
+.nm-dv-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.nm-dv-chip { padding: 4px 10px; border-radius: 999px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 1.4; font-weight: 500; }
+.nm-dv-hint { margin-top: 4px; font-size: 12.5px; line-height: 1.45; color: var(--dsw-alias-label-secondary); }
+.nm-dv-rows { margin: 2px -16px -10px; padding: 0 16px; border-top: 1px solid var(--nm-divider); }
+.nm-dv-rows .nm-row:last-child { border-bottom: 0; }
+.nm-dv-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+@container (min-width: 600px) { .nm-dv-grid { grid-template-columns: 1fr 1fr; } }
+.nm-dv .nm-more.nm-icon-btn { flex: none; }
+.nm-fr-features { width: 100%; display: flex; flex-direction: column; gap: 4px; text-align: left; }
+.nm-fr-feature { display: flex; align-items: flex-start; gap: 12px; padding: 8px 6px; }
+.nm-fr-feature .nm-ob-row-icon { flex: none; }
+.nm-fr-feature .nm-ob-row-sub { line-height: 1.45; }
+.nm-fr-notice { width: 100%; box-sizing: border-box; text-align: left; padding: 12px 14px; border-radius: 14px; background: var(--nm-card); box-shadow: 0 0 0 1px var(--nm-divider); display: flex; flex-direction: column; gap: 6px; }
+.nm-fr-notice-title { font-size: 13.5px; font-weight: 600; }
+.nm-fr-notice p { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--dsw-alias-label-secondary); }
+.nm-fr-notice-closing { color: var(--dsw-alias-label-tertiary) !important; }
+.nm-fr-choices { width: 100%; display: flex; flex-direction: column; gap: 10px; }
+.nm-fr-choice { display: flex; width: 100%; box-sizing: border-box; text-align: left; padding: 14px 16px; border-radius: 14px; border: 1px solid var(--nm-divider); background: var(--nm-card); color: inherit; font: inherit; cursor: pointer; }
+.nm-fr-choice:hover:not(:disabled) { border-color: var(--nm-blue); background: var(--nm-selected); }
+.nm-fr-choice:disabled { opacity: 0.5; cursor: default; }
+.nm-fr-choice .nm-ob-row-sub { line-height: 1.45; margin-top: 2px; }
+.nm-fr-granted { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; color: #2f9e5f; }
+
+/* The first conversation: the app's opening lines as agent bubbles, and the name chooser. */
+.nm-intro-host { width: 100%; max-width: var(--dsh-chat-content-width, 760px); box-sizing: border-box; margin: 0 auto; padding: 12px 0 0; }
+html[data-nm-muse] [data-conversation-scroll]:has(> .nm-intro-host):has([class*="_composerHero"]) { justify-content: flex-start; }
+html[data-nm-muse] [data-conversation-scroll]:has(> .nm-intro-host) [class*="_composerHero"] { margin-top: auto; }
+.nm-intro { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.nm-intro-bubble { width: fit-content; max-width: 100%; box-sizing: border-box; background: var(--nm-agent-bubble); border-radius: 20px; padding: 10px 16px; font-size: 15px; line-height: 1.5; white-space: pre-wrap; animation: nm-rise 260ms ease-out; }
+.nm-naming { display: flex; flex-direction: column; gap: 8px; width: min(360px, 100%); box-sizing: border-box; margin: 8px 0; padding: 14px; border-radius: 16px; background: var(--nm-card); box-shadow: 0 0 0 1px var(--nm-divider); }
+.nm-naming-title { font-size: 13px; font-weight: 600; color: var(--dsw-alias-label-secondary); margin-bottom: 2px; }
+.nm-naming-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; box-sizing: border-box; padding: 11px 14px; border-radius: 12px; border: 1px solid var(--nm-divider); background: var(--nm-base); color: var(--dsw-alias-label-primary); font: inherit; font-size: 15px; text-align: left; cursor: pointer; transition: opacity 200ms, border-color 200ms; }
+.nm-naming-row:hover:not(:disabled) { border-color: var(--nm-blue); }
+.nm-naming-row:disabled { cursor: default; }
+.nm-naming-row.nm-selected { border: 1.5px solid var(--nm-blue); color: var(--nm-blue); }
+.nm-naming-row.nm-dimmed { opacity: 0.4; }
+.nm-naming-custom { border-style: dashed; color: var(--dsw-alias-label-tertiary); background: transparent; }
+
+/* The Feed (C5): the intro card, the "how" card under the empty state, the routine row in the sliders. */
+.nm-feed-intro { display: flex; flex-direction: column; gap: 8px; margin: 0 0 14px; padding: 14px 16px; border-radius: var(--nm-radius); background: var(--nm-card); border: 1px solid var(--nm-divider); }
+.nm-feed-intro-title { font-size: 14px; font-weight: 600; }
+.nm-feed-intro-body { margin: 0; font-size: 13px; line-height: 1.5; color: var(--dsw-alias-label-secondary); }
+.nm-feed-intro-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 2px; }
+.nm-feed-how { width: min(360px, 100%); box-sizing: border-box; text-align: left; margin: 6px 0 2px; padding: 12px 14px; border-radius: 14px; background: var(--nm-card); border: 1px solid var(--nm-divider); }
+.nm-feed-how-title { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+.nm-feed-how p { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--dsw-alias-label-secondary); }
+.nm-feed-routine { display: flex; align-items: center; gap: 10px; margin-top: 6px; font-size: 13.5px; }
+.nm-feed-routine-label { flex: 1; }
+.nm-field-time { width: auto; min-width: 0; padding: 4px 8px; font: inherit; font-size: 13px; }
+/* The version (C2): the two lines under one title. */
+.nm-version-row .nm-row-main { gap: 3px; }
+.nm-version-line { white-space: normal; }
+
+/* desk-b */
+/* Computer use: the "try it" rows, the runtime row, the black-screen notice; Media: the clips. */
+.nm-hc-result { display: flex; align-items: center; gap: 10px; margin: 0 12px 10px; padding: 10px 12px; border-radius: 12px; font-size: 12.5px; line-height: 1.4; color: var(--dsw-alias-label-secondary); }
+.nm-hc-result > span.nm-wrap { flex: 1; min-width: 0; }
+.nm-hc-ok { background: color-mix(in srgb, #2f9e5f 12%, transparent); }
+.nm-hc-ok > svg { color: #2f9e5f; flex: none; }
+.nm-hc-bad { background: color-mix(in srgb, #d9534f 12%, transparent); color: var(--dsw-alias-label-primary); }
+.nm-hc-thumb { width: 96px; height: auto; max-height: 72px; object-fit: cover; border-radius: 8px; flex: none; box-shadow: 0 1px 4px rgba(0,0,0,0.25); background: #000; }
+.nm-hc-black { width: 48px; height: 32px; border-radius: 6px; background: #000; flex: none; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.2); }
+.nm-hc-actions { display: inline-flex; gap: 8px; flex: none; flex-wrap: wrap; justify-content: flex-end; }
+.nm-hc-live { margin-left: 8px; font-size: 11px; font-weight: 500; padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, #d9534f 14%, transparent); color: #c9302c; vertical-align: 1px; }
+.nm-hc-live.nm-hc-live-ok { background: color-mix(in srgb, #2f9e5f 16%, transparent); color: #2f9e5f; }
+.nm-hc-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; word-break: break-all; }
+.nm-hc-runtime-bad { background: color-mix(in srgb, #d9534f 10%, transparent); }
+.nm-hc-runtime-bad .nm-row-sub { color: var(--dsw-alias-label-primary); }
+.nm-hc-black-notice { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin: 0 0 12px; padding: 12px 14px; border-radius: 14px; background: #1b1b1f; color: #fff; border: 2px solid #d9534f; box-shadow: 0 8px 28px rgba(0,0,0,0.35); font-size: 13px; line-height: 1.45; max-width: 560px; }
+.nm-hc-black-notice .nm-hc-black-text { flex: 1 1 260px; display: flex; flex-direction: column; gap: 4px; }
+.nm-hc-black-notice strong { font-size: 14px; }
+.nm-hc-black-notice .nm-pill { background: #fff; color: #1b1b1f; }
+.nm-hc-black-notice .nm-pill.nm-pill-ghost { background: transparent; color: #fff; border: 1px solid rgba(255,255,255,0.4); }
+.nm-hc-compact { padding: 8px 12px; font-size: 12.5px; }
+.nm-md-clip { width: 44px; height: 44px; border-radius: 50%; object-fit: cover; flex: none; background: var(--dsw-alias-bg-layer-2); }
+.nm-md-clip-none { display: inline-block; border: 1px dashed var(--nm-divider); background: transparent; }
+.nm-md-bar { height: 4px; margin: 0 14px 12px; border-radius: 999px; background: var(--dsw-alias-bg-layer-3); overflow: hidden; }
+.nm-md-bar > span { display: block; height: 100%; background: var(--nm-accent, #0064d4); border-radius: 999px; transition: width 300ms; }
+.nm-md-failed { color: #c9302c; }
 `
 
 /** Put the stylesheet in the head once and mark the document as ours. */

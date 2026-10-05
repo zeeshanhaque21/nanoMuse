@@ -393,6 +393,22 @@ export async function checkForUpdate(current: string, fetchImpl: Fetch = fetch a
   } catch (error: unknown) {
     errors.push(`mirror: ${error instanceof Error ? error.message : String(error)}`)
   }
+  try {
+    const rel = (await get(RELEASES_API)) as { tag_name?: string; html_url?: string; body?: string; assets?: { name?: string; browser_download_url?: string; size?: number }[] }
+    const latest = String(rel.tag_name ?? '').replace(/^v/, '')
+    if (!latest) throw new Error('no tag')
+    return {
+      ...base,
+      latest,
+      newer: compareVersions(latest, current) > 0,
+      page: rel.html_url || `${RELEASES_PAGE}/tag/v${latest}`,
+      assets: (rel.assets ?? []).flatMap((a) => (a.name && a.browser_download_url ? [{ name: a.name, url: a.browser_download_url, size: Number(a.size ?? 0) || 0 }] : [])),
+      notes: String(rel.body ?? '').slice(0, 4000),
+      source: 'github',
+    }
+  } catch (error: unknown) {
+    errors.push(`github: ${error instanceof Error ? error.message : String(error)}`)
+  }
   return { ...base, error: errors.join('; ') }
 }
 

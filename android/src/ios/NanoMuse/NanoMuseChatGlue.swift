@@ -11,6 +11,30 @@
 
 import Foundation
 
+// MARK: - The Muse header's menu → the chat
+
+extension Notification.Name {
+    /// `object` is the chat's session key (`nmSessionKey`); `userInfo["action"]` a
+    /// `NanoMuseChatAction` raw value. AIChatView acts on it for its own chat.
+    static let nanoMuseChatAction = Notification.Name("nanoMuse.chatAction")
+}
+
+/// What the Muse header's ••• menu can ask of the chat under it (the entries
+/// Android's ChatScreen menu has; the shell's own rows stay in the shell).
+enum NanoMuseChatAction: String {
+    case newChat, model, clearChat, terminal, browser, files, tokenUsage
+
+    static func post(_ action: NanoMuseChatAction, session: String) {
+        NotificationCenter.default.post(name: .nanoMuseChatAction, object: session, userInfo: ["action": action.rawValue])
+    }
+
+    /// The action a notification carries, when it is for the given chat.
+    static func from(_ note: Notification, for session: String) -> NanoMuseChatAction? {
+        guard (note.object as? String) == session, let raw = note.userInfo?["action"] as? String else { return nil }
+        return NanoMuseChatAction(rawValue: raw)
+    }
+}
+
 @MainActor
 extension AIChatViewModel {
     /// What addenda, flows and cards key on: the real session, or the draft until it is created.
@@ -24,10 +48,12 @@ extension AIChatViewModel {
         guard !text.isEmpty else { return false }
         if NanoMuseAvatarFlow.shared.handle(text, in: self) { return true }
         if NanoMuseFirstConversation.shared.handle(text, in: self) { return true }
+        // C7: "@Pixel 8 open the calendar" — the task runs on that device, its answer comes back here.
+        if NanoMuseDeviceMention.handle(text, in: self) { return true }
         return false
     }
 
-    /// After a turn ended: goals, the feed, the naming flow read the reply; addenda tick.
+    /// After a turn ended: goals, the feed, the naming flow read the reply; addenda tick; sync pushes.
     func nmAfterTurn() {
         let key = nmSessionKey
         let reply = nmLastAssistantText()
@@ -35,6 +61,7 @@ extension AIChatViewModel {
         NanoMuseFeedFlow.afterTurn(session: key, assistantText: reply)
         NanoMuseFirstConversation.shared.afterTurn(session: key, assistantText: reply, vm: self)
         NanoMuseSessionAddenda.onTurnFinished(session: key)
+        NanoMuseSync.shared.turnFinished(session: key)
     }
 
     /// Appended to the system prompt of this session (empty when there is nothing to add).

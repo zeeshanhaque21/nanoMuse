@@ -147,6 +147,8 @@ private struct UserBubbleSurface: ViewModifier {
                         .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
                         .foregroundStyle(ChatColors.secondaryText.opacity(0.5))
                 )
+        } else if NanoMuseShellPrefs.shell { // nanoMuse: Muse's user bubble — flat grey, 18 pt, no glass (Android: MuseTones.bubble)
+            content.background(shape.fill(NanoMuseTones.bubble)) // nanoMuse:
         } else if #available(iOS 26.0, *) {
             content.glassEffect(.regular, in: shape)
         } else {
@@ -399,6 +401,7 @@ struct ChatMessageRow: View {
                         }
                     }
                 }
+                NanoMuseFromDeviceCaption(message.nmFromDevice) // nanoMuse: C8 — "From Pixel 8" under a synced line
             }
             .modifier(MinisOpenURLHandler())
             .contentShape(Rectangle())
@@ -422,14 +425,14 @@ struct ChatMessageRow: View {
                         Label(AppLocalized("Copy Screenshot"), systemImage: "camera.viewfinder")
                     }
                 }
-                if let onEdit {
+                if let onEdit, message.nmFromDevice == nil { // nanoMuse: C8 — another device's line is read-only here
                     Button {
                         onEdit()
                     } label: {
                         Label("Edit", systemImage: "square.and.pencil")
                     }
                 }
-                if let onRetry {
+                if let onRetry, message.nmFromDevice == nil { // nanoMuse: C8
                     Button {
                         onRetry()
                     } label: {
@@ -479,6 +482,7 @@ struct ChatMessageRow: View {
     private var assistantRow: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Assistant label
+            if !NanoMuseShellPrefs.shell { // nanoMuse: in the Muse shell the grey bubble is the agent's; no label over it
             HStack(spacing: 6) {
                 Image(systemName: "sparkles")
                     .font(.system(size: 18, weight: .semibold))
@@ -495,6 +499,7 @@ struct ChatMessageRow: View {
                     .foregroundStyle(ChatColors.primaryText)
             }
             .padding(.top, 4)
+            } // nanoMuse:
 
             ForEach(message.blocks) { block in
                 AssistantBlockView(
@@ -529,6 +534,8 @@ struct ChatMessageRow: View {
                     detailBlock: $detailBlock
                 )
             }
+
+            NanoMuseFromDeviceCaption(message.nmFromDevice) // nanoMuse: C8 — "From Pixel 8" under a synced reply
 
             // Typing indicator — "request out, nothing back yet", evaluated per
             // ROUND. See `ChatMessage.shouldShowTypingIndicator`.
