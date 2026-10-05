@@ -224,3 +224,25 @@ AGENTS.md has been corrected in both places so the next run does not repeat this
   (b) regenerate the static bundle *after* the last source edit, not before; (c) the
   gh-axi API wrapper returns YAML, and `--jq .body` truncates at code fences — verify PR
   bodies against the rendered page, not the API echo.
+
+## Follow-up commits added to PR #11 during the toolchain correction
+
+| Commit | Purpose |
+|---|---|
+| `ac1a8ba3b3` | correct the false "never compiled" claim in this report |
+| `968b05c108` | correct the stale AGENTS.md line (subject scoped `docs(runbook):` after CI rejected `docs(AGENTS):` - the Commits regex requires a lowercase scope) |
+
+PR #11 head is now **`968b05c108225bafb32355b068f4e6c5cde77c10`**, and **all 14 CI checks
+pass with 0 failures** on it.
+
+Two CI failures were hit and fixed honestly rather than bypassed:
+1. `web app build` / "Built app is committed" - the committed bundle predated the last source
+   edit; regenerated with the repo's generator.
+2. `Signed-off-by on every commit` - **not** actually a missing sign-off. Every non-merge
+   commit was signed; the real failure was my `docs(AGENTS): ...` subject, because the
+   Conventional-Commit regex requires a lowercase scope. The job name is misleading. Fixed by
+   amending the subject, and both of CI's own rules were then re-run locally to confirm.
+
+The PR branch was updated with `--force-with-lease` pinned to the exact previously-observed
+remote head, never a bare `--force`. No commit was dropped: the only history change is the one
+commit message's first line.
