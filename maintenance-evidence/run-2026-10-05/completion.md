@@ -150,13 +150,55 @@ Neither happened, so no target was touched. No version changed anywhere.
 | Android APK | **not built** — depends on the unmerged tag |
 | iOS | no sideload path on this host |
 
+## Correction (follow-up, 2026-10-05) — my mobile-toolchain claim was WRONG
+
+This report originally stated: *"Android and iOS were never compiled — no reachable
+Gradle/Xcode toolchain."* **That was false, and it came from trusting a stale line in
+AGENTS.md rather than checking.** Both toolchains exist on this Mac. Verified and corrected:
+
+| Claim | Reality |
+|---|---|
+| "no reachable Gradle" | **False.** Gradle 8.11.1 + JDK 17 (Zulu) + Android SDK, project root `android/src/android/`. `./gradlew :app:assembleRelease` → **BUILD SUCCESSFUL** |
+| "no reachable Xcode" | **False.** Xcode 27.0 (27A266a). `xcodebuild` runs and resolves the SwiftPM graph |
+
+**Android, actually built and scanned** (from merge commit `3e28be36a0`):
+
+| | |
+|---|---|
+| Artifact | `android/src/android/app/build/outputs/apk/release/app-release.apk`, 33,626,894 bytes |
+| SHA-256 | `2b06079e595ee17c6b49c3fd80d5bf4cd79fd5168b5a34cb2505db1f28c5bc36` |
+| Signature | `CN=nanoMuse fork, OU=release, O=nanoMuse fork` — a real release key, **not** `CN=Android Debug`; signer SHA-256 `811846edf105767ca3e54cdafe5e2cad9e8e3348b1e54aefe6dbee2827512c00` (same key as v0.1.34-fork.1, so it can update an installed copy) |
+| Badging | `io.github.nanomuse.app`, versionName 0.1.37, versionCode 38, arm64-v8a |
+| `.cn` scan of the **signed** APK | **0 hits** for `nanomuse.cn` across all 592 entries; `classes.dex` 0, `resources.arsc` 0, `AndroidManifest.xml` 0 |
+| Old release index | `dl/index.json` **absent entirely** — the mirror index is empty by default, as designed |
+| Fork release URL | `https://github.com/zeeshanhaque21/nanoMuse/releases/latest` present in the artifact |
+| Remaining `.cn` strings | only third-party BYO-key model providers inside the bundled `libgojni.so` (ModelScope, MiniMax, Moonshot, SiliconFlow, iFlytek, Ark, TBox, SCNet) — not the nanoMuse backend, and not contacted without the user's own key |
+
+The build needed four **git-ignored** inputs that a fresh treehouse lease does not inherit
+(`local.properties`, `rclone.aar`, `libproot.so`, the keystore pair). Gradle fails on each in
+turn, which is what made this look like a missing toolchain. `build.gradle.kts` resolves
+`storeFile` relative to `app/`, so the copied `keystore.properties` needed `storeFile`
+repointed at the lease's own copy — path only, no password value was ever printed.
+
+**iOS, honestly bounded.** `xcodebuild` reaches the compile stage and then fails on two
+prebuilt native inputs that are git-ignored **and absent from the primary checkout too**:
+`Configs/ProviderCustomization.xcconfig` (only a `.example` is tracked) and
+`deps/frameworks/Rclone.xcframework`. Those are produced by `android/deps/build_ffmpeg.sh`,
+`build_rclone_ios.sh` and friends, which have never been run here. What *did* run:
+`xcrun swiftc -parse android/src/ios/NanoMuse/*.swift` → **rc=0, clean**. So the Swift
+changes are parse-verified, not app-build-verified. That is the real ceiling today, and it is
+a missing prebuilt dependency, **not** a missing toolchain.
+
+AGENTS.md has been corrected in both places so the next run does not repeat this error.
+
 ## What was NOT verified
 
-- **No independent adversarial review** (provider outage, above). The largest gap.
-- **Android and iOS were never compiled** — no reachable Gradle/Xcode toolchain. Kotlin and
-  Swift edits were reviewed by reading only.
-- **The APK was not built** and no fork release artifact was produced or scanned, so the
-  release artifact `.cn` scan that passed for `v0.1.34-fork.1` was **not** re-run here.
+- **No independent adversarial review** (provider outage, above). The largest remaining gap.
+- **iOS was not app-built** — blocked on the two unbuilt native dependencies above. Swift
+  sources parse clean; that is the limit of what ran.
+- **The APK was not built or published during the original run** — it has since been built and
+  scanned in the follow-up above, but it is **not attached to any release**, because PR #11 is
+  still unmerged and a release artifact must come from a tagged sanitized commit.
 - **The Jetson relay, the Mac app, and the phone were not exercised end to end.**
 - Whether upstream's 0.1.36/0.1.37 sync feature works against a real relay — only wiring
   and unit-level coverage were verified.
