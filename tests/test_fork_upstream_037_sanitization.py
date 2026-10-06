@@ -12,7 +12,6 @@ with the fork, so it auto-merged in. Each surface below was checked at its ownin
 
 from __future__ import annotations
 
-import io
 import os
 import re
 from pathlib import Path
@@ -177,7 +176,7 @@ def test_no_android_or_ios_source_reads_upstream_releases() -> None:
                 if not fn.endswith((".kt", ".java", ".swift")):
                     continue
                 full = os.path.join(dirpath, fn)
-                text = io.open(full, encoding="utf-8", errors="replace").read()
+                text = open(full, encoding="utf-8", errors="replace").read()
                 if "repos/nano-muse/nanoMuse" in text or 'OWNER = "nano-muse"' in text:
                     offenders.append(os.path.relpath(full, ROOT))
     assert not offenders, f"still reading upstream releases: {offenders}"
