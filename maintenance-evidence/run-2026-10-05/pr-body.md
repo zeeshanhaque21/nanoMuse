@@ -135,56 +135,60 @@ raw upstream commit. No fork tag targets upstream's `48fd40d896` (v0.1.35), `743
 (v0.1.36) or `10a699280e` (v0.1.37). New fork releases for 0.1.35-0.1.37 will be tagged on the
 sanitized commit produced by this PR.
 
-## Review status — BLOCKED, not merged
+## Review — independent adversarial review, findings fixed
 
-**The required separate fresh-context adversarial review could not be run, so this PR is
-NOT merged.** The merge gate in the runbook requires it, and I am not going to substitute
-my own work for it.
+A **separate fresh-context reviewer** audited the diff and reported
+**mergeable after fixes**. All confirmed findings are fixed below.
 
-Evidence the mandated model is unavailable (a provider outage, not a code problem):
+### MAJOR 1 — the emptied mirror index was still fetched unconditionally
 
-| Attempt | Route | Result |
-|---|---|---|
-| Subagent spawn 1 | `omniroute/opencode/muse-spark-1.3-contributor-free` | `[500]: Internal server error (reset after 1m 36s)` |
-| Subagent spawn 2 | `omniroute/oc/muse-spark-1.3-contributor-free` | `[500]: Internal server error` |
-| Subagent spawn 3 | `omniroute/opencode-zen/muse-spark-1.3-contributor-free` | `[500]: Internal server error (reset after 1m 36s)` |
-| Direct probe (`opencode run --yolo --auto`) | `omniroute/opencode/muse-spark-1.3-contributor-free` | hung >7 min with no answer to "reply OK"; terminated |
+`UpdateCheck.kt` did `get(INDEX_URL)` with `INDEX_URL` empty. OkHttp's
+`Request.Builder().url("")` throws `IllegalArgumentException`; it is caught, so
+the app never crashed, but **every** update check performed a guaranteed-to-fail
+request and logged a misleading failure before falling through to GitHub. The
+sibling surfaces already guarded (`update.py` `if INDEX_URL:`, `desk.ts`
+`if (!mirrorIndex)`); Android and iOS were the only ones that did not. Both now
+guard (`if (INDEX_URL.isNotBlank())` / `if !indexURL.isEmpty`).
 
-The runbook allows at most two worker retries before reporting the provider as blocked;
-all attempts were exhausted.
+### MAJOR 2 — the mobile version lookup still read upstream's releases
 
-As the best available substitute, **68 in-session assertions** were run over the committed
-merge (`/tmp` scripts, re-runnable) covering: every emptied-default consumer, upstream
-feature wiring, per-file size sanity, credential handling, fork tag provenance, and a
-tree-wide conflict-marker scan. Result: **68 pass, 0 fail.**
+Android and iOS pointed `DOWNLOAD_URL` at the fork but the *version lookup* at
+`nano-muse/nanoMuse`, so the Version row could offer an upstream build. Both now
+read `zeeshanhaque21/nanoMuse`, matching the runtime's `FORK_REPO`.
 
-**This is explicitly not equivalent to an independent review** — it is the same agent that
-wrote the merge reviewing its own work. What it does establish is that the objective,
-mechanically-checkable claims hold. What it cannot establish is that a human or an
-independent reviewer would find no design defect.
+A follow-up scan of the **built dex** — not the source, which is what let this
+hide — found a **third** updater, `com/openminis/app/data/UpdateChecker.kt`,
+still polling upstream. That one predates this merge, but leaving it would have
+kept the defect alive on one surface, so it is repointed too. The regression test
+now walks the entire Android and iOS source trees instead of listing files, so a
+fourth updater cannot slip in behind named checks.
 
-### CI status on the tested head `c99ccf705e`
+### Documentation corrections the review caught
 
-All 14 checks pass, 0 failures:
+- The scan remainder is **four** files, not two: three absence-asserting tests plus
+  `README.md`, whose 5 `.cn` references are pre-existing release-history prose with
+  an identical count on `fork/main`.
+- A quoted PR head SHA was stale; the authoritative head is the branch tip.
 
-```
-success  build · test · pack          success  web app build
-success  Signed-off-by on every commit success  gateway tests
-success  ubuntu-latest · py3.11/3.12/3.13  success  macos-latest · py3.12
-success  windows-latest · py3.12      success  docker build
-success  debug APK · arm64-v8a        success  build and push
-success  what changed (x2)            skipped  release
-```
+### A reviewer count I checked and did not "correct"
 
-The first CI run failed on `web app build` → **"Built app is committed"**, because the
-committed bundle had been generated *before* the `DevicesScreen.tsx` sanitization landed.
-That was a real defect this run introduced and caught: the bundle was regenerated with the
-repository's own generator and re-committed in `c99ccf705e`. Two consecutive local builds
-are byte-identical, so the generator is deterministic.
+The review reported the pre-existing failure count as 10 against my 11. Re-running
+the identical command shows **11**, and the reviewer's own enumerated list contains
+11 entries - a miscount of their list, not a correction. The sets are byte-identical
+either way, so the no-regression conclusion stands.
 
-### To unblock
+### A CI failure I caused, and fixed
 
-Merge once an independent review lands on this head. Nothing else is outstanding.
+CI's `Ruff lint` failed on `UP020` (my new test used `io.open`). CI's ruff is newer
+than this machine's, so the local run passed while CI failed - the reason to run the
+repository's own gate. Fixed, then re-verified with CI's exact interpreter
+(`.venv-ci`, py3.12): ruff check + format + mypy all clean.
+
+### CI status on the tested head
+
+**15 checks, all pass, 0 failures** - including `Ruff lint`, `Ruff format`,
+`Mypy`, `Tests`, `web app build`, `debug APK`, `docker build`, and the matrix on
+ubuntu py3.11/3.12/3.13, macOS and Windows.
 
 ## Fork-only features preserved
 
