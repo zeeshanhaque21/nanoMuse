@@ -258,3 +258,103 @@ Two CI failures were hit and fixed honestly rather than bypassed:
 The PR branch was updated with `--force-with-lease` pinned to the exact previously-observed
 remote head, never a bare `--force`. No commit was dropped: the only history change is the one
 commit message's first line.
+
+
+---
+
+# FINAL OUTCOME (2026-10-05, after the user's go-ahead)
+
+## Review performed
+
+An **independent fresh-context adversarial review** ran on the model actually available
+(Space Bunny Free). Earlier in this run the review was wrongly reported as blocked: the
+task file named `omniroute/opencode/muse-spark-1.3-contributor-free`, which returned
+`[500]` on three routes and then hung. The available model was the real constraint;
+naming a dead route was not a reason to skip the gate. That was my error and it cost a
+merge cycle.
+
+The reviewer returned **mergeable after fixes** and found **2 major defects**, both real,
+both mine:
+
+1. **Unguarded empty mirror URL.** `UpdateCheck.kt` called `get(INDEX_URL)` with
+   `INDEX_URL = ""`. OkHttp's `url("")` throws; it is caught, so no crash, but every
+   check made a guaranteed-to-fail request and logged a misleading failure. `update.py`
+   and `desk.ts` already guarded - Android and iOS were the only surfaces that did not.
+2. **Mobile version lookup still read upstream.** Download went to the fork, the version
+   lookup to `nano-muse/nanoMuse`, so the Version row could offer an upstream build.
+
+Both fixed, plus a **third** updater (`com/openminis/app/data/UpdateChecker.kt`) found by
+scanning the **built dex** rather than the source - which is exactly what let it hide.
+That one predates the merge; it was repointed anyway so the fix is coherent. Four
+regression tests added; the mobile scan now walks whole source trees instead of listing
+files.
+
+Also corrected from the review: the scan remainder is four files (three absence-asserting
+tests + `README.md`'s pre-existing release-history prose), and a stale head SHA.
+One reviewer count I re-checked and did **not** adopt: it reported 10 pre-existing
+failures against my 11, but its own list contained 11 entries and re-running gives 11.
+
+## Merge
+
+**PR #11 merged** 2026-10-06 as **`ac5877f86d71ce157b408d6c977c1243ff65837d`**
+(merge commit, parents preserved - the sanitized merge `3e28be36a0` remains an ancestor).
+CI on the tested head: **15 checks, all pass, 0 failures**. No admin merge, no bypass.
+
+Two CI failures were hit and fixed honestly:
+- `web app build` / "Built app is committed": the bundle predated the last source edit.
+- `Ruff lint` on `UP020` (`io.open`): **CI's ruff is newer than this machine's**, so the
+  local run passed while CI failed. Fixed, then re-verified with CI's exact interpreter.
+
+A third cause was the runbook's own stale guidance: it prescribed a pytest ignore-list,
+while CI runs `pytest -q -m "not live"` with **no** ignores. The 7 ignored modules fail
+to collect locally only because a stray `tests` package in `~/.venv-vllm-metal` shadows
+the repo's. Proven pre-existing by running CI's exact command on pristine upstream.
+
+## Releases published
+
+| Tag | Upstream | Sanitized fork commit | Assets |
+|---|---|---|---|
+| `v0.1.37-fork.1` | v0.1.37 `10a699280e` | `ac5877f86d` | APK + sha256 |
+| `v0.1.36-fork.1` | v0.1.36 `74329deb6e` | `ac5877f86d` | APK + sha256 |
+| `v0.1.35-fork.1` | v0.1.35 `48fd40d896` | `ac5877f86d` | APK + sha256 |
+
+All three **published** (not drafts), all tagged on the sanitized commit and never on a raw
+upstream SHA. All three share one commit because one PR merged all three upstream
+releases, so all three carry the same 0.1.37 / versionCode 38 build - stated plainly in
+each release body.
+
+**A provenance error I caught and corrected:** the tags were first created on `3e28be36a0`,
+the merge *before* the review fixes, which would have shipped a release whose APK contained
+code the tag did not. No releases existed yet, so the tags were moved to the real merge
+`ac5877f86d` and the APK rebuilt from that exact commit.
+
+## APK (verified end to end, from the tagged commit)
+
+| | |
+|---|---|
+| Artifact | `nanoMuse-0.1.37-arm64.apk`, 33,626,874 bytes |
+| SHA-256 | `93dc51204fac1c1c6406c957ed76f19e8c85d15c657041832673471d11dae41e` |
+| Signature | `CN=nanoMuse fork, OU=release` - a real release key, not debug; signer SHA-256 `811846ed...`, the **same key** as v0.1.34-fork.1, so it updates an installed copy |
+| Badging | `io.github.nanomuse.app`, 0.1.37, versionCode 38, arm64-v8a |
+| `.cn` scan of the **signed** APK | **0** of 592 entries |
+| Upstream release refs in dex | **0** (all three updaters read the fork) |
+
+## Deployments
+
+**None.** This run merged a sync and published releases, which permits deployment, but
+deployment was not part of this instruction and is a separate, destructive step:
+- **Jetson relay** - not contacted, not redeployed.
+- **Mac desktop app** - not rebuilt or replaced. It is **currently running**
+  (pid 14920), and the rule is to replace only when idle; I did not kill the user's app.
+- **Android** - delivered by attaching the verified APK to the releases, which is the
+  mobile delivery path. Nothing installed on any phone.
+- **iOS** - no sideload path on this host.
+
+## Remaining blockers / not verified
+
+- **macOS and Windows desktop builds not published** - the fork has zero Actions secrets,
+  so no signed/notarized artifact is possible here.
+- **iOS not app-built** - needs two git-ignored prebuilt native inputs never fetched.
+  `swiftc -parse` is clean; that is a parse check, not a device build.
+- **Relay and desktop app not exercised** end to end against the new build.
+- Conversation sync verified as wired and unit-covered, not against a live relay.
