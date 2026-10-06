@@ -12,6 +12,7 @@ with the fork, so it auto-merged in. Each surface below was checked at its ownin
 
 from __future__ import annotations
 
+import io
 import os
 import re
 from pathlib import Path
@@ -157,3 +158,26 @@ def test_mobile_update_checks_read_the_fork_releases_not_upstreams() -> None:
         assert "api.github.com/repos/zeeshanhaque21/nanoMuse" in text, f"{name} must read the fork"
     # the iOS fallback page must be the fork's releases too
     assert "fallbackReleasePage" in ios and "github.com/zeeshanhaque21/nanoMuse" in ios
+
+
+def test_no_android_or_ios_source_reads_upstream_releases() -> None:
+    """No shipped mobile source may poll upstream's releases.
+
+    Three separate updaters exist on Android: community/UpdateCheck.kt (the Version row)
+    and com/openminis/app/data/UpdateChecker.kt (the self-update poller). Fixing only the
+    first leaves the second reporting upstream's newest version. iOS has its own in
+    NanoMuseUpdateCheck.swift. This scans the whole mobile source tree so a fourth one
+    cannot be added behind the tests' backs.
+    """
+    roots = ("android/src/android/app/src/main/java", "android/src/ios")
+    offenders = []
+    for root in roots:
+        for dirpath, _dirs, files in os.walk(root):
+            for fn in files:
+                if not fn.endswith((".kt", ".java", ".swift")):
+                    continue
+                full = os.path.join(dirpath, fn)
+                text = io.open(full, encoding="utf-8", errors="replace").read()
+                if "repos/nano-muse/nanoMuse" in text or 'OWNER = "nano-muse"' in text:
+                    offenders.append(os.path.relpath(full, ROOT))
+    assert not offenders, f"still reading upstream releases: {offenders}"
