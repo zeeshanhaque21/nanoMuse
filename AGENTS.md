@@ -399,9 +399,11 @@ before uploading and only then flip the draft to published.
 - **Never force-push.** If a pushed commit is missing its sign-off, cherry-pick onto a new
   `-v2` branch with `git commit -s` and close the old PR as superseded. (Done this way on
   2026-10-04; PR #9 closed unmerged, PR #10 merged.)
-- Merge only when required local checks and available CI pass, review findings are resolved,
-  and the **tested head SHA still equals the PR head SHA**. No admin merge, no protection
-  bypass, no ignoring failures. If blocked, leave a clearly labelled blocked PR.
+- **Always merge.** A pushed PR is not finished until it is merged - never leave one
+  dangling open. Merge once required local checks and available CI pass, review findings are
+  resolved, and the **tested head SHA still equals the PR head SHA**. No admin merge, no
+  protection bypass, no ignoring failures. If genuinely blocked, leave a clearly labelled
+  blocked PR and say so.
 - **Ship-aftercare after every push**: re-read the final PR body, confirm the evidence
   commands match their real output, and correct any claim that turns out to be wrong.
 - No empty PRs. No-op cleanly when there is nothing to do.
