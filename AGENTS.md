@@ -324,11 +324,30 @@ python3 scripts/desktop-app/build-runtime.py --check
 - Install Chromium into the bundle with `PLAYWRIGHT_BROWSERS_PATH=0` **before** building;
   the frozen runtime must **navigate a real page**, not merely import Playwright.
 - Preserve framework symlinks (`copytree(..., symlinks=True)`).
-- Build the Electron app in `desktop/app` on Node 22, ad-hoc sign.
-- Back up under `build/app-backups/` and **verify the backup exists** before replacing.
-- **Only replace when the app is idle.** Check `pgrep -fl nanoMuse`. If the user is running
-  it, do not kill it to make it idle - report it as blocked and let them close it.
-- After install: launch, verify `/api/health`, then verify a **real browser navigation**.
+- The Electron app lives in **`harness/desktop`**, not `desktop/app`. `desktop/app` is retired
+  junk from before 0.1.30 and has no runtime; `package-mac.sh` defaults to `harness/desktop`.
+  Build it on Node 22 (`/opt/homebrew/opt/node@22/bin`, default node is v26) and ad-hoc sign.
+- Full build chain, in this order (verified 2026-10-06):
+  `harness/dsh-nanomuse` (`pnpm install --frozen-lockfile && pnpm build`) ->
+  `harness/desktop` (`node scripts/prepare-dsh.mjs`, which stages `dsh/`) ->
+  a py3.12 venv with `.[hands,browser] pyinstaller`, Chromium installed with
+  `PLAYWRIGHT_BROWSERS_PATH=0` ->
+  `python scripts/desktop-app/build-runtime.py --check --target harness/desktop/runtime` ->
+  `npm run dist:dir` -> `../../scripts/desktop-app/package-mac.sh arm64`.
+- Back up under `build/app-backups/` with `ditto` and **verify the backup exists** - version
+  reads back and the binary is present - before replacing anything.
+- **A running app is not a blocker: stop it, update it, and start it back up.** Quit through
+  the app's own path, never `kill -9`:
+  `osascript -e 'tell application id "io.github.nanomuse.desktop" to quit'`.
+  Confirm it is idle (`pgrep -f '/Applications/nanoMuse.app/Contents/MacOS/nanomuse-desktop'`)
+  before replacing, then `open -a /Applications/nanoMuse.app` afterwards.
+- **Leave the separate relay alone.** A `nanomuse serve --port 8787` process may be running
+  from an older bundle under `build/app-backups/`. That is the user's local relay, not the
+  desktop app. Never stop it as part of a desktop update.
+- After install: launch, verify the runtime's `/api/health` (a `bearer token is required`
+  body means it is up and auth-gated, which is healthy), then verify a **real browser
+  navigation** with the bundled Chromium (`--headless=new --dump-dom` over a `data:` or
+  `file://` URL), not merely an import of Playwright.
 
 ---
 
@@ -437,6 +456,6 @@ actually happen.** Copy the evidence out of the lease before `treehouse return -
 [ ] CI green on the exact head SHA that was tested
 [ ] releases deduped ; tags at the sanitized commit ; drafts if assets are incomplete
 [ ] orb start ; ssh root@jetson-orin-nano ; /healthz (not /api/health)
-[ ] Mac app idle before replacement ; backup verified before replacing
+[ ] Mac app quit through its own path, not kill -9 ; backup verified before replacing ; relaunched and health-checked after ; the port-8787 relay left running
 [ ] evidence under maintenance-evidence/run-YYYY-MM-DD/
 ```
