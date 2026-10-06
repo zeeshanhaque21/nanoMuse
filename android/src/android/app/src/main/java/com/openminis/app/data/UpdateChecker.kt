@@ -34,12 +34,11 @@ import java.util.concurrent.TimeUnit
 object UpdateChecker {
 
     private const val TAG = "UpdateChecker"
-    private const val OWNER = "nano-muse"
-    // T133: the public repo is OpenMinis/OpenMinis (org + repo share a name).
-    // Previously pointed at OpenMinis/MinisApp, which is the private dev
-    // mirror — every API call 404'd, which we mistranslated as "no release
-    // published". The 0.1-preview release is published as a prerelease on
-    // OpenMinis/OpenMinis with a MinisApp-*.apk asset attached.
+    // Fork: this updater polls the fork's own releases, matching every other release
+    // surface (the runtime's FORK_REPO, the harness RELEASES_REPO, and
+    // community/UpdateCheck.kt). Reading upstream here would report upstream's newest
+    // version while the download link offers the fork's build.
+    private const val OWNER = "zeeshanhaque21"
     private const val REPO = "nanoMuse"
     private const val DOWNLOAD_FILENAME = "minis-update.apk"
     /**

@@ -20,6 +20,8 @@ struct NanoMuseDataControlsView: View {
 
     var body: some View {
         Form {
+            // C7: the conversations shared between the account's devices (NanoMuseSyncSettings.swift).
+            NanoMuseSyncSection()
             if !NanoMuseCloud.isSignedIn {
                 Section {
                     Text(AppLocalized("Sign in to nanoMuse Cloud to use it."))
@@ -38,7 +40,7 @@ struct NanoMuseDataControlsView: View {
                         }
                     }
                     .disabled(busy || loading || info == nil)
-                    .onChange(of: on) { value in
+                    .nmOnChange(of: on) { value in
                         guard let info, value != info.on, !busy else { return }
                         set(value)
                     }

@@ -6,6 +6,9 @@ import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readlin
 import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import * as macPermissions from "./mac-permissions";
+import { Operator, SCREEN_PERMISSION_TEXT, type Marker } from "./operator";
+import { startOperatorServer, type OperatorServer } from "./operator-server";
 
 /**
  * nanoMuse Desktop — the nanoMuse desktop, built on DeepSeek Harness.
@@ -67,6 +70,21 @@ const T = {
 
 /** dev flag: `--screenshot=/tmp/x.png` writes the window once the web app is up, then quits (a headless check) */
 const screenshotFlag = process.argv.find((a) => a.startsWith("--screenshot="))?.slice("--screenshot=".length);
+/**
+ * check flag: `--operator-check=/tmp/x.json` starts the operator alone (no host, no window),
+ * asks it over its own HTTP for /info and a small /screenshot — and, with `--operator-move`,
+ * moves the pointer to the display's centre — writes the answers to the file and quits. What
+ * scripts/smoke.mjs runs against a packaged build to see that libnut loaded there.
+ */
+const operatorCheckFlag = process.argv.find((a) => a.startsWith("--operator-check="))?.slice("--operator-check=".length);
+
+if (process.platform === "darwin") {
+  // electron/electron#44504: since 29.1 Chromium takes desktopCapturer's thumbnails through
+  // ScreenCaptureKit on macOS, and that path drops frames non-deterministically (an empty or
+  // stale picture for the hands). These features off, the thumbnails come from CGWindowList
+  // as before — the same switch UI-TARS-desktop and the issue's workaround use. Before ready.
+  app.commandLine.appendSwitch("disable-features", "ThumbnailCapturerMac:capture_mode/sc_screenshot_manager,ScreenCaptureKitPickerScreen,ScreenCaptureKitStreamPickerSonoma");
+}
 
 const logs: string[] = [];
 let hostStderr = "";
@@ -282,8 +300,8 @@ function startHost(): Promise<string> {
   mkdirSync(home, { recursive: true });
   ensureProfile(dshDir);
   return new Promise<string>((resolve, reject) => {
-    hostPort(home)
-      .then((port) => {
+    Promise.all([hostPort(home), ensureOperator()])
+      .then(([port, operatorServer]) => {
         const env: NodeJS.ProcessEnv = {
           ...process.env,
           ELECTRON_RUN_AS_NODE: "1",
@@ -293,10 +311,25 @@ function startHost(): Promise<string> {
           // the bundle can make (after the permission card), never by the model's own word.
           NANOMUSE_MCP_CONFIRM: randomBytes(24).toString("hex"),
         };
+        if (operatorServer) {
+          // The hands themselves: the runtime's `nanomuse mcp` (a child of the host, which
+          // inherits this environment) finds the operator here and moves the mouse, types
+          // and takes the screenshot through this process (src/operator.ts).
+          env.NANOMUSE_OPERATOR_URL = operatorServer.url;
+          env.NANOMUSE_OPERATOR_TOKEN = operatorServer.token;
+        }
         const shellPath = loginShellPath();
         if (shellPath) env.PATH = shellPath;
         const runtime = bundledRuntime();
         if (!env.NANOMUSE_PY && runtime) env.NANOMUSE_PY = runtime;
+        // Loud when the hands have nothing to run: a packaged build without its runtime, or
+        // NANOMUSE_PY (from the login shell) pointing at a file that is not there. The
+        // Computer-use page shows the same with the fix; this is for the log people send in.
+        if (env.NANOMUSE_PY && !existsSync(env.NANOMUSE_PY)) {
+          log(`runtime: NANOMUSE_PY=${env.NANOMUSE_PY} does not exist — the hands are off until it is fixed or unset`);
+        } else if (!env.NANOMUSE_PY && app.isPackaged) {
+          log(`runtime: no bundled runtime at ${join(resourcesDir(), "runtime")} and NANOMUSE_PY is not set — the hands are off (rebuild with the runtime, or install nanomuse and set NANOMUSE_PY)`);
+        }
         const args = ["--expose-internals", bin, PROFILE, "--no-open", "--port", String(port)];
         log(`host: ${process.execPath} ${args.join(" ")} (DSH_HOME=${home}${env.NANOMUSE_PY ? `, NANOMUSE_PY=${env.NANOMUSE_PY}` : ""})`);
         const proc = spawn(process.execPath, args, { cwd: homedir(), env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
@@ -466,9 +499,19 @@ function overlayColors(dark = nativeTheme.shouldUseDarkColors): Electron.TitleBa
 type PermissionKind = "accessibility" | "screen" | "microphone";
 type PermissionState = "granted" | "denied" | "not-determined" | "not-needed";
 
-/** Where one permission the hands use stands; only macOS gates them. */
+/**
+ * Where one permission the hands use stands; only macOS gates them. TCC's own answer through
+ * the native module when it loaded (src/mac-permissions.ts); Electron's `systemPreferences`
+ * probes otherwise, as before.
+ */
 function permissionState(kind: PermissionKind): PermissionState {
   if (process.platform !== "darwin") return "not-needed";
+  if (kind !== "microphone") {
+    const native = macPermissions.status(kind);
+    if (native === "authorized") return "granted";
+    if (native === "not determined") return "not-determined";
+    if (native !== null) return "denied";
+  }
   if (kind === "accessibility") return systemPreferences.isTrustedAccessibilityClient(false) ? "granted" : "denied";
   const status = systemPreferences.getMediaAccessStatus(kind);
   if (status === "granted") return "granted";
@@ -695,29 +738,15 @@ function registerBridge(): void {
   ipcMain.handle("nanomuse:permissions:request", async (_e, kind: PermissionKind) => {
     if (process.platform !== "darwin") return "not-needed" satisfies PermissionState;
     if (!(kind in PERMISSION_PANES)) return "denied" satisfies PermissionState;
-    if (kind === "accessibility") {
-      // the system's own dialog, which also lists the app in the Accessibility pane
-      if (!systemPreferences.isTrustedAccessibilityClient(true)) void shell.openExternal(PERMISSION_PANES.accessibility);
-    } else if (kind === "microphone") {
-      await systemPreferences.askForMediaAccess("microphone").catch(() => false);
-    } else {
-      // Screen Recording has no prompt API. A first capture attempt is what puts the app on
-      // the pane's list (and shows the system's own notice); without it the user finds
-      // nothing to switch on. Then the pane, where the switch is.
-      try {
-        await desktopCapturer.getSources({ types: ["screen"], thumbnailSize: { width: 1, height: 1 } });
-      } catch {
-        /* no sources without the permission — that attempt was the point */
-      }
-      void shell.openExternal(PERMISSION_PANES.screen);
-    }
+    if (kind === "accessibility") requestAccessibility();
+    else if (kind === "microphone") await systemPreferences.askForMediaAccess("microphone").catch(() => false);
+    else await requestScreenRecording();
     return permissionState(kind);
   });
   // macOS applies Screen Recording only to freshly started processes: after granting it, the
   // runtime that takes the screenshots has to start again.
   ipcMain.handle("nanomuse:relaunch", () => {
-    app.relaunch();
-    app.exit(0);
+    relaunchNow();
   });
   ipcMain.handle("nanomuse:permissions:settings", (_e, kind: PermissionKind | "files") => {
     if (process.platform === "darwin" && typeof kind === "string" && kind in PERMISSION_PANES) void shell.openExternal(PERMISSION_PANES[kind]);
@@ -787,6 +816,106 @@ let glowWindow: BrowserWindow | null = null;
 let capsuleWindow: BrowserWindow | null = null;
 let overlayState: OverlayState = { hands: null, cards: [] };
 let glowHideTimer: NodeJS.Timeout | null = null;
+/** The last action the operator carried out, for the glow's marker (UI-TARS's prediction marker): fractions of the display, the words, when. */
+let overlayMarker: (Marker & { at: number }) | null = null;
+let markerTimer: NodeJS.Timeout | null = null;
+/** How long a marker stays after its action; the glow stays up with it even before the web client has caught up. */
+const MARKER_MS = 2200;
+/** True between the operator's "before" and "after" capture hooks (Linux): the glow must not come back into the picture. */
+let capturing = false;
+
+// ---- the operator: the hands of this computer, run by this process -------------------------
+
+let operator: Operator | null = null;
+let operatorServer: OperatorServer | null = null;
+let operatorStarting: Promise<OperatorServer | null> | null = null;
+
+/** The operator and its loopback server, started once; null when the server could not bind (the runtime then uses its own backends). */
+function ensureOperator(): Promise<OperatorServer | null> {
+  if (operatorServer) return Promise.resolve(operatorServer);
+  if (operatorStarting) return operatorStarting;
+  operator ??= new Operator({
+    log,
+    permissions: () => ({ accessibility: permissionState("accessibility") !== "denied", screen: permissionState("screen") === "granted" || permissionState("screen") === "not-needed" }),
+    onAction: (marker) => {
+      overlayMarker = { ...marker, at: Date.now() };
+      if (markerTimer) clearTimeout(markerTimer);
+      markerTimer = setTimeout(() => {
+        markerTimer = null;
+        applyOverlay();
+      }, MARKER_MS + 50);
+      applyOverlay();
+    },
+    // Linux has no content protection: the glow would be in the picture, so it steps out of
+    // the way for the capture (one frame) and comes back; macOS and Windows exclude it anyway.
+    onCapture:
+      process.platform === "linux"
+        ? async (phase) => {
+            capturing = phase === "before";
+            if (!glowWindow || glowWindow.isDestroyed()) return;
+            if (phase === "before" && glowWindow.isVisible()) {
+              glowWindow.hide();
+              await new Promise((r) => setTimeout(r, 70));
+            } else if (phase === "after" && overlayUp()) glowWindow.showInactive();
+          }
+        : undefined,
+  });
+  operatorStarting = startOperatorServer(operator, log)
+    .then((server) => {
+      operatorServer = server;
+      const info = operator?.info();
+      log(`operator: ${info?.available ? "available" : `not available (${info?.reason ?? "?"})`} · display ${info?.display.width}×${info?.display.height} (scale ${info?.display.scaleFactor})`);
+      return server;
+    })
+    .catch((exc: unknown) => {
+      log(`operator: could not start its server: ${String(exc)} — the runtime uses its own backends`);
+      return null;
+    })
+    .finally(() => {
+      operatorStarting = null;
+    });
+  return operatorStarting;
+}
+
+async function stopOperator(): Promise<void> {
+  const server = operatorServer;
+  operatorServer = null;
+  if (server) await server.close().catch(() => undefined);
+}
+
+/** The `--operator-check` run: the operator alone, asked over its own HTTP, the answers to a file. */
+async function operatorCheck(file: string): Promise<void> {
+  const out: Record<string, unknown> = { platform: process.platform, electron: process.versions.electron };
+  try {
+    const server = await ensureOperator();
+    if (!server) throw new Error("the operator server did not start");
+    const call = async (method: string, path: string, body?: unknown) => {
+      const res = await fetch(server.url + path, { method, headers: { authorization: `Bearer ${server.token}`, "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+      return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+    };
+    const info = await call("GET", "/info");
+    out.info = info.body;
+    const unauthorised = await fetch(server.url + "/info");
+    out.unauthorised = unauthorised.status;
+    const shot = await call("POST", "/screenshot", { width: 320, height: 180, format: "png" });
+    const png = typeof shot.body.base64 === "string" ? Buffer.from(shot.body.base64, "base64") : Buffer.alloc(0);
+    out.screenshot = { status: shot.status, width: shot.body.width, height: shot.body.height, screen: shot.body.screen, mime: shot.body.mime, bytes: png.length, png: png.subarray(0, 8).equals(Buffer.from("89504e470d0a1a0a", "hex")), error: shot.body.error };
+    if (process.argv.includes("--operator-move")) {
+      const display = (info.body.display ?? {}) as { width?: number; height?: number };
+      const x = Math.floor((display.width ?? 2) / 2);
+      const y = Math.floor((display.height ?? 2) / 2);
+      out.move = { x, y, ...(await call("POST", "/execute", { action: "move", x, y })) };
+    }
+    out.ok = Boolean((info.body as { available?: boolean }).available) && shot.status === 200;
+  } catch (exc) {
+    out.ok = false;
+    out.error = String((exc as Error).message ?? exc);
+  }
+  writeFileSync(file, `${JSON.stringify(out, null, 2)}\n`);
+  log(`operator check: ${out.ok ? "ok" : "failed"} → ${file}`);
+  await stopOperator();
+  app.exit(out.ok ? 0 : 1);
+}
 
 const OVERLAY_PREFS = { contextIsolation: true, nodeIntegration: false, sandbox: true, spellcheck: false, preload: join(__dirname, "overlay-preload.js") };
 
@@ -824,16 +953,33 @@ function sendOverlay(win: BrowserWindow | null, state: unknown): void {
   if (win && !win.isDestroyed()) win.webContents.send("nanomuse:overlay:state", state);
 }
 
-function applyOverlay(): void {
+/** The marker still worth showing: the operator's last action, less than MARKER_MS ago. */
+function freshMarker(): (Marker & { at: number }) | null {
+  return overlayMarker && Date.now() - overlayMarker.at < MARKER_MS ? overlayMarker : null;
+}
+
+/** Whether the glow should be on the screen: the web client says the hands are busy or held, or the operator just acted. */
+function overlayUp(): boolean {
   const hands = overlayState.hands;
-  // the glow: up while the hands are active (or held), down a moment after they stop
-  if (hands && (hands.active || hands.held)) {
+  return Boolean((hands && (hands.active || hands.held)) || freshMarker());
+}
+
+/** What the glow draws: the web client's state (face, caption) and the operator's marker (the exact point of the last action). */
+function glowState(): Record<string, unknown> {
+  const hands = overlayState.hands ?? { active: false, held: false, x: -1, y: -1, kind: "", text: "", face: "" };
+  const marker = freshMarker();
+  return { ...hands, active: true, marker: marker ? { x: marker.fx, y: marker.fy, x2: marker.fx2 ?? -1, y2: marker.fy2 ?? -1, kind: marker.kind, text: marker.text, at: marker.at } : null };
+}
+
+function applyOverlay(): void {
+  // the glow: up while the hands are active (or held) or the operator just acted, down a moment after
+  if (overlayUp()) {
     if (glowHideTimer) { clearTimeout(glowHideTimer); glowHideTimer = null; }
     if (!glowWindow || glowWindow.isDestroyed()) glowWindow = overlayWindow("glow");
     const display = screen.getPrimaryDisplay();
     glowWindow.setBounds(display.bounds);
-    if (!glowWindow.isVisible()) glowWindow.showInactive();
-    sendOverlay(glowWindow, { ...hands, active: true });
+    if (!glowWindow.isVisible() && !capturing) glowWindow.showInactive();
+    sendOverlay(glowWindow, glowState());
   } else if (glowWindow && !glowWindow.isDestroyed() && glowWindow.isVisible()) {
     sendOverlay(glowWindow, { active: false });
     if (!glowHideTimer) glowHideTimer = setTimeout(() => { glowHideTimer = null; glowWindow?.hide(); }, 400);
@@ -911,35 +1057,141 @@ async function guidePermissions(): Promise<Record<PermissionKind, PermissionStat
       type: "info",
       message: zh ? "nanoMuse 需要「辅助功能」权限" : "nanoMuse needs Accessibility",
       detail: zh
-        ? "动手操作电脑要靠它移动鼠标和输入。系统会弹出请求；在「系统设置 → 隐私与安全性 → 辅助功能」里打开 nanoMuse Desktop 和它附带的 nanomuse 运行时。"
-        : "The hands move the mouse and type through it. The system asks next; in System Settings → Privacy & Security → Accessibility, switch on nanoMuse Desktop and the bundled nanomuse runtime.",
+        ? "动手操作电脑要靠它移动鼠标和输入。系统会弹出请求；在「系统设置 → 隐私与安全性 → 辅助功能」里打开 nanoMuse Desktop 即可——它附带的运行时作为应用的一部分运行，不会单独出现在列表里。"
+        : "The hands move the mouse and type through it. The system asks next; in System Settings → Privacy & Security → Accessibility, switch on nanoMuse Desktop. The runtime it bundles runs as part of the app and does not appear separately.",
       buttons: [zh ? "继续" : "Continue", zh ? "以后再说" : "Later"],
       defaultId: 0,
       cancelId: 1,
     });
-    if (response === 0 && !systemPreferences.isTrustedAccessibilityClient(true)) void shell.openExternal(PERMISSION_PANES.accessibility);
+    if (response === 0) requestAccessibility();
   }
   if (permissionState("screen") !== "granted") {
     const { response } = await dialog.showMessageBox({
       type: "info",
       message: zh ? "nanoMuse 需要「屏幕录制」权限" : "nanoMuse needs Screen Recording",
       detail: zh
-        ? "它靠截图看到屏幕上有什么。系统没有弹窗；点「继续」后在「屏幕录制」面板里打开 nanoMuse Desktop 和 nanomuse，然后重新启动应用。"
-        : "It sees the screen through screenshots. There is no system prompt: after Continue, switch on nanoMuse Desktop and nanomuse in the Screen Recording pane, then relaunch the app.",
+        ? "它靠截图看到屏幕上有什么。点「继续」后系统会询问一次；在「屏幕录制」面板里打开 nanoMuse Desktop（只需要这一项），然后重新启动应用——macOS 的这项权限只对重新启动后的应用生效。"
+        : "It sees the screen through screenshots. After Continue the system asks once; switch on nanoMuse Desktop in the Screen Recording pane (that one entry is all), then relaunch the app — macOS applies this permission to freshly started apps only.",
       buttons: [zh ? "继续" : "Continue", zh ? "以后再说" : "Later"],
       defaultId: 0,
       cancelId: 1,
     });
-    if (response === 0) {
-      try {
-        await desktopCapturer.getSources({ types: ["screen"], thumbnailSize: { width: 1, height: 1 } });
-      } catch {
-        /* the attempt is what lists the app in the pane */
-      }
-      void shell.openExternal(PERMISSION_PANES.screen);
-    }
+    if (response === 0) await requestScreenRecording();
   }
   return state();
+}
+
+/**
+ * Ask macOS for Screen Recording the way the system does it: `CGRequestScreenCaptureAccess`
+ * through the native module — the system's dialog the first time, and the app on the pane's
+ * list. Without the module, a 1×1 `desktopCapturer` probe, which is what listed the app
+ * before 0.1.37. Then the pane, where the switch is, and the watch for the grant.
+ */
+async function requestScreenRecording(openPane = true): Promise<void> {
+  if (!macPermissions.askScreen()) {
+    try {
+      await desktopCapturer.getSources({ types: ["screen"], thumbnailSize: { width: 1, height: 1 } });
+    } catch {
+      /* no sources without the permission — that attempt was the point */
+    }
+  }
+  if (openPane) void shell.openExternal(PERMISSION_PANES.screen);
+  watchScreenGrant();
+}
+
+/** The Accessibility dialog (`AXIsProcessTrustedWithOptions` with the prompt — it also lists the app in the pane), then the pane when it is still off. */
+function requestAccessibility(openPane = true): void {
+  const asked = macPermissions.askAccessibility();
+  const trusted = systemPreferences.isTrustedAccessibilityClient(!asked);
+  if (!trusted && openPane) void shell.openExternal(PERMISSION_PANES.accessibility);
+}
+
+/**
+ * At launch on macOS (UI-TARS-desktop's `ensurePermissions`): when either permission the
+ * hands need is not granted, the system's own dialogs — Screen Recording first, then
+ * Accessibility — and the Screen Recording pane opened once per launch, so the person
+ * finds the switch without hunting for it; `watchScreenGrant()` then offers the relaunch
+ * the grant needs. Nothing is asked when both are already on, nor under `--operator-check`
+ * / `--screenshot` (the checks must not block on a dialog). The status goes to the log.
+ */
+function ensureMacPermissionsAtLaunch(): void {
+  if (process.platform !== "darwin") return;
+  const accessibility = permissionState("accessibility");
+  const screen = permissionState("screen");
+  log(`permissions: accessibility=${accessibility} screen=${screen} (${macPermissions.loaded() ? "native" : `systemPreferences — ${macPermissions.loadError()}`})`);
+  if (accessibility === "granted" && screen === "granted") return;
+  if (screen !== "granted") void requestScreenRecording(true);
+  if (accessibility !== "granted") requestAccessibility(false);
+}
+
+/**
+ * Quit and start again. Through `app.quit()`, not `app.exit()`: `before-quit` stops the host
+ * and the operator server first, so the old `nanomuse mcp` — started before the permission
+ * was granted, and so still without it — does not outlive the relaunch.
+ */
+function relaunchNow(): void {
+  app.relaunch();
+  app.quit();
+}
+
+let screenGrantWatch: NodeJS.Timeout | null = null;
+
+/**
+ * After the Screen Recording pane was opened for the person: watch for the switch to flip
+ * (the system has no event for it) and, when it does, say the one thing the pane does not —
+ * that the grant reaches only freshly started apps — with the restart button right there.
+ * Gives up quietly after five minutes; the Computer-use page keeps its own notice.
+ */
+function watchScreenGrant(): void {
+  if (process.platform !== "darwin" || screenGrantWatch) return;
+  if (permissionState("screen") === "granted") return;
+  const started = Date.now();
+  screenGrantWatch = setInterval(() => {
+    if (permissionState("screen") !== "granted") {
+      if (Date.now() - started > 5 * 60_000 && screenGrantWatch) {
+        clearInterval(screenGrantWatch);
+        screenGrantWatch = null;
+      }
+      return;
+    }
+    if (screenGrantWatch) clearInterval(screenGrantWatch);
+    screenGrantWatch = null;
+    log("permissions: Screen Recording granted while running — offering a relaunch");
+    void dialog
+      .showMessageBox({
+        type: "info",
+        message: zh ? "屏幕录制已允许，重新启动后生效" : "Screen Recording is on; it takes effect after a restart",
+        detail: zh
+          ? "macOS 只对重新启动后的应用应用这项权限。现在重新启动 nanoMuse，手就能看到屏幕；否则截图仍是一片黑。"
+          : "macOS applies this permission to freshly started apps only. Restart nanoMuse now and the hands see the screen; until then screenshots come back black.",
+        buttons: [zh ? "立即重启" : "Restart now", zh ? "稍后" : "Later"],
+        defaultId: 0,
+        cancelId: 1,
+      })
+      .then(({ response }) => {
+        if (response === 0) relaunchNow();
+      })
+      .catch(() => undefined);
+  }, 1500);
+}
+
+/**
+ * The main window closed. On macOS the app stays in the Dock, as apps there do. On Linux
+ * and Windows it stays only when there is a tray to come back from (the menu-bar switch on,
+ * and `new Tray` worked): the tray's click, *Open* and the launcher all bring the window
+ * back. Without a tray the app quits — before 0.1.37 it lived on headless: the glow and the
+ * capsule are BrowserWindows too, so `window-all-closed` never fired once the hands had been
+ * used, and every later launcher click was a second instance that found no window to show.
+ */
+function mainWindowClosed(): void {
+  mainWindow = null;
+  if (process.platform === "darwin" || quitting) return;
+  if (tray) {
+    log("window closed; the app stays in the tray (Open, or the launcher, brings it back)");
+    return;
+  }
+  log("window closed; no tray — quitting");
+  app.quit();
 }
 
 function createWindow(): BrowserWindow {
@@ -982,9 +1234,8 @@ function createWindow(): BrowserWindow {
     // the microphone for voice input; nothing else is asked for
     callback(permission === "media");
   });
-  win.on("closed", () => {
-    mainWindow = null;
-  });
+  win.on("closed", mainWindowClosed);
+  // the splash: the logo in a loading ring and the wordmark (resources/loading.html) — no face
   void win.loadFile(join(ownResources(), "loading.html"), { query: { lang: zh ? "zh" : "en" } });
   return win;
 }
@@ -1065,7 +1316,12 @@ function buildMenu(): void {
     { label: T.builtOn, click: () => void shell.openExternal(HARNESS_PAGE) },
     { label: T.openLogFolder, click: () => shell.showItemInFolder(join(harnessHome(), "desktop.log")) },
   ];
-  if (process.platform !== "darwin") help.push({ type: "separator" }, { label: T.about, click: about });
+  // Linux and Windows: About, and a Quit with Ctrl+Q — the one way out that needs no tray.
+  // With the menu-bar switch on, closing the window keeps the app in the tray, and on a
+  // GNOME whose appindicator extension does not take Electron 44's registration (Ubuntu
+  // 20.04: "org.freedesktop.StatusNotifierItem-<pid>-1/StatusNotifierItem/1" is not a bus
+  // name to it) the tray icon never appears, so its Quit cannot be reached.
+  if (process.platform !== "darwin") help.push({ type: "separator" }, { label: T.about, click: about }, { type: "separator" }, { label: T.quit, role: "quit", accelerator: "CmdOrCtrl+Q" });
   const template: Electron.MenuItemConstructorOptions[] = [
     ...(process.platform === "darwin"
       ? [
@@ -1118,10 +1374,10 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on("second-instance", () => {
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.focus();
-    }
+    // the launcher clicked while this instance runs — with its window closed, too (the
+    // tray case): showWindow() makes the window again when it is gone
+    log(`second instance: ${mainWindow ? "focusing the window" : hostUrl ? "opening the window again" : "still starting"}`);
+    showWindow();
   });
   app.setAboutPanelOptions({
     applicationName: "nanoMuse",
@@ -1136,6 +1392,11 @@ if (!app.requestSingleInstanceLock()) {
     prefs = readPrefs();
     applyPrefs();
     log(`nanoMuse Desktop ${app.getVersion()} starting (${process.platform} ${process.arch}, packaged=${app.isPackaged})`);
+    if (operatorCheckFlag) {
+      await operatorCheck(operatorCheckFlag);
+      return;
+    }
+    if (!screenshotFlag) ensureMacPermissionsAtLaunch();
     try {
       await boot();
     } catch (exc) {
@@ -1144,23 +1405,23 @@ if (!app.requestSingleInstanceLock()) {
     }
   });
   app.on("activate", () => {
-    if (!mainWindow && hostUrl) {
-      mainWindow = createWindow();
-      void mainWindow.loadURL(hostUrl);
-    }
+    // the Dock icon on macOS: the window again when it was closed
+    showWindow();
   });
   app.on("window-all-closed", () => {
-    // the Host keeps running on macOS while the app is in the Dock, as apps there do
-    if (process.platform !== "darwin") app.quit();
+    // The main window's own `closed` decides (mainWindowClosed): the Host keeps running on
+    // macOS while the app is in the Dock, and on Linux and Windows while there is a tray.
+    // This fires only when the overlays are gone too; the same rule applies.
+    if (process.platform !== "darwin" && !tray) app.quit();
   });
   app.on("before-quit", (e) => {
     releaseAwake();
     globalShortcut.unregisterAll();
     if (quitting) return;
     quitting = true;
-    if (child) {
+    if (child || operatorServer) {
       e.preventDefault();
-      void stopHost().then(() => app.quit());
+      void Promise.all([stopHost(), stopOperator()]).then(() => app.quit());
     }
   });
 }

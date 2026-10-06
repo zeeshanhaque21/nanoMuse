@@ -1,11 +1,17 @@
-"""Is there a newer nanoMuse? One request to GitHub Releases, kept for six hours.
+"""Is there a newer nanoMuse? This fork's GitHub Releases, kept for a day
+(contract C2: every client shows the installed and the latest version).
 
-Nothing is downloaded and nothing about the install is sent: the request is the same
-one a browser makes when it opens the releases page. It is off when ``server.update_check``
-is false, when ``NANOMUSE_NO_UPDATE_CHECK`` is set, and in a hosted web session (the
-operator updates those, not the person using them — those runtimes are the ones handed a
-``NANOMUSE_CLOUD_KEY``). The desktop app and the Android app have checks of their own;
-this one is for ``pipx`` / Docker installs, which show it under *Settings → About*.
+Nothing is downloaded and nothing about the install is sent: the requests are the ones a
+browser makes when it opens the release page. Fork: the primary source is
+``api.github.com/.../releases/latest`` for **this fork's** repository, and an optional
+mirror index (``NANOMUSE_UPDATE_INDEX_URL``) is consulted **only** when the operator
+configures one. Upstream's public download mirror is not contacted: it is a ``.cn`` host
+and this fork must never reach it, so there is no default index and no fallback to one.
+The check is off when ``server.update_check`` is false, when ``NANOMUSE_NO_UPDATE_CHECK``
+is set, and in a hosted web session (the operator updates those, not the person using
+them — those runtimes are the ones handed a ``NANOMUSE_CLOUD_KEY``). The desktop app and
+the Android app have checks of their own; this one is for ``pipx`` / Docker installs, which
+show it under *Settings → About* with a "Check now" when the answer is stale or failed.
 """
 
 from __future__ import annotations
@@ -13,6 +19,7 @@ from __future__ import annotations
 import os
 import re
 import time
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -20,9 +27,16 @@ import httpx
 from nanomuse import __version__
 from nanomuse.logger import logger
 
-RELEASES_API = "https://api.github.com/repos/nano-muse/nanoMuse/releases/latest"
-RELEASES_PAGE = "https://github.com/nano-muse/nanoMuse/releases/latest"
-CACHE_S = 6 * 3600
+FORK_REPO = "zeeshanhaque21/nanoMuse"
+# Fork: no default mirror. Set NANOMUSE_UPDATE_INDEX_URL to opt into a mirror index;
+# empty means only GitHub is asked, so no third-party host is ever contacted.
+INDEX_URL = os.environ.get("NANOMUSE_UPDATE_INDEX_URL", "").strip()
+DOWNLOAD_PAGE = f"https://github.com/{FORK_REPO}/releases/latest"
+RELEASES_API = f"https://api.github.com/repos/{FORK_REPO}/releases/latest"
+RELEASES_PAGE = f"https://github.com/{FORK_REPO}/releases/latest"
+RELEASE_TAG_PAGE = f"https://github.com/{FORK_REPO}/releases/tag/{{tag}}"
+CACHE_S = 24 * 3600
+INDEX_TIMEOUT_S = 5.0
 TIMEOUT_S = 6.0
 
 
@@ -49,6 +63,19 @@ def enabled(setting: bool) -> bool:
     return not os.environ.get("NANOMUSE_CLOUD_KEY")
 
 
+def latest_from_index(data: Any) -> str:
+    """The newest tag in the mirror's index (``releases`` newest first; the highest one is
+    taken anyway in case the order slipped); ``""`` when the shape is not the index."""
+    if not isinstance(data, dict) or not isinstance(data.get("releases"), list):
+        return ""
+    best = ""
+    for rel in data["releases"]:
+        tag = str(rel.get("tag") or "") if isinstance(rel, dict) else ""
+        if parse_version(tag) and (not best or newer_than(tag, best)):
+            best = tag
+    return best
+
+
 class UpdateCheck:
     """The cached answer; :meth:`view` is what ``GET /api/update`` returns."""
 
@@ -57,10 +84,14 @@ class UpdateCheck:
         self.current = current
         self.latest: str | None = None
         self.url: str = RELEASES_PAGE
+        self.download_url: str = DOWNLOAD_PAGE
+        # monotonic, for the cache; the wall clock, for "checked at" on the About page
         self.checked_at: float | None = None
+        self.checked_wall: str | None = None
+        self.source: str | None = None
         self.error: str | None = None
 
-    async def view(self) -> dict[str, Any]:
+    async def view(self, force: bool = False) -> dict[str, Any]:
         if not enabled(self.setting):
             return {
                 "current": self.current,
@@ -68,8 +99,12 @@ class UpdateCheck:
                 "latest": None,
                 "newer": False,
                 "url": self.url,
+                "download_url": self.download_url,
+                "checked_at": None,
+                "source": None,
+                "error": None,
             }
-        if self.checked_at is None or time.monotonic() - self.checked_at > CACHE_S:
+        if force or self.checked_at is None or time.monotonic() - self.checked_at > CACHE_S:
             await self._check()
         return {
             "current": self.current,
@@ -77,28 +112,53 @@ class UpdateCheck:
             "latest": self.latest,
             "newer": bool(self.latest and newer_than(self.latest, self.current)),
             "url": self.url,
+            "download_url": self.download_url,
+            "checked_at": self.checked_wall,
+            "source": self.source,
             "error": self.error,
         }
 
     async def _check(self) -> None:
         self.checked_at = time.monotonic()
-        try:
-            async with httpx.AsyncClient(timeout=TIMEOUT_S, follow_redirects=True) as client:
+        self.checked_wall = datetime.now(UTC).isoformat(timespec="seconds")
+        headers = {"User-Agent": f"nanoMuse/{self.current}"}
+        errors: list[str] = []
+        async with httpx.AsyncClient(follow_redirects=True) as client:
+            # 1. this fork's GitHub Releases
+            try:
                 r = await client.get(
                     RELEASES_API,
-                    headers={
-                        "Accept": "application/vnd.github+json",
-                        "User-Agent": f"nanoMuse/{self.current}",
-                    },
+                    headers={**headers, "Accept": "application/vnd.github+json"},
+                    timeout=TIMEOUT_S,
                 )
-            r.raise_for_status()
-            data = r.json()
-            tag = str(data.get("tag_name") or "")
-            if not parse_version(tag):
-                raise ValueError(f"unexpected tag {tag!r}")
-            self.latest = tag.lstrip("v")
-            self.url = str(data.get("html_url") or RELEASES_PAGE)
-            self.error = None
-        except Exception as exc:  # noqa: BLE001 — the answer is "could not check", never a failure of the app
-            self.error = exc.__class__.__name__
-            logger.debug("update check failed: %s", exc)
+                r.raise_for_status()
+                data = r.json()
+                tag = str(data.get("tag_name") or "")
+                if not parse_version(tag):
+                    raise ValueError(f"unexpected tag {tag!r}")
+                self._found(tag, str(data.get("html_url") or RELEASES_PAGE), "github")
+                return
+            except Exception as exc:  # noqa: BLE001 — the answer is "could not check", never a failure of the app
+                errors.append(exc.__class__.__name__)
+                logger.debug("update check (github) failed: {}", exc)
+            # 2. a mirror index, only when the operator configured one. Unset by default:
+            # the fork never falls back to any third-party host.
+            if INDEX_URL:
+                try:
+                    r = await client.get(INDEX_URL, headers=headers, timeout=INDEX_TIMEOUT_S)
+                    r.raise_for_status()
+                    tag = latest_from_index(r.json())
+                    if not tag:
+                        raise ValueError("no release in the index")
+                    self._found(tag, RELEASE_TAG_PAGE.format(tag=tag), "mirror")
+                    return
+                except Exception as exc:  # noqa: BLE001 — the mirror is one of two ways
+                    errors.append(exc.__class__.__name__)
+                    logger.debug("update check (mirror index) failed: {}", exc)
+        self.error = " / ".join(dict.fromkeys(errors)) or "failed"
+
+    def _found(self, tag: str, url: str, source: str) -> None:
+        self.latest = tag.lstrip("v")
+        self.url = url
+        self.source = source
+        self.error = None

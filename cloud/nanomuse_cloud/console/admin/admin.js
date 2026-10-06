@@ -37,7 +37,7 @@
     all: "全部", signIns: "登录", refusals: "超额", errors: "错误", calls: "通话", passwords: "密码",
     eventName: {
       "account.created": "注册", "sign_in.code": "验证码登录", "sign_in.password": "密码登录", "sign_in.session": "换会话密钥", "sign_in.failed": "登录失败", "password.set": "设置密码", "password.changed": "修改密码",
-      "password.cleared": "移除密码", "sign_out": "退出", "sign_out.all": "全部退出", "pool.set": "额度调整", "pool.set.many": "批量额度调整", "budget.refused": "超出额度被拒", "upstream.error": "上游出错", "call.ended": "通话结束", "contribute.on": "开启「帮助改进」", "contribute.default": "新账号默认开启「帮助改进」", "contribute.bonus": "早期共创奖励 +¥10", "contribute.off": "关闭「帮助改进」", "contribute.deleted": "删除保存的对话", "invite.accepted": "邀请成功", "invite.used": "通过邀请注册", "invite.unknown": "无效邀请码", "credit.granted": "获得额度奖励", "profile.put": "更新资料", "profile.clear": "清空资料", "profile.connectors": "更新连接列表",
+      "password.cleared": "移除密码", "sign_out": "退出", "sign_out.all": "全部退出", "pool.set": "额度调整", "pool.set.many": "批量额度调整", "budget.refused": "超出额度被拒", "upstream.error": "上游出错", "call.ended": "通话结束", "contribute.on": "开启「帮助改进」", "contribute.default": "新账号默认开启「帮助改进」", "contribute.bonus": "早期共创奖励 +¥10", "contribute.off": "关闭「帮助改进」", "contribute.deleted": "删除保存的对话", "invite.accepted": "邀请成功", "invite.used": "通过邀请注册", "invite.unknown": "无效邀请码", "credit.granted": "获得额度奖励", "profile.put": "更新资料", "profile.clear": "清空资料", "profile.connectors": "更新连接列表", "settings.changed": "修改配置", "nudges.changed": "修改 star 提示规则",
     },
     // drawer
     spendToday: "今天", spendTotal: "累计", requests: "请求", cap: "总额度", noCap: "无上限", left: "剩余", usageToday: "今天", usagePeriod: (d) => `最近 ${d} 天`, usageTotal: "累计",
@@ -67,6 +67,12 @@
     rtEnv: (v) => `环境变量：${v}`, rtSet: "页面已设置", rtSave: "保存", rtSaved: "已保存，已生效。", rtApply: (n) => `把当前额度补给 ${n} 个老账号`, rtApplyNone: "所有账号拿到的额度都不低于当前值。",
     rtApplyConfirm: (n, c) => `给 ${n} 个拿到的额度低于 ¥${c} 的账号补齐差额？每个账号的流水会记一笔「额度调整」。`, rtApplied: (n) => `已补给 ${n} 个账号。`,
     rtCreditAll: "给所有人加额度", rtCreditAllPrompt: "给每个受额度限制的账号加多少元？负数扣减。（节日、补偿；成员除外）", rtSetAll: "统一设置所有人额度", rtSetAllPrompt: (n) => `给全部 ${n} 个受限账号设置额度。\n写法：=5 → 每人剩余设为 ¥5；总额=20 → 每人总额度设为 ¥20；+3 / -2 → 每人加 ¥3 / 扣 ¥2。`, rtCreditAllConfirm: (c, n) => `给 ${n} 个账号各加 ¥${c}？`, rtCredited: (n) => `已给 ${n} 个账号加额度。`,
+    // nudges (relay 0.18): when the apps ask for a star on GitHub
+    ndTitle: "Star 提示（即时生效）", ndNote: "客户端什么时候可以请人去 GitHub 点个 star。所有客户端（Android、iPhone、桌面、网页）每天读一次这里的规则，连不上时用内置的默认值。在这里改，不用发版。「不再提醒」也算一次提示；点过「去 GitHub」的设备以后不再提示。",
+    ndEnabled: "允许提示", ndEnabledOff: "关掉后一次都不提示；设置里常驻的「Star on GitHub」一行照旧。", ndMoments: "时机", ndSignedIn: "首次登录后（账号页一行）", ndNewLook: "画好新形象后", ndExhausted: "免费额度用完时（出路卡片里一行）", ndGoalDone: "标记目标完成时",
+    ndTasks: "完成第几个任务时", ndTasksHint: "逗号分隔，比如 3, 10, 30。只算本人发起、模型答完的对话；起名的第一段对话和后台任务不算。", ndDays: "使用第几天时", ndDaysHint: "逗号分隔，比如 7, 30：打开应用的第 n 个不同日期。",
+    ndCooldown: "两次提示至少间隔（天）", ndMax: "每台设备最多提示（次）", ndUrl: "链接", ndSave: "保存", ndReset: "恢复默认", ndResetConfirm: "恢复内置默认规则？客户端在一天内跟上。", ndSaved: "已保存，客户端一天内跟上。", ndResetDone: "已恢复默认。",
+    ndVersion: (v, t) => (t ? `第 ${v} 版 · 保存于 ${t}` : `第 ${v} 版 · 内置默认值`), ndStored: "页面已设置", ndDefault: "内置默认值",
     priceLine: (p) => [p.per_m_input || p.per_m_output ? `输入 ${p.per_m_input} / 输出 ${p.per_m_output} 每百万 tokens` : null,
       p.per_image ? `每张 ${p.per_image}${p.per_image_2k ? `（2k ${p.per_image_2k}）` : ""}` : null, p.per_second ? `每秒 ${p.per_second}` : null].filter(Boolean).join("；"),
     foot: "手机号 / 邮箱只在打开某个账号时用管理口令解出来看；数据库里存的是加密后的值。来访地址和客户端信息随每次登录、请求和动态一起记录，删账号时一并删除。对话文字只有在账号开启了「帮助改进 nanoMuse 的 AI 模型」时才保存，并且只存用户写的、模型回答的和它调用的工具（见「数据控制」）。请不要把这个页面截图发出去。金额按模型服务商的北京地区标价估算。",
@@ -79,6 +85,7 @@
     devices: "设备", devKinds: { phone: "手机", computer: "电脑", web: "网页版" }, invitesTitle: "邀请", invitesLine: (f) => `${fmt(f.with_code)} 人生成了邀请码 · ${fmt(f.inviters)} 人邀请成功 · ${fmt(f.invited)} 人经邀请注册`,
     // data controls
     data: (d) => `数据控制 · 最近 ${d} 天`, dOn: "开启「帮助改进」的账号", dOnSub: (on, total) => `共 ${fmt(total)} 个账号 · ${fmt(on)} 开启 · ${fmt(Math.max(0, total - on))} 关闭`, dOff: "主动关闭过的账号", dOffSub: "曾经把开关关掉的人数", dTurns: "保存的对话", dTurnsSub: (all, acc) => `累计 ${fmt(all)} 轮 · 来自 ${fmt(acc)} 个账号`, dTokens: "保存对话的 tokens", dTokensSub: (i, o) => `输入 ${fmt(i)} · 输出 ${fmt(o)}`, dDefault: (on) => on ? "新账号默认开启（IMPROVE_DEFAULT=1）" : "新账号默认关闭（IMPROVE_DEFAULT=0）", dKeeps: () => "保存：用户写的、模型回答的、它选择调用的工具，以及模型、token 数、客户端和语言。不保存：系统提示（记忆、SOUL、指令）、工具返回的内容、图片 / 音频 / 视频、用户的身份。",
+    syTitle: "对话同步", syOn: "开启同步的账号", syOnSub: (off) => `${fmt(off)} 个账号关闭了`, syWith: "有同步数据的账号", syConvs: "对话", syMsgs: "消息", syMsgsSub: (limit) => `每个账号最多 ${fmt(limit)} 条`, syBytes: "存储的文字", syNote: "0.19：账号各设备之间同步的对话文字。只有用户和助手的文字、附件的名字和大小；没有文件和图片。这里只有合计数，看不到任何内容；关闭开关或删除时，中继立刻删除。",
     mTurns: "保存的对话", mTurnAccounts: "有对话保存的账号", mOn: "开启", mDefaultOn: "默认开启（新账号）", mOff: "关闭", mDeleted: "删除", dModels: "按模型", dApps: "按客户端", dRecent: "最近保存的对话（点开账号看全部）", dPlatforms: { android: "Android", windows: "Windows 上的 runtime", macos: "macOS 上的 runtime", linux: "Linux 上的 runtime", runtime: "runtime", browser: "浏览器", other: "其他" },
     webTitle: "网页版", webLine: (w) => (w ? `${fmt(w.accounts)} 个账号有自己的 Muse（上限 ${fmt(w.max_accounts)}）· ${fmt(w.running)} 个在运行（上限 ${fmt(w.max_running)}）` : "未接入：relay 设 WEB_INFO_URL 指向 gateway 的 /api/web/info。"), webOff: "网页版未开启",
     // 0.11: where people are, and the models under the key
@@ -121,7 +128,7 @@
     all: "All", signIns: "Sign-ins", refusals: "Refusals", errors: "Errors", calls: "Calls", passwords: "Passwords",
     eventName: {
       "account.created": "Joined", "sign_in.code": "Signed in with a code", "sign_in.password": "Signed in with the password", "sign_in.session": "Took a session key", "sign_in.failed": "Failed sign-in", "password.set": "Password set", "password.changed": "Password changed",
-      "password.cleared": "Password removed", "sign_out": "Signed out", "sign_out.all": "Signed out everywhere", "pool.set": "Pool set", "pool.set.many": "Pools set", "budget.refused": "Refused: over budget", "upstream.error": "Upstream error", "call.ended": "Call ended", "contribute.on": "“Help improve” on", "contribute.default": "New account: “help improve” on by default", "contribute.bonus": "Early co-creation bonus +¥10", "contribute.off": "“Help improve” off", "contribute.deleted": "Kept turns deleted", "invite.accepted": "Invited a friend", "invite.used": "Signed up via invite", "invite.unknown": "Unknown invite code", "credit.granted": "Credit granted", "profile.put": "Profile updated", "profile.clear": "Profile cleared", "profile.connectors": "Connectors updated",
+      "password.cleared": "Password removed", "sign_out": "Signed out", "sign_out.all": "Signed out everywhere", "pool.set": "Pool set", "pool.set.many": "Pools set", "budget.refused": "Refused: over budget", "upstream.error": "Upstream error", "call.ended": "Call ended", "contribute.on": "“Help improve” on", "contribute.default": "New account: “help improve” on by default", "contribute.bonus": "Early co-creation bonus +¥10", "contribute.off": "“Help improve” off", "contribute.deleted": "Kept turns deleted", "invite.accepted": "Invited a friend", "invite.used": "Signed up via invite", "invite.unknown": "Unknown invite code", "credit.granted": "Credit granted", "profile.put": "Profile updated", "profile.clear": "Profile cleared", "profile.connectors": "Connectors updated", "settings.changed": "Settings changed", "nudges.changed": "Star asks policy changed",
     },
     spendToday: "Today", spendTotal: "All time", requests: "Requests", cap: "Pool", noCap: "no cap", left: "left", usageToday: "Today", usagePeriod: (d) => `Last ${d} days`, usageTotal: "All time",
     sessions: "Sign-ins (incl. revoked)", revoked: "revoked", via: { code: "code", password: "password", session: "session key" }, lastUsed: "last used", devices: "Devices", firstSeen: "first", lastSeen: "last",
@@ -148,6 +155,11 @@
     rtEnv: (v) => `environment: ${v}`, rtSet: "set here", rtSave: "Save", rtSaved: "Saved and in force.", rtApply: (n) => `Bring ${n} older account${n === 1 ? "" : "s"} up to the current allowance`, rtApplyNone: "Every account has at least the current allowance.",
     rtApplyConfirm: (n, c) => `Top up the ${n} account(s) that were given less than ¥${c}? Each gets a ledger line saying so.`, rtApplied: (n) => `${n} account(s) topped up.`,
     rtCreditAll: "Credit everyone", rtCreditAllPrompt: "How many yuan into every limited account's pool? Negative takes away. (a holiday, an apology; members left out)", rtSetAll: "Set everyone's pool", rtSetAllPrompt: (n) => `Set the pool of all ${n} limited accounts.\nWrite: =5 → ¥5 left each; total=20 → a ¥20 pool each; +3 / -2 → ¥3 more / ¥2 less each.`, rtCreditAllConfirm: (c, n) => `¥${c} to each of ${n} accounts?`, rtCredited: (n) => `${n} account(s) credited.`,
+    ndTitle: "Star asks (in force at once)", ndNote: "When the apps may ask for a star on GitHub. Every client (Android, iPhone, desktop, web) reads this once a day and falls back to the built-in defaults when the relay cannot be reached. Change it here; no release needed. “Not now” counts as an ask; a device that went to GitHub is never asked again.",
+    ndEnabled: "Asks on", ndEnabledOff: "Off: no asks at all; the “Star on GitHub” rows in Settings stay.", ndMoments: "Moments", ndSignedIn: "First time seen signed in (a row on the account page)", ndNewLook: "After a new face is drawn", ndExhausted: "When the free allowance is used up (a row in the ways-on card)", ndGoalDone: "When a goal is marked done",
+    ndTasks: "After task number", ndTasksHint: "Comma-separated, say 3, 10, 30. A task is a turn the person started that ended in a reply; the naming conversation and background runs do not count.", ndDays: "On day of use number", ndDaysHint: "Comma-separated, say 7, 30: the n-th distinct day the app was opened.",
+    ndCooldown: "Days between two asks, at least", ndMax: "Asks per device, at most", ndUrl: "Link", ndSave: "Save", ndReset: "Reset to defaults", ndResetConfirm: "Go back to the built-in defaults? Clients follow within a day.", ndSaved: "Saved; clients follow within a day.", ndResetDone: "Back to the defaults.",
+    ndVersion: (v, t) => (t ? `version ${v} · saved ${t}` : `version ${v} · built-in defaults`), ndStored: "set here", ndDefault: "built-in defaults",
     priceLine: (p) => [p.per_m_input || p.per_m_output ? `${p.per_m_input} in / ${p.per_m_output} out per M tokens` : null,
       p.per_image ? `${p.per_image} a picture${p.per_image_2k ? ` (${p.per_image_2k} at 2k)` : ""}` : null, p.per_second ? `${p.per_second} a second` : null].filter(Boolean).join("; "),
     foot: "A phone number or address is decrypted only when you open that account, with the admin token; the database holds ciphertext. Network addresses and the client are recorded with every sign-in, request and event, and go when the account is deleted. The text of a chat is kept only while the account has “Help improve nanoMuse's AI models” on, and only what the person wrote, what the model answered and the tools it called (see Data controls). Do not share screenshots of this page. Money is estimated at the provider's Beijing list prices.",
@@ -158,6 +170,7 @@
     mSignIns: "Sign-ins", mNew: "New accounts", mActive: "Active accounts", mInvites: "Signed up via invite", mContribute: "“Help improve” turned on", mCalls: "Calls", mRefused: "Refused: over budget", mErrors: "Upstream errors",
     devices: "Devices", devKinds: { phone: "phones", computer: "computers", web: "web" }, invitesTitle: "Invites", invitesLine: (f) => `${fmt(f.with_code)} made an invite code · ${fmt(f.inviters)} brought someone · ${fmt(f.invited)} came through one`,
     data: (d) => `Data controls · last ${d} days`, dOn: "Accounts with “help improve” on", dOnSub: (on, total) => `${fmt(total)} accounts · ${fmt(on)} on · ${fmt(Math.max(0, total - on))} off`, dOff: "Accounts that turned it off", dOffSub: "ever switched it off themselves", dTurns: "Kept turns", dTurnsSub: (all, acc) => `${fmt(all)} in all · from ${fmt(acc)} accounts`, dTokens: "Tokens in kept turns", dTokensSub: (i, o) => `${fmt(i)} in · ${fmt(o)} out`, dDefault: (on) => on ? "New accounts start with it on (IMPROVE_DEFAULT=1)" : "New accounts start with it off (IMPROVE_DEFAULT=0)", dKeeps: (k) => `Kept: ${k.kept.join(", ")}. Not kept: ${k.not_kept.join(", ")}.`,
+    syTitle: "Conversation sync", syOn: "Accounts with sync on", syOnSub: (off) => `${fmt(off)} turned it off`, syWith: "Accounts with synced data", syConvs: "Conversations", syMsgs: "Messages", syMsgsSub: (limit) => `at most ${fmt(limit)} per account`, syBytes: "Text stored", syNote: "0.19: the text of conversations synced between an account's devices. User and assistant texts and attachment names and sizes only; no files, no images. Only totals are shown here, never a text; the relay deletes at once when the switch goes off or the person asks.",
     mTurns: "Kept turns", mTurnAccounts: "Accounts with turns kept", mOn: "Turned on", mDefaultOn: "On by default (new accounts)", mOff: "Turned off", mDeleted: "Deleted", dModels: "By model", dApps: "By app", dRecent: "Newest kept turns (open the account for all of them)", dPlatforms: { android: "Android", windows: "runtime on Windows", macos: "runtime on macOS", linux: "runtime on Linux", runtime: "runtime", browser: "browser", other: "other" },
     webTitle: "nanoMuse Web", webLine: (w) => (w ? `${fmt(w.accounts)} accounts with a Muse of their own (cap ${fmt(w.max_accounts)}) · ${fmt(w.running)} running (cap ${fmt(w.max_running)})` : "Not connected: set the relay's WEB_INFO_URL to the gateway's /api/web/info."), webOff: "nanoMuse Web is off",
     places: (d) => `Where from · last ${d} days`, placesNote: "Guessed from the address (ip2region's offline database: city level in China, country / state elsewhere); no third party is asked. It is where the network exit is — mobile data and proxies skew it.", placesOff: "The location database is not here yet: the relay fetches ip2region_v4.xdb (about 11 MB) into its data directory after start; CLOUD_GEOIP=0 turns this off.", placesFetching: "Fetching the location database…", placesError: (e) => `The location database could not be fetched: ${e}`,
@@ -300,8 +313,10 @@
     places: (d) => `/v1/admin/places?days=${d}`,
     catalog: () => "/v1/admin/catalog",
     health: () => "/v1/admin/health",
+    nudges: () => "/v1/admin/nudges",
+    sync: () => "/v1/admin/sync",
   };
-  const TIMELESS = new Set(["catalog", "health"]);
+  const TIMELESS = new Set(["catalog", "health", "nudges", "sync"]);
   const CACHE = new Map();
   const cacheKey = (key) => `${key}:${TIMELESS.has(key) ? 0 : days}`;
   /** The view's data, or null while it is on its way (the view draws again when it lands);
@@ -1172,7 +1187,18 @@
           h("div", { class: "list", style: "max-height:560px;overflow:auto" }, ...sessions.map((v) => visitRow(v, true)), !sessions.length ? h("div", { class: "empty" }, T.none) : null))),
     ];
   }
-  function dataView() { const dv = need("data"); return !dv ? loadingPanel(T.data(days)) : dv._error ? failedPanel(T.data(days), "data", dv._error) : dataPanel(dv); }
+  /** 0.19: conversation sync in aggregate — accounts on / off, what is stored — never a text. */
+  function syncPanel() {
+    const sv = need("sync");
+    if (!sv) return loadingPanel(T.syTitle);
+    if (sv._error) return failedPanel(T.syTitle, "sync", sv._error);
+    return panel(T.syTitle,
+      h("div", { class: "kpis in-panel" },
+        flatKpi(T.syOn, fmt(sv.accounts_enabled || 0), T.syOnSub(sv.accounts_disabled || 0)), flatKpi(T.syWith, fmt(sv.accounts_with_data || 0)),
+        flatKpi(T.syConvs, fmt(sv.conversations || 0)), flatKpi(T.syMsgs, fmt(sv.messages || 0), T.syMsgsSub((sv.limits || {}).messages || 20000)), flatKpi(T.syBytes, sizeOf(sv.bytes || 0))),
+      h("div", { class: "fine", style: "padding:0 16px 12px" }, T.syNote));
+  }
+  function dataView() { const dv = need("data"); return [!dv ? loadingPanel(T.data(days)) : dv._error ? failedPanel(T.data(days), "data", dv._error) : dataPanel(dv), syncPanel()]; }
   function siteView() { const tr = need("traffic"); return !tr ? loadingPanel(T.site(days)) : tr._error ? failedPanel(T.site(days), "traffic", tr._error) : sitePanel(tr); }
   function modelsView() { const cv = need("catalog"); return !cv ? loadingPanel(T.catalog) : cv._error ? failedPanel(T.catalog, "catalog", cv._error) : catalogPanel(cv); }
   function healthView() {
@@ -1245,7 +1271,7 @@
     const limited = Math.max(0, Number(c.total || 0) - Number(c.unlimited || 0) - Number(c.disabled || 0));
     const note = (key) => h("span", { class: "fine" }, (set[key] ? T.rtSet + " · " : "") + T.rtEnv(typeof env[key] === "boolean" ? (env[key] ? T.on : T.off) : env[key]));
     const num = (key, label) => [h("b", {}, label), h("span", { class: "rt" },
-      h("input", { type: "number", step: "0.5", min: "0", "data-focus": "rt-" + key, value: key in RT_DRAFT ? RT_DRAFT[key] : (v[key] ?? ""), oninput: (e) => { RT_DRAFT[key] = e.target.value; } }), note(key))];
+      h("input", { type: "number", step: "0.5", min: "0", "data-focus": "rt-" + key, value: key in RT_DRAFT ? RT_DRAFT[key] : (v[key] ?? ""), oninput: (e) => { RT_DRAFT[key] = e.target.value; draw(); } }), note(key))];
     const on = "signup_open" in RT_DRAFT ? RT_DRAFT.signup_open : !!v.signup_open;
     const dirty = Object.keys(RT_DRAFT).length > 0;
     return h("div", { class: "panel" }, h("h2", {}, T.rtTitle, h("span", { class: "sp" }), h("button", { class: "btn sm", disabled: dirty && !rtBusy ? null : "", onclick: rtSave }, T.rtSave)),
@@ -1262,10 +1288,62 @@
         h("button", { class: "btn quiet sm", onclick: () => rtSetAll(limited) }, T.rtSetAll),
         rtMsg ? h("span", { class: "fine" }, rtMsg) : null));
   }
+  // ── nudges (relay 0.18): when the apps ask for a star on GitHub ──
+  // The draft is a copy of the policy being edited (null = showing what is in force); a
+  // save PUTs the whole policy, the server checks it and bumps the version.
+  let ND = null, ndMsg = "", ndBusy = false;
+  function ndEdit(nv) {
+    if (!ND) ND = JSON.parse(JSON.stringify(nv.nudges));
+    return ND;
+  }
+  async function ndSave() {
+    if (!ND) return;
+    ndBusy = true; ndMsg = ""; draw();
+    try { await api("PUT", "/v1/admin/nudges", ND); ND = null; ndMsg = T.ndSaved; } catch (e) { ndMsg = e.message; }
+    ndBusy = false;
+    forget("nudges"); draw();
+  }
+  async function ndReset() {
+    if (!confirm(T.ndResetConfirm)) return;
+    ndBusy = true; ndMsg = ""; draw();
+    try { await api("PUT", "/v1/admin/nudges", { reset: true }); ND = null; ndMsg = T.ndResetDone; } catch (e) { ndMsg = e.message; }
+    ndBusy = false;
+    forget("nudges"); draw();
+  }
+  function nudgesPanel() {
+    const nv = need("nudges");
+    if (!nv) return loadingPanel(T.ndTitle);
+    if (nv._error) return failedPanel(T.ndTitle, "nudges", nv._error);
+    const d = ND || nv.nudges, star = d.star || {}, m = star.moments || {};
+    const listText = (v) => (Array.isArray(v) ? v.join(", ") : String(v ?? ""));
+    const sw = (on, set, label, hint) => h("span", { class: "rt" },
+      h("label", { class: "sw" }, h("input", { type: "checkbox", checked: on ? "" : null, disabled: ndBusy ? "" : null, onchange: (e) => { set(e.target.checked); draw(); } }), " ", label),
+      hint ? h("span", { class: "fine" }, hint) : null);
+    const text = (key, value, set, hint, type, attrs) => h("span", { class: "rt" },
+      h("input", { type: type || "text", "data-focus": "nd-" + key, value, disabled: ndBusy ? "" : null, ...(attrs || {}), oninput: (e) => { set(e.target.value); draw(); } }),
+      hint ? h("span", { class: "fine" }, hint) : null);
+    const momentSw = (name, label, hint) => sw(!!m[name], (v) => { ndEdit(nv).star.moments[name] = v; }, label, hint);
+    return h("div", { class: "panel" },
+      h("h2", {}, T.ndTitle, h("span", { class: "fine" }, T.ndVersion(d.version, nv.updated_at ? when(nv.updated_at) : "")), h("span", { class: "sp" }),
+        h("button", { class: "btn quiet sm", disabled: ndBusy || !nv.stored ? "" : null, onclick: ndReset }, T.ndReset),
+        h("button", { class: "btn sm", disabled: ND && !ndBusy ? null : "", onclick: ndSave }, T.ndSave)),
+      h("div", { class: "fine", style: "padding:12px 16px 0" }, T.ndNote),
+      h("div", { class: "kv" },
+        h("b", {}, T.ndEnabled), sw(!!star.enabled, (v) => { ndEdit(nv).star.enabled = v; }, star.enabled ? T.on : T.off, T.ndEnabledOff),
+        h("b", {}, T.ndMoments), h("span", { class: "rt col" },
+          momentSw("signed_in", T.ndSignedIn), momentSw("new_look", T.ndNewLook), momentSw("exhausted", T.ndExhausted), momentSw("goal_done", T.ndGoalDone)),
+        h("b", {}, T.ndTasks), text("tasks", listText(m.tasks), (v) => { ndEdit(nv).star.moments.tasks = v; }, T.ndTasksHint),
+        h("b", {}, T.ndDays), text("days", listText(m.days_used), (v) => { ndEdit(nv).star.moments.days_used = v; }, T.ndDaysHint),
+        h("b", {}, T.ndCooldown), text("cooldown", star.cooldown_days ?? "", (v) => { ndEdit(nv).star.cooldown_days = v; }, null, "number", { min: "0", max: "365", step: "1" }),
+        h("b", {}, T.ndMax), text("max", star.max_asks ?? "", (v) => { ndEdit(nv).star.max_asks = v; }, null, "number", { min: "0", max: "50", step: "1" }),
+        h("b", {}, T.ndUrl), text("url", star.url || "", (v) => { ndEdit(nv).star.url = v; }, null, "url", { maxlength: "200", class: "wide" })),
+      ndMsg ? h("div", { class: "fine", style: "padding:0 16px 12px" }, ndMsg) : null);
+  }
   function settingsView() {
     const s = settings(), rate = Number(s.usd_cny || 0);
     return [
       runtimePanel(),
+      nudgesPanel(),
       h("div", { class: "panel" }, h("h2", {}, T.config),
         h("div", { class: "kv" },
           h("b", {}, T.kAccounts), h("span", {}, `${s.signup_open ? T.signupOpen : T.signupClosed} · ${T.capLine(s.allowance_cny, s.allowance_usd, s.invite_bonus_cny)} · ${T.perMinute(s.per_minute_requests)} · ${T.pwMin(s.password_min_len || 8)}`),

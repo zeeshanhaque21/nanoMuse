@@ -10,12 +10,46 @@
  * it the main chat, pins, renames or archives it. The harness's own workspace
  * browser is one switch away (Settings → General → Developer) for people who
  * want workspaces as folders.
+ *
+ * Signed in, the chats are the account's (C8, one thread): the main chat is the
+ * session the account's main conversation lives in, a conversation from another
+ * device is a chat here from the moment it is pulled, and nothing in the column
+ * says where a chat was written — the bubbles do (`RemoteBubbles.ts`).
  */
 import { createElement as h, useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
-import type { Translate } from './api.ts'
+import { call, type Translate } from './api.ts'
 import { IconMore, IconPlus, IconSearch } from './icons.tsx'
+import { useLive } from './live.ts'
 
 const MAIN_KEY = 'nanomuse.mainChat'
+
+/**
+ * Conversation sync as the chats column needs it (contract C8, one thread): the session the
+ * account's main conversation lives in, the sessions that hold a synced conversation (listed
+ * though no turn ran here yet), and the sessions whose conversation was deleted on another
+ * device, which the column archives (the host has no archive) and reports back.
+ */
+interface SyncList {
+  enabled: boolean
+  mainSession: string
+  sessions: Set<string>
+  toArchive: string[]
+}
+const NO_SYNC: SyncList = { enabled: true, mainSession: '', sessions: new Set(), toArchive: [] }
+
+/** The host's sync view; read again whenever the host's sync revision moves. */
+export function useSyncList(): SyncList {
+  const rev = useLive().sync?.rev ?? 0
+  const [list, setList] = useState<SyncList>(NO_SYNC)
+  useEffect(() => {
+    let alive = true
+    call<{ enabled: boolean; mainSession?: string; sessions?: string[]; toArchive?: string[] }>('sync/state')
+      .then((v) => { if (alive) setList({ enabled: v.enabled, mainSession: v.mainSession ?? '', sessions: new Set(v.sessions ?? []), toArchive: v.toArchive ?? [] }) })
+      .catch(() => undefined)
+    return () => { alive = false }
+  }, [rev])
+  return list
+}
 
 export interface ChatSummary {
   id: string
@@ -185,27 +219,50 @@ export function MuseChats({ t, useSessions, useSessionStatus, useWorkspaces, act
 
   const archivedSet = new Set(archived)
   const pinnedSet = new Set(pinned)
+  const sync = useSyncList()
   const visible = state.ids
     .map((id) => state.byId[id])
     .filter((s): s is ChatSummary => s !== undefined && s.origin !== 'subagent' && !s.parentId && !archivedSet.has(s.id))
   const current = Object.values(state.byId).find((s) => (s.retainedBy.mainView ?? 0) > 0)?.id
 
-  // The main chat: the remembered one while it exists, else the oldest, else the
-  // one on screen (a first session being created becomes the main chat).
-  let mainId = mainStored && visible.some((s) => s.id === mainStored) ? mainStored : undefined
+  // The main chat: the one the account's main conversation lives in (C8) while it exists, else
+  // the remembered one, else the oldest, else the one on screen (a first session being created
+  // becomes the main chat).
+  let mainId = sync.mainSession && visible.some((s) => s.id === sync.mainSession) ? sync.mainSession : undefined
+  if (!mainId) mainId = mainStored && visible.some((s) => s.id === mainStored) ? mainStored : undefined
   if (!mainId && visible.length > 0) {
-    const candidates = visible.filter((s) => !s.blank || s.id === current)
+    const candidates = visible.filter((s) => !s.blank || s.id === current || sync.sessions.has(s.id))
     mainId = [...candidates].sort((a, b) => a.updatedAt - b.updatedAt)[0]?.id ?? visible[0]!.id
   }
   useEffect(() => {
     if (state.phase !== 'ready') return
     if (mainId !== mainStored) { writeMain(mainId); setMainStored(mainId) }
   }, [mainId, mainStored, state.phase])
+  // The host syncs the main chat as the account's one main conversation (C7, C8): it is told
+  // which session that is, and answers with the one the conversation already lives in.
+  useEffect(() => {
+    if (state.phase !== 'ready' || !mainId) return
+    void call<{ sessionId?: string } | undefined>('sync/main', { sessionId: mainId })
+      .then((r) => { if (r?.sessionId && r.sessionId !== mainId) { writeMain(r.sessionId); setMainStored(r.sessionId) } })
+      .catch(() => undefined)
+  }, [mainId, state.phase])
+  // A chat deleted on another device goes to the archive here, and the host is told.
+  const archiving = useRef(new Set<string>())
+  useEffect(() => {
+    const due = sync.toArchive.filter((id) => !archiving.current.has(id))
+    if (due.length === 0) return
+    for (const id of due) archiving.current.add(id)
+    void Promise.all(due.map((id) => (archivedSet.has(id) || !state.byId[id] ? Promise.resolve() : actions.archiveSession(id).catch(() => undefined))))
+      .then(() => call('sync/archived', { sessionIds: due }))
+      .catch(() => undefined)
+      .finally(() => { for (const id of due) archiving.current.delete(id) })
+  }, [sync.toArchive])
 
   const main = visible.find((s) => s.id === mainId)
   const q = query.trim().toLowerCase()
+  // a synced chat is listed from the moment it exists here, though no turn ran here yet
   const side = visible
-    .filter((s) => s.id !== mainId && (!s.blank || s.id === current))
+    .filter((s) => s.id !== mainId && (!s.blank || s.id === current || sync.sessions.has(s.id)))
     .filter((s) => q === '' || s.displayTitle.toLowerCase().includes(q))
     .sort((a, b) => {
       const pa = pinnedSet.has(a.id) ? 1 : 0
@@ -246,12 +303,17 @@ export function MuseChats({ t, useSessions, useSessionStatus, useWorkspaces, act
             key: chat.id,
             t,
             chat,
-            label: chat.blank ? t('chBlank') : chat.displayTitle,
+            label: chat.blank && !sync.sessions.has(chat.id) ? t('chBlank') : chat.displayTitle || t('chBlank'),
             main: false,
             pinned: pinnedSet.has(chat.id),
             selected: current === chat.id,
             useSessionStatus,
             actions,
-            onMakeMain: () => { writeMain(chat.id); setMainStored(chat.id) },
+            // the host has the last word: while the account's main conversation lives in a session, that one stays the main chat
+            onMakeMain: () => {
+              void call<{ sessionId?: string } | undefined>('sync/main', { sessionId: chat.id })
+                .then((r) => { const id = r?.sessionId || chat.id; writeMain(id); setMainStored(id) })
+                .catch(() => { writeMain(chat.id); setMainStored(chat.id) })
+            },
           }))))
 }

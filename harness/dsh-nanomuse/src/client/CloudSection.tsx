@@ -21,6 +21,68 @@ type Phase = 'loading' | 'signedOut' | 'signedIn'
 /** Where the privacy policy is when the relay named one; empty means hide the link. */
 const PRIVACY_URL = ''
 
+/** `GET nanomuse/cloud/sync/state`: the switch, the relay's counts, the main chat and the synced sessions (see `sync.ts`). */
+export interface SyncView {
+  enabled: boolean
+  available: boolean
+  paused: boolean
+  cursor: number
+  relay: { enabled: boolean; cursor: number; counts: { conversations: number; messages: number } } | null
+  rev: number
+  mainSession: string
+  sessions: string[]
+  hidden: string[]
+  toArchive: string[]
+}
+
+/**
+ * Data controls, the first card (contract C7): *Sync conversations between my devices*, on by
+ * default while signed in. Off tells the relay, which deletes what it stores; *Delete synced
+ * conversations* empties the store and keeps the switch and the chats on every device.
+ */
+export function SyncControls({ t }: { t: Translate }): ReactNode {
+  const [view, setView] = useState<SyncView | undefined>()
+  const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState<string | undefined>()
+  const [error, setError] = useState<string | undefined>()
+  useEffect(() => {
+    let alive = true
+    call<SyncView>('sync/state').then((v) => { if (alive) setView(v) }).catch(() => { if (alive) setError(t('syncNotReady')) })
+    return () => { alive = false }
+  }, [t])
+  const run = async (work: () => Promise<SyncView>, said?: string) => {
+    setBusy(true)
+    setError(undefined)
+    setNotice(undefined)
+    try {
+      setView(await work())
+      if (said) setNotice(said)
+    } catch (err: unknown) {
+      setError(t('failed', { message: (err as Error).message }))
+    } finally {
+      setBusy(false)
+    }
+  }
+  const counts = view?.relay?.counts ?? { conversations: 0, messages: 0 }
+  const stored = counts.conversations > 0 || counts.messages > 0
+  const flip = (on: boolean) => {
+    if (!on && stored && !window.confirm(t('syncOffConfirm'))) return
+    void run(() => call<SyncView>('sync/state', { enabled: on }))
+  }
+  const wipe = () => {
+    if (!window.confirm(t('syncDeleteConfirm'))) return
+    void run(() => call<SyncView>('sync/delete', {}), t('syncDeleted'))
+  }
+  return h('div', { 'data-testid': 'nm-sync-controls' },
+    h('div', { style: { ...row, justifyContent: 'space-between' } },
+      h('span', null, t('syncSwitch')),
+      h(Switch, { checked: view?.enabled === true, onChange: flip, disabled: busy || !view, label: t('syncSwitch') })),
+    h('div', { style: muted }, t('syncWhy'), ' ', view?.paused ? t('syncPaused') : stored ? t('syncKept', { c: counts.conversations, m: counts.messages }) : ''),
+    stored ? h('div', { style: { marginTop: 6 } }, h(Button, { variant: 'outline', size: 'sm', disabled: busy, onClick: wipe }, t('syncDelete'))) : null,
+    notice ? h('div', { style: muted }, notice) : null,
+    error ? h('div', { style: errorStyle }, error) : null)
+}
+
 /** Build the section component around the translator the plugin bound. */
 /**
  * @param part - `account`: the account page (who is signed in, the models, the look, the
@@ -113,6 +175,7 @@ export function makeCloudSection(t: Translate, part: 'account' | 'data' = 'accou
               (a.contribute?.privacyUrl || PRIVACY_URL)
                 ? h('a', { href: a.contribute?.privacyUrl || PRIVACY_URL, target: '_blank', rel: 'noopener noreferrer' }, t('dataPrivacy'))
                 : t('dataPrivacy'))),
+          h(SyncControls, { t }),
           dataControls,
           error ? h('div', { style: errorStyle }, error) : null,
           h('h3', { style: heading }, t('dataLocalTitle')),
@@ -132,6 +195,7 @@ export function makeCloudSection(t: Translate, part: 'account' | 'data' = 'accou
           h(Button, { variant: 'ghost', size: 'sm', onClick: () => { settingsBus.openSection?.(DEVICES_PANEL) } }, t('devicesOpen'))),
         // Data controls: the one switch over what the relay keeps, the shape of Muse's own.
         h('h3', { style: heading }, t('dataTitle')),
+        h(SyncControls, { t }),
         dataControls,
         error ? h('div', { style: errorStyle }, error) : null,
         h('div', { style: row },

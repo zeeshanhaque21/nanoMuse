@@ -207,6 +207,8 @@ function SideRow({
         ) : thread.remote_from ? (
           <MonitorSmartphone size={15} className="shrink-0 text-muted" />
         ) : null}
+        {/* a chat started on another device of the account is a normal chat here (C8): no
+            badge in the list — the turns written elsewhere carry their caption instead */}
         <span className="min-w-0 flex-1 truncate text-[15px]">{thread.title || t("New chat")}</span>
         {thread.busy && <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-amber-400" />}
         <span className="shrink-0 text-[12px] text-muted">{relativeDay(thread.updated_at)}</span>

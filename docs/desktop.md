@@ -12,7 +12,7 @@ runtime for the hands are inside.
 | --- | --- |
 | Windows | `nanoMuse-Desktop-<version>-win-x64.exe` (NSIS; no certificate, so SmartScreen asks for *Run anyway*) |
 | macOS | `nanoMuse-Desktop-<version>-mac-arm64.dmg` / `-mac-x64.dmg` (and `.zip`); ad-hoc signed unless a release was signed and notarized, then *Open Anyway* once in System Settings → Privacy & Security |
-| Linux | `nanoMuse-Desktop-<version>-linux-x64.AppImage` / `.deb` |
+| Linux | `nanoMuse-Desktop-<version>-linux-x64.deb` (preferred) / `.AppImage` / `.tar.gz` — see [Linux notes](#linux-notes) |
 
 Every release carries them (`.github/workflows/desktop-app.yml`; `SHA256SUMS-desktop.txt`
 beside them). The code is under [`harness/`](../harness/): the bundle of plugins in
@@ -45,8 +45,16 @@ is dsh's — its agent loop, tools, skills, goals, plan mode, compaction, sub-ag
   `/account-events`, `/password`, `/sign-out-all`, `/delete-account`, `/config`);
 - **Hands** on this computer: `nanomuse mcp` from the bundled runtime over stdio, the
   runtime's `computer_screen` and `computer_act` tools with their approvals, so "what is
-  on my screen?" and "open the settings and turn the volume down" work out of the box;
-  the connectors the runtime's `config.toml` turns on (mailbox, calendar, address book)
+  on my screen?" and "open the settings and turn the volume down" work out of the box.
+  The mouse, the keyboard and the screenshot are the app's own (`src/operator.ts`, a
+  port of UI-TARS-desktop's operator on `@computer-use/nut-js`), answered to the runtime
+  over a loopback HTTP server with a per-launch token (`NANOMUSE_OPERATOR_URL` /
+  `NANOMUSE_OPERATOR_TOKEN` in the runtime's environment; `GET /info`, `POST
+  /screenshot`, `POST /execute`) — one capture path and one pointer space on every
+  platform, no `xdotool` or `pyautogui` needed, and coordinates that are pixels of the
+  picture the model saw ([gui.md](gui.md#hands-on-the-computer-the-picture-is-the-unit)).
+  The runtime's own backends remain the fallback when the app is not the one running it.
+  The connectors the runtime's `config.toml` turns on (mailbox, calendar, address book)
   arrive over the same server, and Settings → Connectors shows how to set each one up;
 - **the rooms**: Feed, Ideas, Goals and Library as Muse has them, kept by the host in
   `nanomuse/rooms.json` and written by the agent in hidden chats (feed and ideas) or
@@ -77,6 +85,29 @@ person picked in Settings → nanoMuse Cloud — provider, model, base URL and t
 and removed on sign-out; `nanomuse/rooms.json` keeps the rooms (feed, goals with their
 steps and progress, which ideas were tried, the library index, memory).
 
+## macOS permissions
+
+The hands need two things from macOS, both granted to **nanoMuse Desktop** (the app
+bundle, `io.github.nanomuse.desktop` — the runtime it bundles runs as part of the app and
+never appears in the panes): *Screen Recording* for the screenshots and *Accessibility*
+for the mouse and the keyboard. At launch the app asks for whichever is missing with the
+system's own dialogs (`CGRequestScreenCaptureAccess`, `AXIsProcessTrustedWithOptions`,
+through `@computer-use/node-mac-permissions` and `@computer-use/mac-screen-capture-permissions`
+— the modules UI-TARS-desktop uses) and opens the Screen Recording pane once, where the
+switch is; Settings → Computer use → Permissions asks again on request and shows TCC's own
+status for each. Screen Recording reaches freshly started apps only: when the switch flips
+while the app runs, it offers *Restart now*, and the restart goes through a proper quit, so
+the old host and the old `nanomuse mcp` (started without the permission) go with it.
+
+There is one screenshot path on a Mac: the app's operator. Without Screen Recording,
+`desktopCapturer` refuses or the capture is black, and the operator answers `403` with
+*macOS: switch on nanoMuse Desktop under System Settings → Privacy & Security → Screen
+Recording, then quit and reopen the app.* — the runtime shows that sentence and never falls
+back to `mss` / `screencapture` (which would mean a second prompt, for a process you cannot
+find in the pane, and a black picture handed to the model). To start the permission flow
+over: `tccutil reset ScreenCapture io.github.nanomuse.desktop; tccutil reset Accessibility
+io.github.nanomuse.desktop`, then relaunch.
+
 ## macOS signing
 
 Without an Apple developer certificate the bundle is ad-hoc signed and macOS asks once.
@@ -87,6 +118,37 @@ Developer ID Application certificate under the hardened runtime
 (`harness/desktop/resources/entitlements.mac.plist`), notarizes with notarytool and
 staples. The certificate is exported from Keychain Access as a `.p12` and base64-encoded;
 the App Store Connect key is the `.p8`'s text.
+
+## Linux notes
+
+- **The `.deb` is the one to prefer** (Debian, Ubuntu and their derivatives): it installs
+  `/opt/nanoMuse/nanomuse-desktop`, the icon set and the desktop entry, and the launcher
+  finds it. `sudo apt install ./nanoMuse-Desktop-<version>-linux-x64.deb`.
+- **The AppImage needs FUSE.** It mounts itself at start; when the machine has no
+  `libfuse2`, or `fusermount` is not permitted (containers, some corporate images — the log
+  says `fusermount: mount failed: Operation not permitted` / `Cannot mount AppImage, please
+  check your FUSE setup`), run it unpacked instead:
+  `./nanoMuse-Desktop-<version>-linux-x64.AppImage --appimage-extract-and-run`, or take the
+  **`.tar.gz`** — the same app as a plain folder: unpack it anywhere and run
+  `./nanomuse-desktop` from it (no FUSE, no root).
+- **The icon does nothing.** The app allows one instance at a time: a click on the launcher
+  while a copy is already running tells *that* copy to show its window. Up to 0.1.36 a copy
+  whose window had been closed stayed alive for the tray and did not answer — the click
+  looked dead. Since 0.1.37 the running copy opens its window again on the click; a copy
+  from before that is still in the tray — quit it there (*Quit*), or
+  `pkill -f /opt/nanoMuse/nanomuse-desktop`, and click again. Closing the window keeps the
+  app in the tray only while the menu-bar switch (Settings → General → App behavior) is on;
+  with it off, closing the window quits. **Ctrl+Q** quits from the window either way (Help →
+  Quit; the menu bar shows on Alt).
+- **No tray icon on Ubuntu 20.04.** GNOME 3.36's appindicator extension (v33) does not take
+  the registration Electron 44 sends (a bus name with an object path appended), so the icon
+  falls back to an XEmbed tray GNOME Shell does not show — the app is in the tray, invisibly.
+  Ubuntu 22.04 and newer show it. On 20.04 use Ctrl+Q, or switch the menu-bar option off so
+  that closing the window quits.
+- **Wayland.** The hands drive the mouse and read the screen through X11; on a Wayland
+  session they say so and stay off. Choose *Ubuntu on Xorg* on the login screen.
+- The log is `~/.nanomuse/desktop/desktop.log`; the launcher's side is in
+  `journalctl --user -n 200`.
 
 ## The terminal binary
 
@@ -124,5 +186,9 @@ python -m pytest desktop/tests
 
 The macOS `.pkg` installs `/usr/local/bin/nanomuse-desktop` and a small "nanoMuse
 Desktop.app" that opens it in Terminal; the Windows setup adds the folder to `PATH` and
-a Start-menu entry; the `.deb` installs `/usr/bin/…` and a desktop entry. Nothing is
-signed — macOS asks for right-click → Open once, Windows for "Run anyway".
+a Start-menu entry; the `.deb` (package `nanomuse-desktop-terminal`) installs
+`/usr/bin/nanomuse-desktop-terminal`, a desktop entry "nanoMuse Desktop (terminal)" with its
+own icon, and registers the command as a lower-priority alternative for `nanomuse-desktop`,
+so it installs next to the desktop app's `.deb` and the plain name keeps working when the app
+is not there. Nothing is signed — macOS asks for right-click → Open once, Windows for "Run
+anyway".

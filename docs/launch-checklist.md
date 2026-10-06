@@ -3,7 +3,7 @@
 > **Archived.** This was the working list for the first public release of the Python
 > line. Domains (`nanomuse.dev`), artifacts (two APKs, a rootfs) and the mascot decision
 > (red panda) it mentions are not the current ones: the site is upstream's own
-(nanomuse.cn, unused by this fork), the release
+(no default mirror in this fork), the release
 > carries one `nanoMuse-<version>-arm64.apk`, the default face is the dragon. Kept
 > unchanged as a record; the plan that replaced it is [roadmap.md](roadmap.md).
 

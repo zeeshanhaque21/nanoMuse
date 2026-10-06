@@ -319,6 +319,7 @@ struct AIChatView: View {
 
     @State private var floatingBarHeight: CGFloat = 0
     @State private var nmCardsHeight: CGFloat = 0 // nanoMuse: the cards above the composer (avatar takes, name chooser)
+    @StateObject private var nmComposer = NanoMuseComposerWatch() // nanoMuse: rebuilds the composer host when it stops laying out (the "lost keyboard")
     @State private var showFileBrowser = false
     // [T-browser-download-ux-v2] Downloads panel + "Show in Files" locate target.
     @State private var showDownloadsPanel = false
@@ -608,6 +609,10 @@ struct AIChatView: View {
                             inputBar
                             #endif
                         }
+                        // nanoMuse: the probe tells the watch whether this stack is really in a window and how
+                        // tall it is; a tick on `.id` rebuilds the whole host when it is not (NanoMuseComposerWatch).
+                        .background(NanoMuseComposerProbe(watch: nmComposer)) // nanoMuse:
+                        .id(nmComposer.rebuildTick) // nanoMuse:
                         // Register the composer (tool preview + input bar) as a
                         // region the global speech capsule must not cover.
                         .capsuleProtectedFrame("inputBar")
@@ -698,6 +703,10 @@ struct AIChatView: View {
             }
         }
         .environment(\.chatSessionId, vm.sessionId)
+        .onReceive(NotificationCenter.default.publisher(for: .nanoMuseChatAction)) { note in // nanoMuse: the Muse header's ••• menu drives this chat
+            guard let action = NanoMuseChatAction.from(note, for: vm.nmSessionKey) else { return } // nanoMuse:
+            nmPerform(action) // nanoMuse:
+        } // nanoMuse:
         .modifier(NavBarStyleModifier(topSafeAreaInset: $topSafeAreaInset))
         .navigationBarTitleDisplayMode(.inline)
         // [T-ios-navbar-toolbar-host] The ENTIRE toolbar now lives inside an
@@ -1226,6 +1235,7 @@ struct AIChatView: View {
             inputBarHeightDebounce?.cancel()
             inputBarHeightDebounce = nil
             AppLogger(category: "InputBarLayout").info("inputBarHeight re-arm seed on appear (was \(inputBarHeight))")
+            nmComposer.visible = true // nanoMuse: the composer watch only acts while the chat is on screen
             vm.sessionId = sessionId
             vm.draftId = draftId
             vm.remoteDeviceId = remoteDeviceId
@@ -1345,6 +1355,7 @@ struct AIChatView: View {
         }
         .onDisappear {
             isChatViewVisible = false
+            nmComposer.visible = false // nanoMuse: a host torn down because the chat left is not a failure
             // [T-voice-inputbar-collapse-selfheal] The health probe must not
             // outlive the view — its report would describe a composer that no
             // longer exists.
@@ -1478,8 +1489,10 @@ struct AIChatView: View {
                         AppLogger(category: "InputBarLayout").info("[InputBarHealth] OK after foreground — composer re-reported geometry (h=\(latestInputBarFrameH) committed=\(inputBarHeight))")
                     } else {
                         AppLogger(category: "InputBarLayout").error("[InputBarHealth] STALLED — no geometry callback 900ms after foreground. committed=\(inputBarHeight) latest=\(latestInputBarFrameH) lastReport=\(String(format: "%.1f", age))s ago voice=\(voiceInputActive) editing=\(voiceVM.isEditingTranscript) seeded=\(didSeedInputBarHeight). The composer host is not laying out; expect a blank bottom area. Leaving and re-entering the session rebuilds it.")
+                        nmComposer.stalled() // nanoMuse: the rebuild upstream only describes — if the host really is gone, NanoMuseComposerWatch re-creates it
                     }
                 }
+                nmComposer.sceneActive() // nanoMuse: and a plain check a beat after every foreground
                 // [T-voice-bg-fg-gap] Foreground reseal: if we return to a
                 // voice-mode-not-editing state, no responder should be armed.
                 // Releasing here is a no-op when nothing is focused and clears
@@ -1930,6 +1943,19 @@ struct AIChatView: View {
             }
         )
     }
+
+    // nanoMuse: one of the Muse header's menu entries, the same paths as the "…" menu above.
+    private func nmPerform(_ action: NanoMuseChatAction) { // nanoMuse:
+        switch action { // nanoMuse:
+        case .newChat: requestNewChatFromMenu() // nanoMuse:
+        case .model: showModelPicker = true // nanoMuse:
+        case .clearChat: showClearChatConfirm = true // nanoMuse:
+        case .terminal: showTerminal = true // nanoMuse:
+        case .browser: showBrowserSheet = true // nanoMuse:
+        case .files: showFileBrowser = true // nanoMuse:
+        case .tokenUsage: showTokenUsage = true // nanoMuse:
+        } // nanoMuse:
+    } // nanoMuse:
 
     // MARK: - New Chat (menu entry)
 
@@ -3383,6 +3409,15 @@ struct AIChatView: View {
         }, isVoiceActive: voiceInputActive)
     }
 
+    // nanoMuse: the voice panel's keyboard button — the same path as the mic/keyboard toggle
+    // (the transcript stays in the field), then the field takes focus once the panel has
+    // released its own responder (InlineVoiceInputView ends editing on the next runloop turn).
+    private func nmBackToTyping() { // nanoMuse:
+        voiceVM.reset(clearTranscript: false) // nanoMuse:
+        withAnimation(.easeInOut(duration: 0.2)) { voiceInputActive = false } // nanoMuse:
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { inputFocused = true } // nanoMuse:
+    } // nanoMuse:
+
     /// Send / Enqueue / Stop circular button.
     ///
     /// [T-ios-voiceover-labels] All three states are icon-only, and two of them
@@ -3439,7 +3474,8 @@ struct AIChatView: View {
                     inputText: inputTextBinding,
                     onPasteImage: { image in vm.addImageAttachment(image) },
                     onPasteFile: { url in vm.addFileAttachment(from: url) },
-                    conversationContext: { voiceCorrectionContext(from: vm.messages) }
+                    conversationContext: { voiceCorrectionContext(from: vm.messages) },
+                    onBackToTyping: { nmBackToTyping() } // nanoMuse: the panel's keyboard button
                 )
             )
         }
@@ -3482,7 +3518,70 @@ struct AIChatView: View {
             .padding(.bottom, 10)
             return AnyView(waveform)
         }
-        let field = PastableTextView(
+        let field = composerTextField // nanoMuse: built once, for this bar and for the Muse pill
+        return AnyView(composerBody(field: field, topPadding: topPadding))
+    }
+
+    // nanoMuse: whether the composer is Muse's pill (the shell on) or the OpenMinis bar.
+    private var nmPill: Bool { NanoMuseShellPrefs.shell } // nanoMuse:
+
+    // nanoMuse: the pill's rows. Text mode: plus · field · mic-or-send on one row (the field grows
+    // to several lines on its own). Voice mode and the legacy dictation band keep upstream's panel
+    // and its bottom row inside the same pill, so the keyboard button, read-aloud and send stay.
+    // Editing a past message: the exit chip above the row, as Android shows it above the field.
+    @ViewBuilder
+    private var nmPillRows: some View { // nanoMuse:
+        if voiceInputActive || speechManager.state == .recording { // nanoMuse:
+            inputFieldOrWaveform // nanoMuse:
+            inputBottomRow // nanoMuse:
+                .padding(.horizontal, 12) // nanoMuse:
+                .padding(.bottom, 10) // nanoMuse:
+        } else { // nanoMuse:
+            if vm.editingMessageIndex != nil { // nanoMuse:
+                HStack { editExitButton; Spacer() } // nanoMuse:
+                    .padding(.horizontal, 12) // nanoMuse:
+                    .padding(.top, 8) // nanoMuse:
+            } // nanoMuse:
+            NanoMuseComposerPill( // nanoMuse:
+                hasContent: hasMovableShareContent, // nanoMuse: text or an attachment
+                isProcessing: vm.isProcessing, // nanoMuse:
+                canSend: canSend, // nanoMuse:
+                canEnqueue: canEnqueue, // nanoMuse:
+                onCamera: { showCamera = true }, // nanoMuse:
+                onPhotos: { showPhotoPicker = true }, // nanoMuse:
+                onFile: { showDocumentPicker = true }, // nanoMuse:
+                onCommands: { vm.showSlashMenuOverInput(); inputFocused = true }, // nanoMuse:
+                onMic: { nmEnterVoice() }, // nanoMuse:
+                onSend: { performSend() }, // nanoMuse:
+                onEnqueue: { performEnqueue() }, // nanoMuse:
+                onStop: { vm.cancel() } // nanoMuse:
+            ) { // nanoMuse:
+                nmPillField // nanoMuse:
+            } // nanoMuse:
+        } // nanoMuse:
+    } // nanoMuse:
+
+    // nanoMuse: the field alone — the pill adds its own insets. The iPad resize floor still applies.
+    private var nmPillField: AnyView { // nanoMuse:
+        let field = composerTextField // nanoMuse:
+        if let height = composerTextHeight { return AnyView(field.frame(height: height)) } // nanoMuse:
+        // nanoMuse: never below one line — a text view whose host has not laid out measures 0 and would
+        // fold the pill down to its padding (NanoMuseComposerWatch.fieldFloor is the natural one-line height).
+        return AnyView(field.fixedSize(horizontal: false, vertical: true).frame(minHeight: NanoMuseComposerWatch.fieldFloor)) // nanoMuse:
+    } // nanoMuse:
+
+    // nanoMuse: the pill's mic — the same switch into voice mode as MicButton's onTap.
+    private func nmEnterVoice() { // nanoMuse:
+        inputFocused = false // nanoMuse:
+        vm.voiceUsedInComposition = true // nanoMuse:
+        VoiceModePreference.shared.enteredFromText = true // nanoMuse:
+        withAnimation(.easeInOut(duration: 0.2)) { voiceInputActive = true } // nanoMuse:
+    } // nanoMuse:
+
+    /// The multi-line text field itself, with every handler the composer wires. One
+    /// builder for the classic bar and the Muse pill. // nanoMuse: extracted from inputFieldOrWaveform
+    private var composerTextField: PastableTextView { // nanoMuse:
+        PastableTextView(
             text: inputTextBinding,
             isFocused: $inputFocused,
             hasSelection: $inputHasSelection,
@@ -3492,7 +3591,7 @@ struct AIChatView: View {
             // `%@` form ("Message %@ (@ to mention files)") as the lookup
             // key in Localizable.xcstrings, so translators get one
             // parameterized entry per locale instead of one per soul name.
-            placeholder: AppLocalized("Message \(soulName) (@ to mention files)"),
+            placeholder: NanoMuseShellPrefs.shell ? AppLocalized("Message") : AppLocalized("Message \(soulName) (@ to mention files)"), // nanoMuse: Muse's short placeholder in the shell
             onPasteImage: { image in vm.addImageAttachment(image) },
             onPasteFile: { url in vm.addFileAttachment(from: url) },
             onReturnKey: handleReturnKey,
@@ -3522,7 +3621,6 @@ struct AIChatView: View {
             // 120pt inside a taller box and the extra space would be dead.
             maxHeightOverride: composerTextHeight
         )
-        return AnyView(composerBody(field: field, topPadding: topPadding))
     }
 
     /// [T-ipad-composer-resize] Wraps the text field with its (optional) fixed
@@ -3667,11 +3765,15 @@ struct AIChatView: View {
                     .padding(.top, 8)
                 }
 
+                if nmPill { // nanoMuse: Muse's pill in the shell — one row, bare glyphs (Android: nmPill)
+                    nmPillRows // nanoMuse:
+                } else { // nanoMuse: the OpenMinis composer when the shell is off
                 inputFieldOrWaveform
 
                 inputBottomRow
                     .padding(.horizontal, 12)
                     .padding(.bottom, 10)
+                } // nanoMuse:
             }
             .contentShape(RoundedRectangle(cornerRadius: 20))
             .onTapGesture { inputFocused = true }
@@ -3706,9 +3808,9 @@ struct AIChatView: View {
                     .padding(.trailing, 10)
                 }
             }
-            .modifier(ComposerSurface())
+            .modifier(ComposerSurface(pill: nmPill)) // nanoMuse: the flat grey capsule in the shell
             .frame(maxWidth: maxContentWidth)
-            .padding(.horizontal, 12)
+            .padding(.horizontal, nmPill ? 16 : 12) // nanoMuse: Muse's 16 pt margins
             .padding(.vertical, 8)
             // [T-ios-geometry-observer-crash] onGeometryChange replaces the
             // GeometryReader scaffold (async-renderer SIGTRAP — see the
@@ -3719,6 +3821,7 @@ struct AIChatView: View {
                 proxy.frame(in: .global)
             } action: { frame in
                 let newH = frame.size.height
+                nmComposer.geometry(height: newH) // nanoMuse: every sample, the zero ones included — a lasting 0 is the collapsed composer
                 // [voice-inputbar-padding-zero] Guard against transient 0.
                 guard newH > 0 else { return }
 
@@ -4650,12 +4753,19 @@ struct AIChatView: View {
 /// fill and BOTH shadows byte-for-byte, including the dark-mode-only top shadow
 /// that lifts the bar off the message list.
 private struct ComposerSurface: ViewModifier {
+    /// nanoMuse: Muse's pill in the shell — a flat grey capsule, no shadow (Android: MuseTones.bubble, 26 dp).
+    var pill = false // nanoMuse:
+
     private var shape: RoundedRectangle {
-        RoundedRectangle(cornerRadius: 20, style: .continuous)
+        RoundedRectangle(cornerRadius: pill ? 26 : 20, style: .continuous) // nanoMuse: 26 for the pill
     }
 
     func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
+        if pill { // nanoMuse:
+            content // nanoMuse:
+                .background(shape.fill(NanoMuseTones.bubble)) // nanoMuse:
+                .clipShape(shape) // nanoMuse:
+        } else if #available(iOS 26.0, *) {
             content
                 .glassEffect(.regular, in: shape)
                 .clipShape(shape)
@@ -4839,7 +4949,9 @@ private struct NavBarStyleModifier: ViewModifier {
     @Binding var topSafeAreaInset: CGFloat
 
     func body(content: Content) -> some View {
-        if #available(iOS 26, *) {
+        // nanoMuse: in the Muse shell the header is a top safe-area inset the list scrolls under,
+        // so the content must keep the container's top inset; the shell takes the lower branch.
+        if #available(iOS 26, *), !NanoMuseShellPrefs.shell { // nanoMuse:
             // iOS 26: extend content behind nav bar so liquid-glass has
             // something to show through; the collection view's
             // contentInsetAdjustmentBehavior = .automatic keeps messages
@@ -4850,7 +4962,8 @@ private struct NavBarStyleModifier: ViewModifier {
         } else {
             // iOS 16–18: opaque navbar background
             content
-                .toolbarBackground(ChatColors.background, for: .navigationBar)
+                // nanoMuse: side chats pushed from the shell float on a blur, as the main chat's header does
+                .toolbarBackground(NanoMuseShellPrefs.shell ? AnyShapeStyle(.ultraThinMaterial) : AnyShapeStyle(ChatColors.background), for: .navigationBar) // nanoMuse:
                 .toolbarBackground(.visible, for: .navigationBar)
                 .overlay(alignment: .top) {
                     // [T-ios-geometry-observer-crash] onGeometryChange replaces

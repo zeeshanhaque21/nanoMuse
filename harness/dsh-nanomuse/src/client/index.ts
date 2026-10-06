@@ -21,6 +21,8 @@ import { profileBus, settingsBus } from './bus.ts'
 import { makeAboutSheet } from './About.tsx'
 import { syncOverlay } from './overlay.ts'
 import { renderFenceCards } from './FenceCards.ts'
+import { renderRemoteBubbles } from './RemoteBubbles.ts'
+import { makeFirstRunIntro } from './FirstRun.tsx'
 import { interceptComposer, makeAvatarChat } from './AvatarChat.tsx'
 import { makeCapsule } from './Capsule.tsx'
 import { prefillComposer } from './composer.ts'
@@ -50,6 +52,7 @@ import { makeProfileDrawer } from './ProfileDrawer.tsx'
 import { nav as roomsNav, roomsCall } from './rooms.ts'
 import { SearchModal } from './SearchModal.tsx'
 import { makeChannelsSection, makeComputerSection, makeHelpSection, makeLegalSection, makeStorageSection, makeWalletSection } from './Sections.tsx'
+import { makeMediaSection } from './MediaSection.tsx'
 import { ensureStyles, setAccent, setMuseMode } from './styles.ts'
 import { useWin, win } from './win.ts'
 
@@ -379,6 +382,10 @@ export function apply(ctx: ClientContext): void {
   const AboutSheet = makeAboutSheet(t, process.env.NANOMUSE_VERSION ?? '')
   slots.inject('shell.overlay', () =>
     slots.register({ name: 'shell.overlay', id: 'nanomuse.about', locale: 'nanomuse' }, AboutSheet))
+  // The first conversation's opening lines, drawn at the top of the main chat (C4).
+  const FirstRunIntro = makeFirstRunIntro(t)
+  slots.inject('shell.overlay', () =>
+    slots.register({ name: 'shell.overlay', id: 'nanomuse.firstrun', locale: 'nanomuse' }, FirstRunIntro))
   const AvatarChat = makeAvatarChat(t)
   slots.inject('shell.overlay', () =>
     slots.register({ name: 'shell.overlay', id: 'nanomuse.avatar-chat', locale: 'nanomuse' }, AvatarChat))
@@ -538,6 +545,10 @@ export function apply(ctx: ClientContext): void {
   const ComputerSection = makeComputerSection(t)
   slots.inject('settings.section', () =>
     slots.register({ name: 'settings.section', id: COMPUTER_SECTION, order: 22, label: () => t('navComputer'), locale: 'nanomuse' }, ComputerSection))
+  // Settings → Media (desk-b): the image and video models, the face's clips.
+  const MediaSection = makeMediaSection(t)
+  slots.inject('settings.section', () =>
+    slots.register({ name: 'settings.section', id: 'nanomuse-media', order: 29, label: () => t('mdMediaTitle'), locale: 'nanomuse' }, MediaSection))
   const DataSection = makeCloudSection(t, 'data')
   slots.inject('settings.section', () =>
     slots.register({ name: 'settings.section', id: DATA_SECTION, order: 32, label: () => t('navData'), locale: 'nanomuse' }, DataSection))
@@ -588,6 +599,8 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => syncOverlay(t), 'nanomuse: overlays')
   // The agent's app fences (goal created, goal update, feed post, new look) as cards in the chat.
   ctx.effect(() => renderFenceCards(t), 'nanomuse: fence cards')
+  // The turns written on the account's other devices, as bubbles in the thread (C8).
+  ctx.effect(() => renderRemoteBubbles(t), 'nanomuse: remote bubbles')
 
   // The avatar studio: a sheet over the window, from the look editor or the agent's draw_new_look.
   const AvatarStudio = makeAvatarStudio({ t })

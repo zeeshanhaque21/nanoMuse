@@ -1,0 +1,199 @@
+# Merge upstream v0.1.35 - v0.1.37 into the sanitized fork
+
+Brings three upstream releases into `zeeshanhaque21/nanoMuse`, with the fork's
+no-unwanted-backend contract enforced at every owning configuration layer.
+
+| | |
+|---|---|
+| Upstream releases | [v0.1.35](https://github.com/nano-muse/nanoMuse/releases/tag/v0.1.35) (Accord, code 36), [v0.1.36](https://github.com/nano-muse/nanoMuse/releases/tag/v0.1.36) (Thread, Android/iOS code 37, relay 0.19.0), [v0.1.37](https://github.com/nano-muse/nanoMuse/releases/tag/v0.1.37) (Weave) |
+| Upstream tip merged | `10a699280e02827cdae5c81ca1093cda1dea5208` (upstream `main`) |
+| Previous integration | `4f644c9c7ae6a5032b4cfb846a5b0824d1064c72` (upstream v0.1.34), via #10 |
+| Base | `9ad7efcedd3895fe49cf1c6a032be835c39d6d3e` (fork `main`) |
+| Merge commit | `3e28be36a08808451a53bfbfa64b43a4e13ba724` (true merge, two parents) |
+| Conflicts resolved | 54 |
+
+## What upstream adds
+
+- **Conversation sync** (0.1.36, relay 0.19.0) — `CloudSettings.sync`, the console sync card, and the desktop `SyncControls` with their locale strings in both languages.
+- **One thread per account** (0.1.37) — every device's main chat is the same conversation.
+- **Parity round** (0.1.35) — the iPhone and desktop brought to the phone's design, star asks driven by a backend policy.
+- **Desktop runtime row fix** for Windows, where there is no executable bit.
+
+All four are kept and verified **wired**, not merely present.
+
+## Sanitization
+
+Upstream reintroduced the unwanted `nanomuse.cn` backend in code that did **not**
+conflict with the fork, so it auto-merged in silently. A conflict-only scan misses
+exactly this class, so every new default was checked at its owning layer:
+
+| Surface | Before (upstream) | After (this fork) |
+|---|---|---|
+| `nanomuse/server/update.py` | `.cn` index first, always | this fork's GitHub releases first; mirror is **opt-in** via `NANOMUSE_UPDATE_INDEX_URL`, empty by default |
+| `harness/dsh-nanomuse/src/desk.ts` | `.cn` index first | GitHub first, `RELEASES_INDEX = ''`, optional configured mirror retained |
+| `harness/dsh-nanomuse/src/nudges.ts` | `NUDGES_ORIGIN = 'https://cloud.nanomuse.cn'` | `''` — feature stays off until a relay is configured |
+| `harness/dsh-nanomuse/src/client/DevicesPanel.tsx` | `.cn` download link | fork releases page |
+| `web/src/screens/DevicesScreen.tsx` | `.cn` download link | fork releases page |
+| Android `community/UpdateCheck.kt` | `.cn` download + index | fork releases page; `INDEX_URL = ""` |
+| iOS `NanoMuseUpdateCheck.swift` | `.cn` index | `indexURL = ""` |
+| iOS `NanoMuseSettings.swift` | force-unwrapped `.cn` privacy URL | fork's tracked `docs/privacy.md` |
+| `harness/dsh-nanomuse/src/video.ts` | `.cn` relay in docs | operator-configured relay |
+
+No blind global replacement was used. Each change is at the layer that owns the default.
+
+### Emptied defaults audited for unsafe use
+
+Per the known failure modes, every consumer of a newly emptied default was checked:
+
+- **Android `call()`** still calls `requireBaseUrl(context)` *before* building the URL, so an empty relay raises `IllegalStateException("Relay server not configured: ...")` instead of OkHttp's `IllegalArgumentException`, and before any network I/O.
+- **Android `DataControlsScreen`** privacy row is inert and dimmed when the URL is blank — it cannot "succeed" with an empty string.
+- **iOS privacy URL** is *not* force-unwrapped from an empty string (that would trap at launch). `NanoMuseActionRow` requires a non-optional `URL`, so it points at the fork's real tracked privacy doc instead.
+- **`update.py`** consults the mirror only inside `if INDEX_URL:`, and `INDEX_URL` is empty unless an operator sets it. `latest_from_index` remains reachable on that path, so no dead code.
+
+## Backend scan (evidence of record)
+
+```
+$ git grep -l 'nanomuse\.cn' -- . \
+  ':(exclude)CHANGELOG.md' ':(exclude)docs/releases/**' ':(exclude)cloud/deploy/**' \
+  ':(exclude)demo/**' ':(exclude)docs/privacy.md' ':(exclude)docs/roadmap.md' \
+  ':(exclude)docs/readme/**' ':(exclude)site/README.md' \
+  ':(exclude)docs/release-notes-template.md' ':(exclude)nanomuse/server/static/**' \
+  ':(exclude)AGENTS.md' ':(exclude)maintenance-evidence/**'
+tests/test_fork_relay_defaults.py
+tests/test_nudges_runtime.py
+```
+
+Only the two regression tests that **assert absence** remain. Historical and
+attribution references are preserved unchanged: `CHANGELOG.md`, `docs/releases/**`,
+`docs/readme/**`, `cloud/deploy/nanomuse-hk/**`, `demo/**`, `docs/privacy.md`,
+`docs/roadmap.md`, `site/README.md`, `docs/release-notes-template.md`.
+
+The generated bundle `nanomuse/server/static/**` was taken from upstream and
+**regenerated** with the repository's own generator (`web`: `tsc --noEmit && vite build`,
+Node v22.23.3), never hand-edited. It contains no `.cn` and no conflict markers.
+
+## Validation actually run on `3e28be36a0`
+
+| Check | Command | Result |
+|---|---|---|
+| Fork relay defaults | `pytest tests/test_fork_relay_defaults.py` | **pass** |
+| New 0.1.37 sanitization | `pytest tests/test_fork_upstream_037_sanitization.py` | **pass** (24 with the above) |
+| Runtime suite | `pytest tests/ -q` (runbook's ignores + `test_computer_operator.py`) | **462 passed, 4 skipped, 11 failed** |
+| Cloud relay | `(cd cloud && pytest tests -q)` | **91 passed** |
+| Showcase gateway | `(cd demo/showcase/gateway && pytest tests -q)` | **40 passed** |
+| Ruff lint | `ruff check nanomuse tests scripts demo cloud` | **All checks passed** |
+| Ruff format | `ruff format --check nanomuse tests scripts` | **203 files already formatted** |
+| mypy | `.venv-ci/bin/python -m mypy` (pinned py3.12) | **Success: no issues found in 128 source files** |
+| Web | `npm run check` (eslint + tsc + vitest) | **pass**, tsc clean, **51 tests passed** |
+| Web bundle | `npm run build` (Node 22) | **pass**, regenerated |
+| Harness types | `tsc -p tsconfig.json` | **pass** |
+| Harness tests | `node --test tests/*.test.mjs` (after `node build.mjs`) | **132 passed** |
+| Byte-compile | `python -m compileall` | **pass** |
+| In-session invariant checks | 68 assertions over sanitization, wiring, sizes, secrets, tags | **68 pass, 0 fail** |
+
+`tests/test_computer_operator.py` is ignored alongside the runbook's six because it
+does `from tests.test_computer import FakeHands` and `tests/` has no `__init__.py`;
+this collection error is present on pristine `upstream/main` too.
+
+### The 11 failures are pre-existing, not a regression
+
+Verified by cloning pristine checkouts to `/tmp` and running the identical command:
+
+| Checkout | Failures |
+|---|---|
+| `fork/main` `9ad7efcedd` | **0** |
+| `upstream/main` `10a699280e` | **11** |
+| this merge `3e28be36a0` | **11** — the *same 11*, identical node ids |
+
+```
+tests/test_attachments.py::test_pdf_read_as_text
+tests/test_channels_api.py::test_feishu_login_endpoints
+tests/test_config.py::test_defaults_without_file
+tests/test_config.py::test_env_expansion_and_overrides
+tests/test_memory_goals.py::test_goal_check_ins
+tests/test_server.py::test_cards_and_background_results_reach_the_phone
+tests/test_server.py::test_push_keys_subscriptions_and_gone_endpoints
+tests/test_server.py::test_reminders_fire_in_their_chat_and_are_pushed_once
+tests/test_server.py::test_triggers_start_work_from_mail_events_and_webhooks
+tests/test_skills.py::test_load_skill_checks_the_folder
+tests/test_tools.py::test_host_and_markdown
+```
+
+No failure is unique to this merge, so no regression was introduced.
+
+## Credential handling
+
+No signing key, keystore, password file or secret is committed. `android/nanomuse-release.jks`,
+`android/keystore.properties` and `android/SIGNING-PASSWORDS.md` remain git-ignored and absent
+from the commit; build outputs (`node_modules`, `harness/dsh-nanomuse/lib`) are not committed.
+`.venv-ci/` was added to `.gitignore` because the pinned mypy interpreter must never be committed.
+
+## Release provenance
+
+Existing fork tags were verified to sit on the sanitized fork commit `34aebbb9f476`, never on a
+raw upstream commit. No fork tag targets upstream's `48fd40d896` (v0.1.35), `74329deb6e`
+(v0.1.36) or `10a699280e` (v0.1.37). New fork releases for 0.1.35-0.1.37 will be tagged on the
+sanitized commit produced by this PR.
+
+## Review — independent adversarial review, findings fixed
+
+A **separate fresh-context reviewer** audited the diff and reported
+**mergeable after fixes**. All confirmed findings are fixed below.
+
+### MAJOR 1 — the emptied mirror index was still fetched unconditionally
+
+`UpdateCheck.kt` did `get(INDEX_URL)` with `INDEX_URL` empty. OkHttp's
+`Request.Builder().url("")` throws `IllegalArgumentException`; it is caught, so
+the app never crashed, but **every** update check performed a guaranteed-to-fail
+request and logged a misleading failure before falling through to GitHub. The
+sibling surfaces already guarded (`update.py` `if INDEX_URL:`, `desk.ts`
+`if (!mirrorIndex)`); Android and iOS were the only ones that did not. Both now
+guard (`if (INDEX_URL.isNotBlank())` / `if !indexURL.isEmpty`).
+
+### MAJOR 2 — the mobile version lookup still read upstream's releases
+
+Android and iOS pointed `DOWNLOAD_URL` at the fork but the *version lookup* at
+`nano-muse/nanoMuse`, so the Version row could offer an upstream build. Both now
+read `zeeshanhaque21/nanoMuse`, matching the runtime's `FORK_REPO`.
+
+A follow-up scan of the **built dex** — not the source, which is what let this
+hide — found a **third** updater, `com/openminis/app/data/UpdateChecker.kt`,
+still polling upstream. That one predates this merge, but leaving it would have
+kept the defect alive on one surface, so it is repointed too. The regression test
+now walks the entire Android and iOS source trees instead of listing files, so a
+fourth updater cannot slip in behind named checks.
+
+### Documentation corrections the review caught
+
+- The scan remainder is **four** files, not two: three absence-asserting tests plus
+  `README.md`, whose 5 `.cn` references are pre-existing release-history prose with
+  an identical count on `fork/main`.
+- A quoted PR head SHA was stale; the authoritative head is the branch tip.
+
+### A reviewer count I checked and did not "correct"
+
+The review reported the pre-existing failure count as 10 against my 11. Re-running
+the identical command shows **11**, and the reviewer's own enumerated list contains
+11 entries - a miscount of their list, not a correction. The sets are byte-identical
+either way, so the no-regression conclusion stands.
+
+### A CI failure I caused, and fixed
+
+CI's `Ruff lint` failed on `UP020` (my new test used `io.open`). CI's ruff is newer
+than this machine's, so the local run passed while CI failed - the reason to run the
+repository's own gate. Fixed, then re-verified with CI's exact interpreter
+(`.venv-ci`, py3.12): ruff check + format + mypy all clean.
+
+### CI status on the tested head
+
+**15 checks, all pass, 0 failures** - including `Ruff lint`, `Ruff format`,
+`Mypy`, `Tests`, `web app build`, `debug APK`, `docker build`, and the matrix on
+ubuntu py3.11/3.12/3.13, macOS and Windows.
+
+## Fork-only features preserved
+
+Google Calendar, vault-backed MCP headers, configurable relay hosting, signed-out relay
+editing, and bundled desktop Playwright/Chromium are untouched by this merge. The relay
+override `https://jetson-orin-nano.time-mora.ts.net` is untouched and was not contacted.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)

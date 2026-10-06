@@ -91,6 +91,72 @@ you, on the phone ──"编译一下项目，把日志发我"──▶ phone's 
 - Files and screenshots travel base64 in the frames; the size limits are the
   hub's.
 
+## The same conversations everywhere
+
+Since 0.1.36 the chats themselves follow the account. Signed in, each device
+sends the text of its turns to the relay's sync store
+([cloud.md](cloud.md#conversation-sync)) and pulls what the others sent — at
+launch, when the hub says `sync`, and once a minute — so a chat begun on the
+phone in the morning is on the computer at the desk, and continuing it there
+runs the turn on *that* device with the synced transcript as its history; what
+it answers goes back the same way. Chats addressed to a device, or run on this
+device for another, stay where they are. Rename or delete a chat anywhere and
+it is renamed or deleted everywhere. Text only: files and images stay on the
+device they were made on, and a synced message shows their names and sizes.
+
+Since 0.1.37 it is **one thread**. The main chat is one conversation across
+all devices: what you say to the muse on the phone is in the main chat on the
+computer and in the web app, in time order among what was said there, as a
+read-only bubble with *From Pixel 8* (来自 Pixel 8) under it — and the muse,
+wherever it answers next, has read it. A side chat from another device is a
+chat on this one from the moment it is pulled, with its title, and continues
+here under the same conversation; nothing in the chat list says where a chat
+was written, the bubbles do. The person's message is on the other devices as
+soon as it is sent, the reply when the turn ends; signing in sends the device's
+whole history, oldest first. Rename the muse anywhere — the first
+conversation's naming included — and the name follows on the next pull.
+
+The switch is *Settings → Data controls → Sync conversations between my
+devices*, on by default; off tells the relay to delete the account's store, and
+every other device's switch follows. *Delete synced conversations* empties the
+store and keeps the switch. The phone and the web app map each local chat to a
+conversation id and apply the other devices' changes straight into their chat
+lists. **nanoMuse Desktop (the dsh plugin)** keeps another device's turns in
+its own store (`$DSH_HOME/nanomuse/sync-remote.json`, by session — a dsh session
+log is append-only and owned by its agent loop, and a row written into it
+outside a turn is neither shown nor safe), shows them in the browser as the
+other device's bubbles (`client/RemoteBubbles.ts`), placed by time among the
+turns typed here, and hands the model what arrived as one note before its next
+step (`agent.inject`; the note is context, never a row, never pushed back). A side
+conversation pulled from the relay gets its dsh session at once (listed in
+*Side chats* though no turn ran here yet); the main chat is the session the
+account's main conversation lives in, and the first conversation starts in it
+when the account already has one. The harness has no delete and a log forgets
+nothing: a message deleted elsewhere is hidden here, a chat deleted elsewhere
+is archived here. Code: the runtime's [`nanomuse/sync/`](../nanomuse/sync/)
+(`ConversationSync`, `/api/sync/*` in [app.md](app.md#api)), the web app's
+`SyncControls` and the message captions in `web/src/`, the plugin's
+`src/sync.ts`, `client/RemoteBubbles.ts` and `tests/sync.test.mjs`, the relay's
+[`cloud/nanomuse_cloud/sync.py`](../cloud/nanomuse_cloud/sync.py).
+
+**Work on another device.** The default is always the device you are typing
+on. To send one message elsewhere, start it with `@` and the device's name as
+the hub lists it — `@Desk compile the project and send me the log` — a prefix
+match, case-insensitive; the composer offers the names as you type, the mention
+is taken off the text, the bubble says *to Desk*, and a one-line note in front
+of the turn tells this device's agent to hand it to that device with `delegate`
+(`nanomuse-pc task … --on` on the phone) and report what it did; the Devices
+page's *Ask this device* does the same. On the iPhone, which has no delegate
+tool, the mention goes to the hub directly — `task` to that device, its answer
+shown as a turn in the chat — and only devices that are online are matched.
+Which devices can be a target: **computers** — nanoMuse Desktop, a runtime —
+whenever they are online, since their hub socket stays up; **phones** — Android
+and the iPhone — only while the nanoMuse app is open, because the socket lives
+in the app and neither keeps it in the background. A device that is not online
+is offered as a target all the same on the web and the desktop and answers
+`device_offline`; the web console is never one. The session a device runs for
+another is kept on that device and is not synced.
+
 ## The computer: nanoMuse Desktop
 
 The desktop is the Python runtime (`nanomuse serve`) with three front doors on
@@ -193,7 +259,11 @@ mouse stays yours*, the desktop stage draws the cursor where the click lands
 (the hands' events carry `x`/`y` in screen pixels), and the approval cards
 name the application. A window that cannot be found, captured (no Screen
 Recording — the capture comes back empty) or driven drops back to the whole
-screen with a note in the observation; nothing stops. Linux and Windows stay
+screen with a note in the observation; nothing stops. When the Quartz layer
+itself fails (pyobjc, the window server) *Auto* parks the hands on the whole
+screen for the rest of that target, says so once, and tries the window again
+when the next application is named; *One window* keeps trying, as asked —
+the Hands card's *Where* line shows the reason either way. Linux and Windows stay
 on the shared screen; `pip install "nanomuse[hands]"` brings the pyobjc
 frameworks on macOS only.
 
@@ -208,7 +278,7 @@ phone's screen only), the desk's Hands events shown while it works, a
 
 ## The browser: a demo on a simulated phone
 
-Upstream's hosted demo (`nanomuse.cn/web`) leads to the showcase: a simulated
+Upstream's hosted demo (not used by this fork) leads to the showcase: a simulated
 phone in the browser (MobileGym, with the nanoMuse app brought to the front —
 `demo/mobilegym/apps/nanoMuse`) and, behind it, a private nanoMuse of the
 visitor's own that the showcase gateway starts for the visit — the
