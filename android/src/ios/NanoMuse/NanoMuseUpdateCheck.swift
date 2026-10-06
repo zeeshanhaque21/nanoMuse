@@ -20,8 +20,10 @@ final class NanoMuseUpdateCheck: ObservableObject {
     /// Fork: no default mirror. Empty means only GitHub is asked; no third-party host
     /// is contacted and there is no fallback to one.
     nonisolated static let indexURL = ""
-    nonisolated static let githubURL = "https://api.github.com/repos/nano-muse/nanoMuse/releases/latest"
-    nonisolated static let fallbackReleasePage = "https://github.com/nano-muse/nanoMuse/releases/latest"
+        /// Fork: this fork's own releases, matching the runtime (FORK_REPO in
+    /// nanomuse/server/update.py) - the version row must not report upstream's latest.
+    nonisolated static let githubURL = "https://api.github.com/repos/zeeshanhaque21/nanoMuse/releases/latest"
+        nonisolated static let fallbackReleasePage = "https://github.com/zeeshanhaque21/nanoMuse/releases/latest"
 
     private enum Keys {
         static let latest = "nm.update.latest"
@@ -117,7 +119,9 @@ final class NanoMuseUpdateCheck: ObservableObject {
 
     /// The download index first, GitHub second. Nil when neither answered usefully.
     private static func fetchLatest() async -> Found? {
-        if let json = await fetchJSON(indexURL) {
+        // Only ask the mirror when one is configured: indexURL is empty by default, and
+        // an empty URL is a pointless round trip on every check.
+        if !indexURL.isEmpty, let json = await fetchJSON(indexURL) {
             // {"ios": {"version": "1.4.0", "url": "…"}, "latest": "1.4.0", "page": "…"}
             let ios = json["ios"] as? [String: Any]
             let version = (ios?["version"] as? String) ?? (json["latest"] as? String) ?? (json["version"] as? String)

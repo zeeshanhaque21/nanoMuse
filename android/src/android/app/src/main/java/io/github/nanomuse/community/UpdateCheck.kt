@@ -36,7 +36,10 @@ object UpdateCheck {
     /** Fork: no default mirror. Empty means only GitHub is asked; no third-party host
      * is contacted and there is no fallback to one. */
     const val INDEX_URL = ""
-    const val GITHUB_LATEST_URL = "https://api.github.com/repos/nano-muse/nanoMuse/releases/latest"
+    /** Fork: this fork's own releases, matching DOWNLOAD_URL above and the runtime
+     * (`FORK_REPO` in nanomuse/server/update.py) — the version row must not report
+     * upstream's latest while its download button points at the fork. */
+    const val GITHUB_LATEST_URL = "https://api.github.com/repos/zeeshanhaque21/nanoMuse/releases/latest"
 
     /** A check is repeated at most this often on its own. */
     const val FRESH_MS = 24L * 60 * 60 * 1000
@@ -114,7 +117,11 @@ object UpdateCheck {
 
     /** This fork's GitHub releases, then a configured mirror; null when neither answered. */
     internal fun fetchLatest(): String? {
-        get(INDEX_URL)?.let { parseIndex(it) }?.let { return it }
+        // Only ask the mirror when one is configured: INDEX_URL is empty by default, and
+        // an empty URL would be a guaranteed-to-fail request on every check.
+        if (INDEX_URL.isNotBlank()) {
+            get(INDEX_URL)?.let { parseIndex(it) }?.let { return it }
+        }
         return get(GITHUB_LATEST_URL)?.let { parseGitHubLatest(it) }
     }
 

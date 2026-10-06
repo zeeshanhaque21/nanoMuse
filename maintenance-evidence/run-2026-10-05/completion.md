@@ -47,7 +47,19 @@ tests/test_fork_relay_defaults.py
 tests/test_nudges_runtime.py
 ```
 
-Only the two regression tests that **assert absence** remain.
+The remainder is **four** files, not two:
+
+```
+README.md
+tests/test_fork_relay_defaults.py
+tests/test_fork_upstream_037_sanitization.py
+tests/test_nudges_runtime.py
+```
+
+All three tests assert **absence**. `README.md` is pre-existing release-history prose: it
+carries 5 `nanomuse.cn` references, the identical count on `fork/main` before this merge
+(verified `git show 9ad7efcedd:README.md | grep -c 'nanomuse\.cn'` -> 5), and none is an
+active default. Corrected from an earlier "only the two tests" claim in this report.
 
 ### The scan-limited-to-conflicts trap
 
@@ -232,8 +244,8 @@ AGENTS.md has been corrected in both places so the next run does not repeat this
 | `ac1a8ba3b3` | correct the false "never compiled" claim in this report |
 | `968b05c108` | correct the stale AGENTS.md line (subject scoped `docs(runbook):` after CI rejected `docs(AGENTS):` - the Commits regex requires a lowercase scope) |
 
-PR #11 head is now **`968b05c108225bafb32355b068f4e6c5cde77c10`**, and **all 14 CI checks
-pass with 0 failures** on it.
+PR #11 head moved past this line as further fixes landed; the authoritative head is the
+current `sync/upstream-0.1.37-sanitize` tip, not a SHA quoted in this document.
 
 Two CI failures were hit and fixed honestly rather than bypassed:
 1. `web app build` / "Built app is committed" - the committed bundle predated the last source

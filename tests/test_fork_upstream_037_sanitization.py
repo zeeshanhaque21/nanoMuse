@@ -13,6 +13,7 @@ with the fork, so it auto-merged in. Each surface below was checked at its ownin
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -112,3 +113,47 @@ def test_cloud_sync_default_survives_the_merge() -> None:
     assert CloudSettings().required is False
     assert CloudSettings().base_url == ""
     assert CloudSettings().sync is True
+
+
+def test_android_update_check_guards_the_empty_mirror_url() -> None:
+    """Regression: INDEX_URL is "" by default, so it must be guarded, not fetched.
+
+    An unguarded get("") reaches OkHttp's Request.Builder().url(""), which throws
+    IllegalArgumentException. It is caught, so the app does not crash, but every check
+    would perform a guaranteed-to-fail request and log a misleading failure before
+    falling through to GitHub. The sibling surfaces (update.py `if INDEX_URL:`,
+    desk.ts `if (!mirrorIndex)`) both guard; Android was the only one that did not.
+    """
+    text = _read(
+        "android/src/android/app/src/main/java/io/github/nanomuse/community/UpdateCheck.kt"
+    )
+    assert "INDEX_URL.isNotBlank()" in text, "Android must not fetch an empty mirror URL"
+    # and it must actually guard the call site, not merely mention the constant
+    assert "get(INDEX_URL)" in text
+    guarded = re.search(r"if \(INDEX_URL\.isNotBlank\(\)\) \{\s*get\(INDEX_URL\)", text)
+    assert guarded, "the get(INDEX_URL) call must sit inside the blank check"
+
+
+def test_ios_update_check_guards_the_empty_mirror_url() -> None:
+    """Same guard on the iOS side: never fetchJSON("") when no mirror is configured."""
+    text = _read("android/src/ios/NanoMuse/NanoMuseUpdateCheck.swift")
+    assert "!indexURL.isEmpty" in text
+    assert re.search(r"if !indexURL\.isEmpty, let json = await fetchJSON\(indexURL\)", text)
+
+
+def test_mobile_update_checks_read_the_fork_releases_not_upstreams() -> None:
+    """The version row and its download link must agree.
+
+    The runtime (FORK_REPO) and the harness (RELEASES_REPO) point at the fork, and the
+    download links do too. If the version lookup still read upstream's releases, the app
+    would report upstream's latest version while its download button went to the fork.
+    """
+    android = _read(
+        "android/src/android/app/src/main/java/io/github/nanomuse/community/UpdateCheck.kt"
+    )
+    ios = _read("android/src/ios/NanoMuse/NanoMuseUpdateCheck.swift")
+    for name, text in (("android", android), ("ios", ios)):
+        assert "nano-muse/nanoMuse" not in text, f"{name} still reads upstream releases"
+        assert "api.github.com/repos/zeeshanhaque21/nanoMuse" in text, f"{name} must read the fork"
+    # the iOS fallback page must be the fork's releases too
+    assert "fallbackReleasePage" in ios and "github.com/zeeshanhaque21/nanoMuse" in ios
