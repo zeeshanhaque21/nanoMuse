@@ -463,8 +463,10 @@ def test_goal_store_upgrades_an_old_database(tmp_path: Path):
     store.close()
 
 
-def test_check_in_lands_on_the_local_clock_across_dst():
-    """A daily 09:00 check-in lands on 09:00 local time after a DST change, on every platform."""
+def test_check_in_lands_on_nine_local_the_day_after_a_dst_change():
+    """A daily 09:00 check-in computed for the day after 2026-03-08 is 09:00 in the process's
+    local zone. In a zone without DST (UTC, or a CI runner's default zone) this does not
+    exercise a DST transition; the forced-zone test below does wherever time.tzset exists."""
     from nanomuse.goals.store import next_check_in
 
     after = datetime(2026, 3, 7, 12, 0).astimezone()
