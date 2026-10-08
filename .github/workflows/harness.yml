@@ -72,7 +72,7 @@ jobs:
       - name: Pack
         working-directory: harness/dsh-nanomuse
         env:
-          TAG: ${{ inputs.release_tag || (startsWith(github.ref, 'refs/tags/v') && github.ref_name) || '' }}
+          TAG: ${{ !contains(inputs.release_tag || github.ref_name, '-fork.') && (inputs.release_tag || (startsWith(github.ref, 'refs/tags/v') && github.ref_name)) || '' }}
         run: |
           VERSION=$(node -p "require('./package.json').version")
           if [ -n "$TAG" ] && [ "v$VERSION" != "$TAG" ]; then
@@ -97,7 +97,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
+    if: (startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != '') && !contains(inputs.release_tag || github.ref_name, '-fork.')
     needs: bundle
     runs-on: ubuntu-latest
     permissions:
