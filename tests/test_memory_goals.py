@@ -463,8 +463,17 @@ def test_goal_store_upgrades_an_old_database(tmp_path: Path):
     store.close()
 
 
-def test_check_in_keeps_its_wall_clock_across_dst(monkeypatch: pytest.MonkeyPatch):
-    """A daily 09:00 check-in stays at 09:00 on the far side of the spring-forward change."""
+def test_check_in_lands_on_the_local_clock_across_dst():
+    """A daily 09:00 check-in lands on 09:00 local time after a DST change, on every platform."""
+    from nanomuse.goals.store import next_check_in
+
+    after = datetime(2026, 3, 7, 12, 0).astimezone()
+    assert next_check_in("daily 09:00", after) == datetime(2026, 3, 8, 9, 0).astimezone()
+
+
+@pytest.mark.skipif(not hasattr(time, "tzset"), reason="forcing a zone needs time.tzset (POSIX)")
+def test_check_in_keeps_its_wall_clock_across_dst_in_a_dst_zone(monkeypatch: pytest.MonkeyPatch):
+    """Forced into a zone with DST: the check-in keeps 09:00, not the PST offset of its input."""
     from nanomuse.goals.store import next_check_in
 
     monkeypatch.setenv("TZ", "America/Los_Angeles")
