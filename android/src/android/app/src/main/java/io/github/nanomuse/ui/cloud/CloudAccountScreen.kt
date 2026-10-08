@@ -34,6 +34,7 @@ import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
+import io.github.nanomuse.ui.muse.setPlainText
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.PersonAdd
 import androidx.compose.material.icons.outlined.Share
@@ -50,6 +51,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -78,6 +80,7 @@ import com.openminis.app.R
 import com.openminis.app.ui.components.openExternalUrl
 import io.github.nanomuse.cloud.AllowanceSignal
 import io.github.nanomuse.cloud.NanoMuseCloud
+import io.github.nanomuse.cloud.RelayAddress
 import io.github.nanomuse.sysfiles.SystemFiles
 import io.github.nanomuse.ui.home.MuseTones
 import io.github.nanomuse.ui.muse.MuseCard
@@ -118,6 +121,9 @@ fun CloudAccountScreen(
     var showToday by remember { mutableStateOf(true) }
     var passwordDialog by remember { mutableStateOf(false) }
     var confirm by remember { mutableStateOf<Confirm?>(null) }
+    var changeServer by remember { mutableStateOf(false) }
+    // the sign-out sheet's question, off every time it opens (contract C12)
+    var keep by remember(confirm, changeServer) { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
@@ -180,9 +186,24 @@ fun CloudAccountScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 4.dp),
                         )
+                        if (NanoMuseCloud.signInEnded(context)) {
+                            // the relay refused the key; the account's data waits for its return (contract C12)
+                            Text(
+                                stringResource(R.string.nm_cloud_sign_in_ended),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.padding(top = 8.dp),
+                            )
+                        }
                     }
                     MuseRowDivider(inset = 16.dp)
                     MuseRow(title = stringResource(R.string.nm_cloud_sign_in), onClick = onSignIn, titleColor = MuseTones.action)
+                    val base = NanoMuseCloud.baseUrl(context)
+                    if (!RelayAddress.isDefault(base)) {
+                        // pointed at someone's own relay: say which, so a sign-in that fails is understood
+                        MuseRowDivider(inset = 16.dp)
+                        MuseRow(title = stringResource(R.string.nm_cloud_server_row), value = RelayAddress.display(base), chevron = false, onClick = onSignIn)
+                    }
                 }
             } else {
                 val a = account
@@ -234,6 +255,20 @@ fun CloudAccountScreen(
                         chevron = false,
                         onClick = { refresh() },
                     )
+                    MuseRowDivider()
+                    // the relay the key belongs to (0.1.38: people who run their own); changing it means signing out first
+                    MuseRow(
+                        title = stringResource(R.string.nm_cloud_server_row),
+                        icon = Icons.Outlined.Storage,
+                        value = RelayAddress.display(NanoMuseCloud.baseUrl(context)),
+                        chevron = false,
+                        trailing = {
+                            TextButton(onClick = { changeServer = true }) {
+                                Text(stringResource(R.string.nm_cloud_server_change), color = MuseTones.action, fontSize = 13.sp)
+                            }
+                        },
+                        onClick = { changeServer = true },
+                    )
                     if (a?.accountId?.isNotEmpty() == true) {
                         Text(
                             text = stringResource(R.string.nm_cloud_account_id, a.accountId.take(8)),
@@ -259,7 +294,7 @@ fun CloudAccountScreen(
                     LaunchedEffect(Unit) { io.github.nanomuse.community.StarPrompt.markShown(context, io.github.nanomuse.community.StarPrompt.Moment.SIGNED_IN) }
                     MuseGap()
                     io.github.nanomuse.community.StarNudgeCard(
-                        text = stringResource(R.string.nm_star_signed_in),
+                        text = remember { io.github.nanomuse.community.StarPrompt.text(context, io.github.nanomuse.community.StarPrompt.Ask(io.github.nanomuse.community.StarPrompt.Moment.SIGNED_IN)) },
                         modifier = Modifier.padding(horizontal = 16.dp),
                         onDone = { starAsk = false },
                     )
@@ -475,6 +510,7 @@ fun CloudAccountScreen(
                             inviteBonusCny = a.inviteBonusCny,
                             inviteeBonusCny = a.inviteeBonusCny,
                             ownKeyDocs = a.ownKeyDocs,
+                            guidance = NanoMuseCloud.guidance(context), // the relay's list for the region first (contract C11)
                         ),
                         exhausted = a.exhausted,
                         modifier = Modifier.padding(horizontal = 16.dp),
@@ -667,15 +703,19 @@ fun CloudAccountScreen(
                 )
             },
             text = {
-                Text(
-                    stringResource(
-                        when (which) {
-                            Confirm.SIGN_OUT -> R.string.nm_cloud_sign_out_confirm
-                            Confirm.SIGN_OUT_ALL -> R.string.nm_cloud_sign_out_everywhere_confirm
-                            Confirm.DELETE -> R.string.nm_cloud_delete_account_confirm
-                        },
-                    ),
-                )
+                Column {
+                    Text(
+                        stringResource(
+                            when (which) {
+                                Confirm.SIGN_OUT -> R.string.nm_cloud_sign_out_confirm
+                                Confirm.SIGN_OUT_ALL -> R.string.nm_cloud_sign_out_everywhere_confirm
+                                Confirm.DELETE -> R.string.nm_cloud_delete_account_confirm
+                            },
+                        ),
+                    )
+                    // contract C12: a sign-out takes the account's data off the phone unless asked not to
+                    if (which != Confirm.DELETE) KeepChatsRow(keep) { keep = it }
+                }
             },
             confirmButton = {
                 TextButton(
@@ -685,8 +725,8 @@ fun CloudAccountScreen(
                         scope.launch {
                             try {
                                 when (which) {
-                                    Confirm.SIGN_OUT -> { NanoMuseCloud.signOut(context); leave() }
-                                    Confirm.SIGN_OUT_ALL -> { NanoMuseCloud.signOutEverywhere(context, includingThis = true); leave() }
+                                    Confirm.SIGN_OUT -> { NanoMuseCloud.signOut(context, keep); leave() }
+                                    Confirm.SIGN_OUT_ALL -> { NanoMuseCloud.signOutEverywhere(context, includingThis = true, keep = keep); leave() }
                                     Confirm.DELETE -> { NanoMuseCloud.deleteAccount(context); leave() }
                                 }
                             } catch (e: Exception) {
@@ -709,6 +749,43 @@ fun CloudAccountScreen(
         )
     }
 
+    if (changeServer) {
+        // the key belongs to one relay: out of this one first, then the sign-in screen with its server form
+        AlertDialog(
+            onDismissRequest = { changeServer = false },
+            title = { Text(stringResource(R.string.nm_cloud_server_change)) },
+            text = {
+                Column {
+                    Text(stringResource(R.string.nm_cloud_server_change_confirm))
+                    KeepChatsRow(keep) { keep = it } // a sign-out like any other (C12)
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !busy,
+                    onClick = {
+                        busy = true
+                        scope.launch {
+                            try {
+                                NanoMuseCloud.signOut(context, keep)
+                                leave()
+                                changeServer = false
+                                onSignIn()
+                            } catch (e: Exception) {
+                                error = NanoMuseCloud.describe(context, e)
+                                changeServer = false
+                            }
+                            busy = false
+                        }
+                    },
+                ) { Text(stringResource(R.string.nm_cloud_sign_out)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { changeServer = false }) { Text(stringResource(R.string.cancel)) }
+            },
+        )
+    }
+
     if (passwordDialog) {
         PasswordDialog(
             hasPassword = account?.hasPassword == true,
@@ -724,6 +801,30 @@ fun CloudAccountScreen(
 }
 
 private enum class Confirm { SIGN_OUT, SIGN_OUT_ALL, DELETE }
+
+/**
+ * *Keep this account's chats on this device* — the one question a sign-out asks (contract C12).
+ * Off by default: the account's chats, memory, feed, goals and face leave the phone with it.
+ */
+@Composable
+private fun KeepChatsRow(keep: Boolean, onChange: (Boolean) -> Unit) {
+    Spacer(Modifier.height(16.dp))
+    Row(
+        Modifier.fillMaxWidth().clickable { onChange(!keep) },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(stringResource(R.string.nm_cloud_keep_chats), style = MaterialTheme.typography.bodyMedium)
+            Text(
+                stringResource(R.string.nm_cloud_keep_chats_sub),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Switch(checked = keep, onCheckedChange = onChange)
+    }
+}
 
 /** Set, change or remove the password; the relay decides whether the current one is needed. */
 @Composable
@@ -946,7 +1047,7 @@ internal fun money(v: Double): String = when {
 @Composable
 private fun InviteCard(a: NanoMuseCloud.Account) {
     val context = LocalContext.current
-    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    val clipboard = androidx.compose.ui.platform.LocalClipboard.current
     var copied by remember { mutableStateOf(false) }
     LaunchedEffect(copied) { if (copied) { kotlinx.coroutines.delay(1500); copied = false } }
     val link = a.inviteUrl.ifBlank { "" }
@@ -963,7 +1064,7 @@ private fun InviteCard(a: NanoMuseCloud.Account) {
                     Text(stringResource(R.string.nm_cloud_invite_code), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(a.inviteCode, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, letterSpacing = 2.sp)
                 }
-                TextButton(onClick = { clipboard.setText(androidx.compose.ui.text.AnnotatedString(a.inviteCode)); copied = true }) {
+                TextButton(onClick = { clipboard.setPlainText("nanoMuse", a.inviteCode); copied = true }) {
                     Icon(Icons.Outlined.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
                     Text(stringResource(if (copied) R.string.nm_cloud_invite_copied else R.string.nm_cloud_invite_copy))
@@ -1041,12 +1142,12 @@ fun CommunityNoticeCard(inset: Dp = 16.dp) {
             )
             Spacer(Modifier.height(6.dp))
             Row {
-                TextButton(onClick = { openExternalUrl(context, "https://github.com/nano-muse/nanoMuse") }, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp)) {
+                TextButton(onClick = { openExternalUrl(context, "https://github.com/zeeshanhaque21/nanoMuse") }, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp)) {
                     Icon(Icons.Outlined.Code, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
                     Text(stringResource(R.string.nm_notice_github))
                 }
-                TextButton(onClick = { openExternalUrl(context, "https://github.com/nano-muse/nanoMuse/issues/new/choose") }, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp)) {
+                TextButton(onClick = { openExternalUrl(context, "https://github.com/zeeshanhaque21/nanoMuse/issues/new/choose") }, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp)) {
                     Icon(Icons.Outlined.BugReport, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
                     Text(stringResource(R.string.nm_notice_issue))

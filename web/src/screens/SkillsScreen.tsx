@@ -2,6 +2,7 @@ import { ChevronRight, FileCode2, Link2, Loader2, Pencil, Play, Plus, Trash2, Wa
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { PageBar } from "../components/BackBar";
+import { LoadError } from "../components/LoadError";
 import { MuseRoundButton } from "../components/MuseHeader";
 import { Markdown } from "../components/Markdown";
 import { useT } from "../i18n";
@@ -11,7 +12,7 @@ import { cx, relativeTime } from "../util";
 
 const TEMPLATE = (name: string) => `---
 name: ${name}
-description: What this does, and when to use it — the model picks the skill from this line.
+description: What this does, and when to use it; the model picks the skill from this line.
 ---
 
 # ${name.replace(/-/g, " ").replace(/^./, (c) => c.toUpperCase())}
@@ -40,10 +41,18 @@ export function SkillsScreen() {
   const t = useT();
   const name = state.profile?.name ?? "nanoMuse";
   const [data, setData] = useState<SkillsData | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
 
-  const load = () => api.skills().then(setData).catch((e: Error) => toast(e.message));
+  const load = () =>
+    api
+      .skills()
+      .then((d) => {
+        setData(d);
+        setLoadError(null);
+      })
+      .catch((e: Error) => (data === null ? setLoadError(e.message) : toast(e.message)));
   useEffect(() => {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -81,7 +90,7 @@ export function SkillsScreen() {
     <div className="flex h-full flex-col">
       <PageBar
         title={t("Skills")}
-        description={t("How {name} does a job, written down once. Start one in chat with /name, or just ask — it picks the skill that fits.", { name })}
+        description={t("How {name} does a job, written down once. Start one in chat with /name, or just ask; it picks the skill that fits.", { name })}
         actions={
           <MuseRoundButton small onClick={() => setAdding(true)} label={t("New")}>
             <Plus size={20} />
@@ -90,7 +99,8 @@ export function SkillsScreen() {
       />
 
       <div className="flex-1 overflow-y-auto px-4 pb-6 space-y-5">
-        {data === null && (
+        {data === null && loadError && <LoadError message={loadError} onRetry={() => void load()} />}
+        {data === null && !loadError && (
           <div className="py-10 flex justify-center text-muted">
             <Loader2 className="animate-spin" size={20} />
           </div>
@@ -106,7 +116,7 @@ export function SkillsScreen() {
                   <Wand2 className="mx-auto text-accent" />
                   <div className="mt-2 font-semibold">{t("Nothing of your own yet")}</div>
                   <p className="mt-1 text-[13.5px] text-muted">
-                    {t("After a job went well, tell {name} “save this as a skill” — it writes the steps down and asks you first. Or write one here, or paste a link to a SKILL.md.", { name })}
+                    {t("After a job went well, tell {name} “save this as a skill”; it writes the steps down and asks you first. Or write one here, or paste a link to a SKILL.md.", { name })}
                   </p>
                   <button type="button" onClick={() => setAdding(true)} className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-[13.5px] font-semibold text-accent-fg">
                     <Plus size={15} /> {t("Write one")}
@@ -136,7 +146,7 @@ export function SkillsScreen() {
               </section>
             )}
             <p className="px-1 text-[12px] text-muted">
-              {t("Yours live in {dir}, one folder each with a SKILL.md — the Agent Skills format, so recipes written for other agents work here too.", { dir: data.dir })}
+              {t("Yours live in {dir}, one folder each with a SKILL.md, the Agent Skills format, so recipes written for other agents work here too.", { dir: data.dir })}
             </p>
           </>
         )}
@@ -174,7 +184,7 @@ function SkillList({ items, onOpen, onChange }: { items: SkillInfo[]; onOpen: (n
             type="button"
             role="switch"
             aria-checked={sk.enabled}
-            aria-label={t("On")}
+            aria-label={t("Use /{name}", { name: sk.name })}
             onClick={() => void toggle(sk, !sk.enabled)}
             className={cx("relative h-6 w-10 shrink-0 rounded-full transition", sk.enabled ? "bg-accent" : "bg-border")}
           >

@@ -8,7 +8,7 @@ import { asIdea, catalogue } from "../ideas";
 import { useStore } from "../store";
 import type { Idea, IdeasData } from "../types";
 import { relativeTime } from "../util";
-import { CATEGORIES } from "./GoalsScreen";
+import { CATEGORIES } from "../goals";
 
 /** The areas an idea can belong to, in the order they are listed; the emoji Muse puts in front of a row, and the label. */
 const AREAS: Array<{ id: string; label: string; emoji: string }> = [
@@ -63,7 +63,7 @@ export function IdeasScreen() {
   const [selected, setSelected] = useState<{ idea: Idea; emoji: string } | null>(null);
   const sendIdea = (idea: Idea) => {
     setSelected(null);
-    void send("main", idea.prompt);
+    send("main", idea.prompt).catch((e: Error) => toast(e.message || t("Could not send")));
     openThread("main");
   };
   // A routine idea becomes a daily reminder that runs the prompt (the phone's "Create routine").
@@ -72,7 +72,7 @@ export function IdeasScreen() {
     const time = idea.time && /^([01]\d|2[0-3]):[0-5]\d$/.test(idea.time) ? idea.time : "09:00";
     try {
       await api.createReminder({ text: idea.prompt, kind: "task", repeat: `daily ${time}` });
-      toast(t("Routine set — every day at {time}. It is listed under Goals.", { time }));
+      toast(t("Routine set: every day at {time}. It is listed under Goals.", { time }));
     } catch (e) {
       toast((e as Error).message);
     }
@@ -81,10 +81,10 @@ export function IdeasScreen() {
   const startGoal = (idea: Idea) => {
     setSelected(null);
     const category = CATEGORIES.find((c) => c.id === idea.category) ?? CATEGORIES[CATEGORIES.length - 1];
-    const opener = t("I'd like to create a {category} goal. Ask me a few short questions, one at a time — what exactly I want, why and by when, how often to check in — then create it with concrete steps using the goals tool.", {
+    const opener = t("I'd like to create a {category} goal. Ask me a few short questions, one at a time (what exactly I want, why and by when, how often to check in), then create it with concrete steps using the goals tool.", {
       category: t(category.label),
     });
-    void send("main", `${opener} ${idea.prompt}`);
+    send("main", `${opener} ${idea.prompt}`).catch((e: Error) => toast(e.message || t("Could not send")));
     openThread("main");
   };
   const kindOf = (idea: Idea) => (idea.kind === "routine" || idea.kind === "goal" ? idea.kind : "chat");
@@ -127,7 +127,7 @@ export function IdeasScreen() {
         ))}
         {data && (
           <div className="px-5 pt-4 text-[12.5px] text-muted">
-            {data.source === "model" ? t("Generated {when}", { when: relativeTime(data.generated_at) }) : t("Starter ideas — refresh once {name} knows you better.", { name })}
+            {data.source === "model" ? t("Generated {when}", { when: relativeTime(data.generated_at) }) : t("Starter ideas. Refresh once {name} knows you better.", { name })}
           </div>
         )}
       </div>

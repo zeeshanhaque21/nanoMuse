@@ -104,7 +104,7 @@ the rail, the pinned face, our Settings and first run, the harness's own pages u
 *Advanced*. `dsh` here is the command the desktop app installs (*Manage dsh Command…* in
 its menu) or any dsh of the same version with `DSH_HOME` pointing at the app's home;
 `dsh plugin --profile desktop remove dsh-nanomuse` takes it out again. Hands need the
-runtime on this computer too (`pipx install "git+https://github.com/nano-muse/nanoMuse"`,
+runtime on this computer too (`pipx install "git+https://github.com/zeeshanhaque21/nanoMuse"`,
 or `NANOMUSE_PY` pointing at it) — the preset starts `nanomuse mcp` for them. The app's
 name, icon and About are DeepSeek Harness's there; the app below is ours.
 
@@ -205,8 +205,8 @@ dsh-nanomuse/
     DevicesPanel.tsx    Settings → Devices and the rail's Devices page: this computer, the others, the switch
     Avatar.tsx          the face in five moods: dragon stills, emoji on a colour, drawn face from the host
     Onboarding.tsx      the first run, full-window: welcome → sign in → code → the permissions carousel → ready
-    SignIn.tsx          the two-step form (identifier → code), shared with Settings → Account
-    CloudSection.tsx    Settings → Account (the account, the look, the models, the relay, Open Devices) and Data controls
+    SignIn.tsx          the two-step form (identifier → code), shared with Settings → nanoMuse Cloud
+    CloudSection.tsx    Settings → nanoMuse Cloud (the account, the look, the models, the relay, Open Devices) and Data controls
     Capsule.tsx         the toasts (and the words for a Hands/Reach call, shared with the header)
     bridge.ts, prefs.ts the desktop shell's bridge (window.nanomuseHarness: permissions, links, keep awake, app behavior, bug report, quick chat) and the local preferences (Developer switch, keep awake, approvals)
     icons.tsx, keys.ts, bus.ts, panels.ts

@@ -27,6 +27,7 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from nanomuse.logger import logger
 from nanomuse.schema import RiskLevel
 
 DEFAULT_DATA_DIR = Path.home() / ".nanomuse"
@@ -34,8 +35,51 @@ _ENV_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
 
 
 # ----------------------------------------------------------------------------- models
+#: the wire protocols the runtime speaks, as ``provider`` values; besides these, ``provider``
+#: may name a catalogue entry (``nanomuse/llm/providers.json``: ``bailian``, ``openai``,
+#: ``openrouter``, …), which fills in the protocol and the endpoint, or ``chatgpt`` — the
+#: ChatGPT sign-in (``nanomuse chatgpt login``), which needs no key and no URL
+PROTOCOLS: tuple[str, ...] = ("openai", "openai_responses")
+CHATGPT_PROVIDER = "chatgpt"
+
+
+def check_provider(value: str) -> str:
+    from nanomuse.llm import catalogue
+
+    v = str(value or "").strip()
+    if not v:
+        return "openai"
+    if v in PROTOCOLS or v == CHATGPT_PROVIDER:
+        return v
+    entry = catalogue.load().get(v)
+    if entry is None:
+        choices = ", ".join((*PROTOCOLS, CHATGPT_PROVIDER, *catalogue.load().ids()))
+        raise ValueError(f"unknown provider {v!r}; one of: {choices}")
+    if catalogue.protocol_provider(entry.protocol) is None:
+        raise ValueError(
+            f"provider {v!r} speaks {entry.protocol}, which the runtime does not; "
+            "OpenRouter carries the same models in the OpenAI shape"
+        )
+    return v
+
+
+def resolve_provider(provider: str, base_url: str | None) -> tuple[str, str | None]:
+    """What a ``provider`` setting means on the wire: the protocol (``openai`` /
+    ``openai_responses`` / ``chatgpt``) and the base URL — the catalogue's when the slot
+    names an entry and leaves ``base_url`` empty."""
+    if provider in PROTOCOLS or provider == CHATGPT_PROVIDER:
+        return provider, base_url
+    from nanomuse.llm import catalogue
+
+    entry = catalogue.load().get(provider)
+    if entry is None:
+        return "openai", base_url
+    protocol = catalogue.protocol_provider(entry.protocol) or "openai"
+    return protocol, (base_url or entry.base_url or None)
+
+
 class LLMSettings(BaseModel):
-    provider: Literal["openai", "openai_responses"] = "openai"
+    provider: str = "openai"
     model: str = "deepseek-flash"
     base_url: str | None = "https://api.deepseek.com"
     api_key: str = ""
@@ -69,13 +113,92 @@ class LLMSettings(BaseModel):
     # lives when it is not at the chat model's host — a relaying host, such as the showcase
     # gateway, tells its runtimes this way. Empty: the chat host's root, on hosts that have it.
     video_base_url: str = ""
+    # An HTTP(S) or SOCKS proxy for this slot's requests only (`http://host:port`,
+    # `http://user:pass@host:port`, `socks5://host:port`), for a provider that this machine's
+    # network cannot reach directly. Empty: the environment's HTTPS_PROXY / NO_PROXY apply as
+    # usual. Honoured by the ChatGPT sign-in (`provider = "chatgpt"`): the Codex endpoint, the
+    # token refresh and the usage check all go through it; never nanoMuse Cloud.
+    proxy: str = ""
     extra_headers: dict[str, str] = Field(default_factory=dict)
     extra_body: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("provider")
+    @classmethod
+    def _known_provider(cls, v: str) -> str:
+        return check_provider(v)
 
     @field_validator("base_url")
     @classmethod
     def _strip_slash(cls, v: str | None) -> str | None:
         return v.rstrip("/") if v else v
+
+    @model_validator(mode="after")
+    def _provider_defaults(self) -> LLMSettings:
+        """The DeepSeek defaults for ``model`` and ``base_url`` belong to the plain
+        ``openai`` protocol; a slot that names the ChatGPT sign-in or a catalogue entry and
+        leaves them out gets that provider's own."""
+        if self.provider in PROTOCOLS:
+            return self
+        if "base_url" not in self.model_fields_set:
+            self.base_url = None
+        if "model" not in self.model_fields_set:
+            if self.provider == CHATGPT_PROVIDER:
+                self.model = ""
+            else:
+                from nanomuse.llm import catalogue
+
+                entry = catalogue.load().get(self.provider)
+                self.model = (entry.defaults.get("chat") if entry else "") or ""
+        return self
+
+    @property
+    def protocol(self) -> str:
+        """``openai`` / ``openai_responses`` / ``chatgpt`` — what ``provider`` speaks."""
+        return resolve_provider(self.provider, self.base_url)[0]
+
+    @property
+    def endpoint(self) -> str | None:
+        """``base_url``, or the catalogue entry's when ``provider`` names one."""
+        return resolve_provider(self.provider, self.base_url)[1]
+
+
+class MediaSettings(BaseModel):
+    """One of the ``[image]`` / ``[video]`` slots: where pictures or clips come from when it
+    is not the chat model's host. ``provider`` is a catalogue id (``bailian``, ``openai``,
+    ``gemini``, …) or empty; ``base_url`` fills in from the catalogue when empty; ``api_key``
+    falls back to the chat model's key when the host is the same. All empty (the default):
+    pictures and clips come from the chat model's host as before — the account's model, or
+    Alibaba Cloud Model Studio's — and ``[llm] image_model`` / ``video_model`` still work."""
+
+    provider: str = ""
+    model: str = ""
+    base_url: str | None = None
+    api_key: str = ""
+
+    @field_validator("provider")
+    @classmethod
+    def _known_provider(cls, v: str) -> str:
+        return check_provider(v) if str(v or "").strip() else ""
+
+    @field_validator("base_url")
+    @classmethod
+    def _strip_slash(cls, v: str | None) -> str | None:
+        return v.rstrip("/") if v else v
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.provider or self.model or self.base_url)
+
+    @property
+    def endpoint(self) -> str | None:
+        """``base_url``; or the catalogue's for ``provider`` (the plain protocol names
+        ``openai`` / ``openai_responses`` mean OpenAI's own endpoint here)."""
+        if self.base_url or not self.provider:
+            return self.base_url
+        from nanomuse.llm import catalogue
+
+        entry = catalogue.load().get("openai" if self.provider in PROTOCOLS else self.provider)
+        return (entry.base_url or None) if entry else None
 
 
 class AgentSettings(BaseModel):
@@ -92,6 +215,12 @@ class AgentSettings(BaseModel):
     # "auto" → answer in the user's language; or force e.g. "zh" / "en".
     language: str = "auto"
     max_context_messages: int = 80
+    # How many of the newest image-bearing messages keep their pictures in a model request.
+    # A computer- or phone-hands session adds a screenshot or two per step, and the whole
+    # conversation goes up again on every step: a dozen 4K screenshots passed the relay's
+    # body limit (0.1.37, 413 too_large). Older ones are replaced by a short note so the
+    # model still knows a screenshot was there. 0 = keep every picture.
+    max_context_images: int = 4
     show_thinking: bool = False
     # Optional free-text profile injected into the system prompt.
     user_profile: str = ""
@@ -242,6 +371,8 @@ class SearchSettings(BaseModel):
     api_key: str = ""
     # SearXNG: your instance, e.g. "http://127.0.0.1:8080".
     base_url: str = ""
+    # False: a failed search fails, instead of going to DuckDuckGo's host as well.
+    fallback: bool = True
 
 
 class ConnectorSettings(BaseModel):
@@ -272,7 +403,7 @@ class SandboxSettings(BaseModel):
 
     # "auto": bubblewrap when it is installed and works here; "bwrap": insist (a startup
     # error otherwise); "off": commands run unboxed, with the scrubbed environment only.
-    mode: str = "auto"
+    mode: Literal["auto", "bwrap", "off"] = "auto"
     # Directories from outside the box that commands may use — the home directory as a
     # whole stays out. `share_read_only` for the programs (a CLI under ~/.nvm), `share`
     # for state a tool must also write (its login, a token it refreshes). Both are bound
@@ -299,9 +430,9 @@ class BrowserSettings(BaseModel):
     headless: bool = True
     timeout_ms: int = 30_000
     # "auto": Playwright when installed, else the phone's WebView; or "playwright" / "device"
-    backend: str = "auto"
+    backend: Literal["auto", "playwright", "device"] = "auto"
     # the starting user agent + viewport: "desktop", "mobile", or "" for the backend's own
-    profile: str = ""
+    profile: Literal["", "desktop", "mobile"] = ""
 
 
 class GUISettings(BaseModel):
@@ -316,10 +447,24 @@ class GUISettings(BaseModel):
     """
 
     enabled: bool = False
-    provider: Literal["openai", "openai_responses"] = "openai"
+    provider: str = "openai"
     model: str = ""
     base_url: str | None = None
     api_key: str = ""
+
+    @field_validator("provider")
+    @classmethod
+    def _known_provider(cls, v: str) -> str:
+        return check_provider(v)
+
+    @property
+    def endpoint(self) -> str | None:
+        """``base_url``, or the catalogue entry's when ``provider`` names one and ``model``
+        is set (an unset model means the main model's settings do the hands)."""
+        if not self.model:
+            return self.base_url
+        return resolve_provider(self.provider, self.base_url)[1]
+
     # Steps one ``phone_task`` may take on the screen before it has to report back;
     # 0 (the default) is no cap — the task ends when it is done, asks, or is stopped.
     max_steps: int = 0
@@ -404,7 +549,7 @@ class HandsSettings(BaseModel):
     enabled: bool = False
     # "auto": the desktop app's operator when it started this runtime, else pyautogui when
     # installed, else xdotool on X11; or "desktop" / "pyautogui" / "xdotool"
-    backend: str = "auto"
+    backend: Literal["auto", "desktop", "pyautogui", "xdotool"] = "auto"
     # How the model gives points: "pixels" of the picture it was shown (Qwen2.5-VL and the
     # computer_use dialect), or "norm1000" — a 0–1000 grid over the picture (Qwen3-VL's
     # default, UI-TARS). Boxes ([x1, y1, x2, y2]) are taken either way; their centre counts.
@@ -435,11 +580,29 @@ class CloudSettings(BaseModel):
     # Fork default is False: without an explicitly configured relay, do not
     # require a cloud account and never fall back to another service.
     required: bool = False
+    # The account's models as a source (the apps' *Use nanoMuse Cloud models* switch). Off,
+    # the relay leaves the automatic order of the hands, pictures and clips, and the hub's
+    # listing; the sign-in itself stays (sync, the devices). Only the explicit "use nanoMuse
+    # Cloud this time" button reaches it then.
+    models: bool = True
     # Conversations synced between the account's devices (docs/every-device.md): the text
     # of the chats on the relay, so every device shows the same ones. The person's switch
     # in Settings → Data controls is what counts once set; this is the default for it.
     # Only meaningful once a relay is configured; with no relay there is nothing to sync.
     sync: bool = True
+
+
+class SyncSettings(BaseModel):
+    """Conversation sync, what this device sends and takes (contract C9). The account-wide
+    switch is ``[cloud] sync``; these are per device."""
+
+    # Off: only the main conversation is pushed and pulled (``scope=main``); side chats stay
+    # on the device that wrote them — they are often device-bound work, a run on this
+    # computer's screen, and most people do not want every one of them on every device.
+    # On: this device's side chats go to the account and the other devices' come here.
+    # *Settings → Data controls → Also sync side chats*; the person's switch, once set, is
+    # kept in ``sync.json`` and this is only its default.
+    side_chats: bool = False
 
 
 class HubSettings(BaseModel):
@@ -492,8 +655,11 @@ class Settings(BaseModel):
     sandbox: SandboxSettings = Field(default_factory=SandboxSettings)
     browser: BrowserSettings = Field(default_factory=BrowserSettings)
     gui: GUISettings = Field(default_factory=GUISettings)
+    image: MediaSettings = Field(default_factory=MediaSettings)
+    video: MediaSettings = Field(default_factory=MediaSettings)
     hands: HandsSettings = Field(default_factory=HandsSettings)
     cloud: CloudSettings = Field(default_factory=CloudSettings)
+    sync: SyncSettings = Field(default_factory=SyncSettings)
     hub: HubSettings = Field(default_factory=HubSettings)
     mcp: MCPSettings = Field(default_factory=MCPSettings)
     server: ServerSettings = Field(default_factory=ServerSettings)
@@ -630,8 +796,14 @@ def _apply_env_overrides(raw: dict[str, Any]) -> None:
         if (val := os.environ.get(env)) not in (None, ""):
             llm[key] = val
     if not llm.get("api_key"):
-        base_url = llm.get("base_url") or LLMSettings.model_fields["base_url"].default or ""
-        for env in _provider_key_vars(str(base_url)):
+        # the endpoint the slot will talk to: the catalogue's when `provider` names an entry
+        provider = str(llm.get("provider") or LLMSettings.model_fields["provider"].default)
+        base_url = llm.get("base_url") or None
+        if provider in PROTOCOLS:
+            base_url = base_url or LLMSettings.model_fields["base_url"].default
+        else:
+            base_url = resolve_provider(provider, base_url)[1]
+        for env in _provider_key_vars(str(base_url or "")):
             if val := os.environ.get(env):
                 llm["api_key"] = val
                 break
@@ -654,7 +826,10 @@ def _apply_env_overrides(raw: dict[str, Any]) -> None:
     if val := os.environ.get("NANOMUSE_SERVER_HOST"):
         server["host"] = val
     if val := os.environ.get("NANOMUSE_SERVER_PORT"):
-        server["port"] = int(val)
+        if val.strip().isdigit():
+            server["port"] = int(val)
+        else:
+            logger.warning("NANOMUSE_SERVER_PORT={!r} is not a port number; ignored", val)
     if val := os.environ.get("NANOMUSE_SERVER_TOKEN"):
         server["token"] = val
     # turns the browser tool on (the browser Docker image sets it); it never turns it off, so a
@@ -686,6 +861,11 @@ def _apply_env_overrides(raw: dict[str, Any]) -> None:
     ):
         if (val := os.environ.get(env)) not in (None, ""):
             gui[key] = val
+    # the picture and clip slots (docs/configuration.md)
+    for slot in ("image", "video"):
+        for key in ("provider", "model", "base_url", "api_key"):
+            if (val := os.environ.get(f"NANOMUSE_{slot.upper()}_{key.upper()}")) not in (None, ""):
+                raw.setdefault(slot, {})[key] = val
 
 
 APP_SETTINGS_FILE = "app-settings.json"
@@ -723,9 +903,27 @@ def apply_app_settings(settings: Settings, data: dict[str, Any]) -> None:
     if llm := data.get("llm"):
         for key in ("provider", "model", "base_url", "api_key", "tool_mode", "vision"):
             if key in llm and llm[key] not in (None, ""):
+                if key == "provider":
+                    try:
+                        settings.llm.provider = check_provider(str(llm[key]))
+                    except ValueError:
+                        pass
+                    continue
+                if key == "tool_mode" and llm[key] not in ("auto", "native", "prompt"):
+                    continue  # a value the app never writes; the config's stays
+                if key == "vision" and llm[key] not in ("auto", "on", "off"):
+                    continue
                 setattr(settings.llm, key, llm[key])
-        for key in ("image_model", "video_model"):
-            # "" is meaningful here: back to the automatic choice
+        if settings.llm.provider == CHATGPT_PROVIDER:
+            # the sign-in has no endpoint of its own; an empty model there means Codex's default
+            if not llm.get("base_url"):
+                settings.llm.base_url = None
+            if "model" in llm and not llm.get("model"):
+                from nanomuse.llm.chatgpt import DEFAULT_MODEL
+
+                settings.llm.model = DEFAULT_MODEL
+        for key in ("image_model", "video_model", "proxy"):
+            # "" is meaningful here: back to the automatic choice (the models), no proxy
             if key in llm and llm[key] is not None:
                 setattr(settings.llm, key, str(llm[key]).strip())
         if settings.llm.base_url:
@@ -805,13 +1003,29 @@ def apply_app_settings(settings: Settings, data: dict[str, Any]) -> None:
     if gui := data.get("gui"):
         if "enabled" in gui:
             settings.gui.enabled = bool(gui["enabled"])
-        if gui.get("provider") in ("openai", "openai_responses"):
-            settings.gui.provider = gui["provider"]
+        if gui.get("provider"):
+            try:
+                settings.gui.provider = check_provider(str(gui["provider"]))
+            except ValueError:
+                pass
         for key in ("model", "base_url", "api_key"):
             # "" is meaningful: back to the main model's endpoint and key
             if key in gui and gui[key] is not None:
                 value = str(gui[key]).strip().rstrip("/")
                 setattr(settings.gui, key, value if value or key != "base_url" else None)
+    for slot in ("image", "video"):
+        if media := data.get(slot):
+            target: MediaSettings = getattr(settings, slot)
+            for key in ("provider", "model", "base_url", "api_key"):
+                # "" is meaningful: back to the chat model's host
+                if key in media and media[key] is not None:
+                    value = str(media[key]).strip().rstrip("/")
+                    if key == "provider" and value:
+                        try:
+                            value = check_provider(value)
+                        except ValueError:
+                            continue
+                    setattr(target, key, value if value or key != "base_url" else None)
     if hands := data.get("hands"):
         if "enabled" in hands:
             settings.hands.enabled = bool(hands["enabled"])
@@ -824,6 +1038,8 @@ def apply_app_settings(settings: Settings, data: dict[str, Any]) -> None:
             settings.cloud.base_url = str(cloud["base_url"]).strip().rstrip("/")
         if "required" in cloud and cloud["required"] is not None:
             settings.cloud.required = bool(cloud["required"])
+        if "models" in cloud and cloud["models"] is not None:
+            settings.cloud.models = bool(cloud["models"])
     if hub := data.get("hub"):
         for key in ("enabled", "remote_control"):
             if key in hub and hub[key] is not None:

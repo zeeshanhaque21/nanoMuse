@@ -28,7 +28,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.ContentCopy
-import androidx.compose.material.icons.outlined.OpenInNew
+import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -76,6 +76,8 @@ import io.github.nanomuse.ui.home.MuseTones
 import io.github.nanomuse.ui.muse.MuseCaption
 import io.github.nanomuse.ui.muse.MuseCard
 import io.github.nanomuse.ui.muse.MuseGap
+import io.github.nanomuse.ui.muse.SecretEye
+import io.github.nanomuse.ui.muse.secretTransformation
 import io.github.nanomuse.ui.muse.MuseRowDivider
 import io.github.nanomuse.ui.muse.MuseSectionLabel
 import io.github.nanomuse.ui.muse.MuseTopAppBar
@@ -286,6 +288,7 @@ private fun ConnectorSheet(connector: Connector, state: Connectors.State, elsewh
     var redirectUri by remember { mutableStateOf(MCPOAuthController.DEFAULT_REDIRECT_URI) }
     var clientId by remember { mutableStateOf("") }
     var clientSecret by remember { mutableStateOf("") }
+    var showSecrets by remember { mutableStateOf(false) }
     var done by remember { mutableStateOf(false) }
 
     fun connect() {
@@ -350,7 +353,7 @@ private fun ConnectorSheet(connector: Connector, state: Connectors.State, elsewh
                 ) {
                     Text(stringResource(R.string.nm_connectors_docs), fontSize = 13.sp, color = MuseTones.action)
                     Spacer(Modifier.width(4.dp))
-                    Icon(Icons.Outlined.OpenInNew, contentDescription = null, tint = MuseTones.action, modifier = Modifier.size(14.dp))
+                    Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = null, tint = MuseTones.action, modifier = Modifier.size(14.dp))
                 }
             }
             if (wantsClient && !wantsKey && state != Connectors.State.Connected && !done) {
@@ -363,7 +366,7 @@ private fun ConnectorSheet(connector: Connector, state: Connectors.State, elsewh
                     ) {
                         Text(stringResource(R.string.nm_connectors_client_developer, connector.name), fontSize = 13.sp, color = MuseTones.action)
                         Spacer(Modifier.width(4.dp))
-                        Icon(Icons.Outlined.OpenInNew, contentDescription = null, tint = MuseTones.action, modifier = Modifier.size(14.dp))
+                        Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = null, tint = MuseTones.action, modifier = Modifier.size(14.dp))
                     }
                 }
                 Text(stringResource(R.string.nm_connectors_client_redirect), fontSize = 13.sp, lineHeight = 18.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -397,6 +400,8 @@ private fun ConnectorSheet(connector: Connector, state: Connectors.State, elsewh
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     placeholder = { Text(stringResource(R.string.nm_connectors_client_secret)) },
+                    visualTransformation = secretTransformation(showSecrets),
+                    trailingIcon = { SecretEye(showSecrets) { showSecrets = !showSecrets } },
                     shape = RoundedCornerShape(14.dp),
                     colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MuseTones.action, unfocusedBorderColor = MuseTones.hairline),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
@@ -410,6 +415,8 @@ private fun ConnectorSheet(connector: Connector, state: Connectors.State, elsewh
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     placeholder = { Text(stringResource(R.string.nm_connectors_key_placeholder)) },
+                    visualTransformation = secretTransformation(showSecrets),
+                    trailingIcon = { SecretEye(showSecrets) { showSecrets = !showSecrets } },
                     shape = RoundedCornerShape(14.dp),
                     colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MuseTones.action, unfocusedBorderColor = MuseTones.hairline),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),

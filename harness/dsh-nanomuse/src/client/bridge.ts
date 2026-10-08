@@ -19,13 +19,43 @@ export interface DesktopPrefs {
   quickChatDefault?: string
   /** Another app holds the combination, so nanoMuse did not get it. */
   quickChatTaken?: boolean
+  // since 0.1.41 — the proxy for the model providers (the Cloud page's Network row); absent in older shells
+  /** The address as kept (`http://host:port`, `socks5://host:port`); '' for none. */
+  proxy?: string
+  /** The same with `user:pass@` hidden, for the screen. */
+  proxyMasked?: string
+  /** The proxy the running Host was started with; differs from `proxy` until a restart. */
+  proxyApplied?: string
+  /** The relay hosts the shell keeps off the proxy (the plugin's `config.baseURL`), besides the default relay and loopback. */
+  relayHosts?: string[]
   supports: { openAtLogin: boolean; menuBar: boolean; quickChat: boolean }
+}
+
+/** What the shell's glow and capsule show of the hands (0.1.40 adds the step, the title and the two buttons' words). */
+export interface OverlayHands {
+  active: boolean
+  held: boolean
+  /** The last action's point as fractions of the frame; -1 when none. */
+  x: number
+  y: number
+  kind: string
+  step: number
+  /** "Step 3" / "Your turn" and what is being done, in the person's language. */
+  title: string
+  text: string
+  face: string
+  /** The buttons' words; '' hides the button. */
+  stop: string
+  take: string
 }
 
 export interface HarnessBridge {
   platform: string
-  info(): Promise<{ version: string; platform: string; arch: string }>
-  permissions(): Promise<Record<PermissionKind, PermissionState>>
+  /** `appImage` (0.1.42): the Linux build runs from an AppImage, so an update should be one too. */
+  info(): Promise<{ version: string; platform: string; arch: string; appImage?: boolean }>
+  // `helper` since 0.1.38: true when "nanoMuse Computer Use" (the shell's helper app) holds the
+  // grants — the rows to switch on in the panes are its, and a grant needs no app restart
+  permissions(): Promise<Record<PermissionKind, PermissionState> & { helper?: boolean }>
   requestPermission(kind: PermissionKind): Promise<PermissionState>
   openPermissionSettings(kind: PermissionKind | 'files'): Promise<void>
   openExternal(url: string): Promise<void>
@@ -33,7 +63,7 @@ export interface HarnessBridge {
   setTheme(theme: 'light' | 'dark'): Promise<void>
   // since 0.1.30 — absent in older shells
   prefs?(): Promise<DesktopPrefs>
-  setPrefs?(patch: Partial<Pick<DesktopPrefs, 'openAtLogin' | 'menuBar' | 'quickChat' | 'quickChatKey'>>): Promise<DesktopPrefs>
+  setPrefs?(patch: Partial<Pick<DesktopPrefs, 'openAtLogin' | 'menuBar' | 'quickChat' | 'quickChatKey' | 'proxy'> & { relayHosts: string[] }>): Promise<DesktopPrefs>
   reportBug?(): Promise<{ screenshot: string; url: string }>
   reveal?(path: string): Promise<void>
   onQuickChat?(listener: () => void): () => void
@@ -42,8 +72,10 @@ export interface HarnessBridge {
   // since 0.1.34
   guidePermissions?(): Promise<Record<PermissionKind, PermissionState>>
   setContentProtection?(on: boolean): Promise<void>
-  setOverlay?(state: { hands: { active: boolean; held: boolean; x: number; y: number; kind: string; text: string; face: string } | null; cards: { id: string; kind: 'approval' | 'hold'; title: string; text: string; actions: { id: string; label: string; tone?: 'on' | 'no' }[] }[] }): void
+  setOverlay?(state: { hands: OverlayHands | null; cards: { id: string; kind: 'approval' | 'hold'; title: string; text: string; actions: { id: string; label: string; tone?: 'on' | 'no' }[] }[] }): void
   onOverlayAction?(listener: (card: string, action: string) => void): () => void
+  // since 0.1.41: the Host again with the window up, so a proxy just set applies
+  restartHost?(): Promise<void>
 }
 
 export function bridge(): HarnessBridge | undefined {

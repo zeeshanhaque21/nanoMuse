@@ -35,7 +35,7 @@ const PLATFORM_MODULES = [
 await rm(new URL('./lib/', import.meta.url), { recursive: true, force: true })
 
 await build({
-  entryPoints: ['src/index.ts', 'src/admit.ts', 'src/cloud.ts', 'src/relay.ts', 'src/reach.ts', 'src/hub.ts', 'src/profile.ts', 'src/actions.ts', 'src/task.ts', 'src/sync.ts', 'src/rooms.ts', 'src/rooms-tools.ts', 'src/connectors.ts', 'src/connectors-tools.ts', 'src/desk.ts', 'src/avatar-flow.ts', 'src/fences.ts', 'src/video.ts', 'src/motion.ts', 'src/hands-check.ts', 'src/firstrun.ts', 'src/nudges.ts'],
+  entryPoints: ['src/index.ts', 'src/admit.ts', 'src/cloud.ts', 'src/relay.ts', 'src/reach.ts', 'src/hub.ts', 'src/profile.ts', 'src/actions.ts', 'src/task.ts', 'src/sync.ts', 'src/rooms.ts', 'src/rooms-tools.ts', 'src/connectors.ts', 'src/connectors-tools.ts', 'src/hands-tools.ts', 'src/images.ts', 'src/desk.ts', 'src/avatar-flow.ts', 'src/fences.ts', 'src/video.ts', 'src/motion.ts', 'src/hands-check.ts', 'src/firstrun.ts', 'src/nudges.ts', 'src/providers.ts', 'src/trajectory.ts', 'src/refusals.ts', 'src/coding.ts', 'src/coding-readers.ts', 'src/coding-runner.ts'],
   outdir: 'lib',
   format: 'esm',
   platform: 'node',
@@ -47,6 +47,11 @@ await build({
   chunkNames: 'chunks/[name]-[hash]',
   sourcemap: true,
   packages: 'external',
+  // The bundle's own version, baked in: `BUNDLE_VERSION` (cloud.ts) is what the update check
+  // compares with the latest release and what the device tells the hub. Left to the
+  // environment, nothing set it in the packaged app and every install ran as 0.0.0, so every
+  // release read as newer (0.1.41).
+  define: { 'process.env.NANOMUSE_VERSION': JSON.stringify(pkg.version) },
   logLevel: 'warning',
 })
 

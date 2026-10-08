@@ -19,10 +19,10 @@ export type PermissionState = "granted" | "denied" | "not-determined" | "not-nee
 const bridge = {
   /** `darwin`, `win32`, `linux`. */
   platform: process.platform,
-  /** The app's version, its platform and arch. */
-  info: (): Promise<{ version: string; platform: string; arch: string }> => ipcRenderer.invoke("nanomuse:info"),
-  /** Where every permission the hands use stands right now. */
-  permissions: (): Promise<Record<PermissionKind, PermissionState>> => ipcRenderer.invoke("nanomuse:permissions"),
+  /** The app's version, its platform and arch; `appImage` when the Linux build runs from an AppImage (so an update is offered as one). */
+  info: (): Promise<{ version: string; platform: string; arch: string; appImage: boolean }> => ipcRenderer.invoke("nanomuse:info"),
+  /** Where every permission the hands use stands right now; `helper` (0.1.38) when "nanoMuse Computer Use" holds them — the rows to switch on are its, and a grant needs no app restart. */
+  permissions: (): Promise<Record<PermissionKind, PermissionState> & { helper?: boolean }> => ipcRenderer.invoke("nanomuse:permissions"),
   /** Ask the system for one permission (its own dialog, or the Settings pane); the new state. */
   requestPermission: (kind: PermissionKind): Promise<PermissionState> => ipcRenderer.invoke("nanomuse:permissions:request", kind),
   /** Open the System Settings pane for one permission (macOS); a no-op elsewhere. */
@@ -38,7 +38,10 @@ const bridge = {
   /** App behaviour (open at login, menu bar icon, quick-chat key): the values, the key's name, what this platform can do. */
   prefs: (): Promise<DesktopPrefs> => ipcRenderer.invoke("nanomuse:prefs"),
   /** Change some of it; the shell applies it at once and answers with the whole. */
-  setPrefs: (patch: Partial<Pick<DesktopPrefs, "openAtLogin" | "menuBar" | "quickChat" | "quickChatKey">>): Promise<DesktopPrefs> => ipcRenderer.invoke("nanomuse:prefs:set", patch),
+  setPrefs: (patch: Partial<Pick<DesktopPrefs, "openAtLogin" | "menuBar" | "quickChat" | "quickChatKey" | "proxy" | "relayHosts">>): Promise<DesktopPrefs> => ipcRenderer.invoke("nanomuse:prefs:set", patch),
+  // since 0.1.41
+  /** Stop the Host and start it again with the window up: the Network row's *Restart now*, so a proxy just set applies. */
+  restartHost: (): Promise<void> => ipcRenderer.invoke("nanomuse:restart-host"),
   /** A screenshot of the window to Downloads and the issue page with the build's facts filled in. */
   reportBug: (): Promise<{ screenshot: string; url: string }> => ipcRenderer.invoke("nanomuse:report-bug"),
   /** Show a file in the system's file manager. */
@@ -48,8 +51,8 @@ const bridge = {
   guidePermissions: (): Promise<Record<PermissionKind, PermissionState>> => ipcRenderer.invoke("nanomuse:permissions:guide"),
   /** Keep this window out of screenshots while the hands work. */
   setContentProtection: (on: boolean): Promise<void> => ipcRenderer.invoke("nanomuse:content-protection", on),
-  /** What the overlays show: the hands' pointer for the glow window, the cards for the capsule. */
-  setOverlay: (state: { hands: { active: boolean; held: boolean; x: number; y: number; kind: string; text: string; face: string } | null; cards: { id: string; kind: "approval" | "hold"; title: string; text: string; actions: { id: string; label: string; tone?: "on" | "no" }[] }[] }): void => ipcRenderer.send("nanomuse:overlay", state),
+  /** What the overlays show: the hands' pointer for the glow window; the step, its words, the face and the buttons for the capsule, with the cards. */
+  setOverlay: (state: { hands: { active: boolean; held: boolean; x: number; y: number; kind: string; step: number; title: string; text: string; face: string; stop: string; take: string } | null; cards: { id: string; kind: "approval" | "hold"; title: string; text: string; actions: { id: string; label: string; tone?: "on" | "no" }[] }[] }): void => ipcRenderer.send("nanomuse:overlay", state),
   /** A button pressed on the capsule window. */
   onOverlayAction: (listener: (card: string, action: string) => void): (() => void) => {
     const handler = (_e: Electron.IpcRendererEvent, payload: { card: string; action: string }) => listener(payload.card, payload.action);
@@ -73,6 +76,15 @@ export interface DesktopPrefs {
   quickChatDefault: string;
   /** Another app holds the combination, so nanoMuse did not get it. */
   quickChatTaken: boolean;
+  // since 0.1.41: the proxy for the model providers
+  /** The address as kept (`http://host:port`, `socks5://host:port`); "" for none. Set it to change, to "" to remove. */
+  proxy: string;
+  /** The same with `user:pass@` hidden, for the screen. */
+  proxyMasked: string;
+  /** The proxy the running Host was started with; differs from `proxy` until a restart. */
+  proxyApplied: string;
+  /** The relay hosts the plugin talks to (its `config.baseURL`): kept on NO_PROXY together with the default relay. */
+  relayHosts?: string[];
   supports: { openAtLogin: boolean; menuBar: boolean; quickChat: boolean };
 }
 

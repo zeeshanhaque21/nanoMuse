@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,7 @@ from nanomuse.config import Settings
 from nanomuse.contacts import ContactBook
 from nanomuse.goals import GoalStore
 from nanomuse.llm.base import BaseLLM
+from nanomuse.llm.vision import keep_newest_images
 from nanomuse.logger import logger
 from nanomuse.memory import MemoryItem, MemoryStore
 from nanomuse.runtime import device
@@ -25,13 +27,15 @@ from nanomuse.ui import UI
 
 
 class Incoming:
-    """A user message on its way to the agent: the text and what was attached to it."""
+    """A user message on its way to the agent: the text, what was attached to it, and the
+    language of the client's screens (a BCP-47 tag, "" when the client did not say)."""
 
-    __slots__ = ("files", "text")
+    __slots__ = ("files", "language", "text")
 
-    def __init__(self, text: str, files: list[Attachment] | None = None):
+    def __init__(self, text: str, files: list[Attachment] | None = None, language: str = ""):
         self.text = text
         self.files = files or []
+        self.language = language
 
 
 class MuseAgent:
@@ -74,6 +78,13 @@ class MuseAgent:
         # before the next model call instead of waiting for the current run to finish.
         self.inbox: asyncio.Queue[str | Incoming] | None = None
         self._told_no_vision = False
+        # The language of the screens the person reads this conversation on, from the latest
+        # message that said (a BCP-47 tag); the language rule names it ahead of the script
+        # of one message. "" means no client has said, and the script decides.
+        self.ui_language = ""
+        # Words for this conversation alone, read when the system prompt is built (the first
+        # conversation's phase, nanomuse/server/firstrun.py); None or "" adds nothing.
+        self.prompt_addendum: Callable[[], str] | None = None
 
     def _drain_inbox(self) -> int:
         if self.inbox is None:
@@ -85,6 +96,8 @@ class MuseAgent:
             except asyncio.QueueEmpty:  # pragma: no cover
                 break
             incoming = item if isinstance(item, Incoming) else Incoming(item)
+            if incoming.language:
+                self.ui_language = incoming.language
             self.messages.append(self.user_message(incoming.text, incoming.files))
             self.audit.record("user_message", content=incoming.text, interjected=True)
             count += 1
@@ -220,7 +233,7 @@ class MuseAgent:
             return ""
         n = len(book)
         return (
-            f"- Address book: {n} {'person' if n == 1 else 'people'} — look someone up with "
+            f"- Address book: {n} {'person' if n == 1 else 'people'}; look someone up with "
             "`contacts` before writing to them; never guess an address\n"
         )
 
@@ -237,17 +250,26 @@ class MuseAgent:
             logger.warning("recall failed ({}); using the keyword ranking", exc)
             return self.memory.relevant(user_input, limit=self.settings.memory.max_inject)
 
+    def language_rule(self, user_input: str) -> str:
+        """The `## Language` paragraph of the system prompt. A reply language set under
+        Settings wins; else the language of the client's screens when a client has said
+        (``ui_language``); else the script of the message."""
+        fixed = self.settings.agent.language
+        if fixed not in ("", "auto"):
+            return prompts.LANGUAGE_FIXED.format(language=fixed)
+        detected = prompts.detect_language(user_input)
+        ui = prompts.language_name(self.ui_language)
+        if ui:
+            return prompts.LANGUAGE_UI.format(language=ui, detected=detected)
+        return prompts.LANGUAGE_AUTO.format(detected=detected)
+
     def build_system_prompt(
         self, user_input: str, memories_: list[MemoryItem] | None = None
     ) -> str:
         """``memories_`` is what ``recall_for`` returned; without it the keyword ranking is
         used on the spot."""
         a = self.settings.agent
-        language_rule = (
-            prompts.LANGUAGE_AUTO.format(detected=prompts.detect_language(user_input))
-            if a.language in ("", "auto")
-            else prompts.LANGUAGE_FIXED.format(language=a.language)
-        )
+        language_rule = self.language_rule(user_input)
         memories = ""
         if self.memory is not None and self.settings.memory.enabled:
             items = (
@@ -270,7 +292,7 @@ class MuseAgent:
                     if g.category:
                         bits.append(g.category)
                     if g.due:
-                        bits.append(f"due {g.due}" + (" — overdue" if g.overdue else ""))
+                        bits.append(f"due {g.due}" + (", overdue" if g.overdue else ""))
                     if nxt:
                         bits.append(f"next: {nxt.idx}. {nxt.title}")
                     if g.proposal:
@@ -297,6 +319,9 @@ class MuseAgent:
             if a.instructions.strip()
             else ""
         )
+        addendum = (self.prompt_addendum() if self.prompt_addendum is not None else "").strip()
+        if addendum:
+            extra += f"\n## This conversation\n{addendum}\n"
         return prompts.SYSTEM_PROMPT.format(
             name=a.name,
             language_rule=language_rule,
@@ -320,15 +345,22 @@ class MuseAgent:
 
     # ------------------------------------------------------------------ context window
     def context_messages(self) -> list[Message]:
+        """The window the model sees: the newest ``max_context_messages`` (never starting
+        inside a tool exchange), with pictures only on the newest ``max_context_images``
+        image-bearing messages — a hands session would otherwise send every screenshot of
+        the run on every step (C9). Copies where a picture was dropped; the history itself
+        keeps them."""
         limit = self.settings.agent.max_context_messages
         msgs = self.messages
         if len(msgs) <= limit:
-            return list(msgs)
-        cutoff = len(msgs) - limit
-        # Never start in the middle of a tool exchange: advance to the next user message.
-        while cutoff < len(msgs) and msgs[cutoff].role != Role.USER:
-            cutoff += 1
-        return list(msgs[cutoff:]) if cutoff < len(msgs) else list(msgs[-limit:])
+            window = list(msgs)
+        else:
+            cutoff = len(msgs) - limit
+            # Never start in the middle of a tool exchange: advance to the next user message.
+            while cutoff < len(msgs) and msgs[cutoff].role != Role.USER:
+                cutoff += 1
+            window = list(msgs[cutoff:]) if cutoff < len(msgs) else list(msgs[-limit:])
+        return keep_newest_images(window, self.settings.agent.max_context_images)
 
     # ------------------------------------------------------------------ stuck detection
     def _is_stuck(self) -> bool:
@@ -348,17 +380,22 @@ class MuseAgent:
         user_input: str,
         purpose: str | None = None,
         files: list[Attachment] | None = None,
+        language: str = "",
     ) -> str:
         """One task: a user message (or a background prompt) worked to completion.
 
         ``purpose`` is what approval cards show as the reason for an action; it defaults
         to the message itself. ``files`` are the attachments that came with the message.
-        Task-scoped approvals end when this call returns.
+        ``language`` is the BCP-47 tag of the client's screens when the client sent one;
+        it is remembered for the conversation and names the reply language ahead of the
+        script of the message. Task-scoped approvals end when this call returns.
         """
         if self.state == AgentState.RUNNING:
             raise RuntimeError("agent is already running")
         self.state = AgentState.RUNNING
         self.turns += 1
+        if language:
+            self.ui_language = language
         if self.skills is not None and "skills" in self.tools:
             # "/weekly-review …" — the skill's instructions ride along with the message
             user_input = self.skills.expand(user_input)
@@ -444,7 +481,11 @@ class MuseAgent:
                         raw = str(call.arguments["__raw__"])
                         summary = f"{call.name}: arguments cut off ({len(raw)} chars)"
                     else:
-                        summary = tool.assess(call.arguments).summary
+                        try:
+                            summary = tool.assess(call.arguments).summary
+                        except Exception as exc:  # noqa: BLE001
+                            # the gate's assess will fail the same way, as a tool result
+                            summary = f"{call.name}: bad arguments ({type(exc).__name__})"
                     self.ui.on_tool_call(call, summary)
                     if tool is None:
                         result = ToolResult.fail(

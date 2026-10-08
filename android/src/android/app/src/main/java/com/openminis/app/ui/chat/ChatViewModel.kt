@@ -2572,7 +2572,9 @@ class ChatViewModel(
     private fun applyRequestImageBudget(messages: List<LLMMessage>): List<LLMMessage> {
         // Collect every image in chronological order so the planner can
         // walk in reverse and protect the most recent images.
-        data class ImageRef(val msgIdx: Int, val partIdx: Int, val image: ImageBudget.BudgetImage)
+        // nanoMuse: `screenshot` marks a tool-result image (a screen the agent took), which the
+        // count rule below applies to; the person's own pictures are never counted (C9).
+        data class ImageRef(val msgIdx: Int, val partIdx: Int, val image: ImageBudget.BudgetImage, val screenshot: Boolean = false)
         val images = mutableListOf<ImageRef>()
         messages.forEachIndexed { mi, msg ->
             msg.contentParts.forEachIndexed { pi, part ->
@@ -2596,6 +2598,7 @@ class ChatViewModel(
                                         part.imageLinuxPath,
                                         part.imageMimeType ?: "image/jpeg",
                                     ),
+                                    screenshot = true, // nanoMuse
                                 )
                             )
                         }
@@ -2606,7 +2609,12 @@ class ChatViewModel(
         }
         if (images.isEmpty()) return messages
 
-        val plan = ImageBudget.planRequestBudget(images.map { it.image })
+        // nanoMuse: the four newest screenshots only, whatever the bytes — the relay caps a request at 6 MiB (C9)
+        val plan = io.github.nanomuse.chat.ScreenshotBudget.apply(
+            ImageBudget.planRequestBudget(images.map { it.image }),
+            images.map { it.image },
+            images.map { it.screenshot },
+        )
         if (!plan.mutated) return messages
 
         // For dropped images without a linuxPath, lazily spill to disk so
@@ -3639,6 +3647,8 @@ class ChatViewModel(
                 }
             }
             _isStreaming.collect { streaming ->
+                // the turn is over: the reply goes up and the other devices hear "done" (C9)
+                if (!streaming) io.github.nanomuse.sync.ConversationSync.turnEnded(realSessionId.ifEmpty { sessionId })
                 if (!streaming && nmPulledWhileStreaming) {
                     // a breath after the end: the turn's last rows are still being written
                     kotlinx.coroutines.delay(1_500)
@@ -3705,6 +3715,23 @@ class ChatViewModel(
                         }
                 }
             }
+        // nanoMuse: the main chat follows the chat slot (Settings › Models, the "Use it for"
+        // card, a pick in a chat's picker: ModelSlots.followPick → mainChatFollows). Its row is
+        // rewritten there; this view-model lives as long as the app, so it is told as well and
+        // re-resolves to the group that now leads with the pick. A side chat keeps its model.
+        viewModelScope.launch {
+            sessionLoaded.first { it }
+            io.github.nanomuse.models.ModelSlots.chatSlotWritten.collect { pick ->
+                val sid = realSessionId.takeIf { it.isNotEmpty() } ?: return@collect
+                val isMain = io.github.nanomuse.home.MainChat.isMain(context, sid)
+                if (!io.github.nanomuse.models.MainChatFollow.shouldMove(isMain, _activeEntryId.value, _selectedGroupId.value, pick)) return@collect
+                if (resolveProviderFromGroup(pick.groupId, pick.entryId)) {
+                    _selectedGroupId.value = pick.groupId
+                    _activeEntryId.value?.let { persistBinding(io.github.nanomuse.models.MainChatFollow.binding(pick.copy(entryId = it))) }
+                    AppLogger.info(TAG, "🔀RESOLVE main chat follows the chat slot: group=${pick.groupId} entry=${_activeEntryId.value} model=${currentModel?.id}")
+                }
+            }
+        }
         // Re-resolve provider when config changes (models may load async)
         viewModelScope.launch {
             // T306: wait for loadSession to finish BEFORE observing config.
@@ -3796,7 +3823,7 @@ class ChatViewModel(
                 // nanoMuse: a chat pinned to one of the Cloud's models (the picker in the
                 // chat's menu) follows the Cloud group once that model leaves it. The group
                 // is where Settings chooses the model, and a pick in the picker already
-                // moves the group (NanoMuseCloud.followPick), so the two never disagree
+                // moves the group (ModelSlots.followPick), so the two never disagree
                 // for long; a pin on a group of the person's own is left alone, as upstream.
                 val pinned = if (currentProvider != null && groupBound == null && activeEntry != null) {
                     config.modelEntries.firstOrNull { it.id == activeEntry }
@@ -3817,6 +3844,15 @@ class ChatViewModel(
                             persistBinding("""{"type":"group","groupId":"${cloudGroup.id}","lastEntryId":"$it"}""")
                         }
                     }
+                }
+                // nanoMuse: a pin on a provider switched off since (the Cloud instance above
+                // all: Settings › Models › Use nanoMuse Cloud models) must not keep answering,
+                // and spending, on it; upstream re-resolves group bindings only. Drop the
+                // provider so the default chain below runs; restoreFromBinding refuses the
+                // pin too, so a reload cannot bring it back.
+                if (pinned != null && currentProvider != null && !providerRepository.isEntryProviderEnabled(pinned.id)) {
+                    AppLogger.info(TAG, "🔀RESOLVE pinned entry=${pinned.id} provider disabled — falling back to the default")
+                    currentProvider = null
                 }
                 if (currentProvider == null && config.modelEntries.isNotEmpty()) {
                     // T306: re-attempt the persisted binding now that config
@@ -4121,7 +4157,9 @@ class ChatViewModel(
                         // session whose model lives on an OAuth provider unable
                         // to restore, despite being signed in.
                         val apiKey = providerRepository.usableApiKey(instance) ?: ""
-                        if (providerRepository.hasAnyCredential(instance)) {
+                        // nanoMuse: `&& instance.isEnabled`, so a remembered model on a provider
+                        // switched off since (the Cloud instance) falls back to the default.
+                        if (providerRepository.hasAnyCredential(instance) && instance.isEnabled) {
                             currentProvider = ProviderFactory.create(instance, apiKey, entry.model, context)
                             _providerName.value = instance.label.ifEmpty { entry.model.provider }
                             resolved = true
@@ -4368,7 +4406,11 @@ class ChatViewModel(
             // while a request is genuinely in flight THERE. Without it, Case D
             // would light Resume on a turn that is merely still waiting.
             val trackerActive = SessionActivityTracker.isActive(activeSessionId)
-            if (lastEntry != null && !_isStreaming.value && !trackerActive) {
+            // nanoMuse: a tail another device wrote (a message synced in while that device
+            // works on it) is not this phone's turn — no Resume banner, no PAUSED badge (C9).
+            val nmRemoteTail = lastEntry != null &&
+                io.github.nanomuse.sync.RemoteRows.isRemote(context, activeSessionId, lastEntry.dbMessageId)
+            if (lastEntry != null && !_isStreaming.value && !trackerActive && !nmRemoteTail) {
                 val isInterrupted = when (lastEntry.role) {
                     LLMMessage.Role.USER -> {
                         val parts = lastEntry.contentParts
@@ -4743,6 +4785,10 @@ class ChatViewModel(
                     // [T-android-group-resolve-skip-uncredentialed] An explicit
                     // entry pin on an OAuth provider must restore too.
                     if (!providerRepository.hasAnyCredential(instance)) return false
+                    // nanoMuse: a pin on a provider that is switched off falls back to the
+                    // default, as a group binding does; the Cloud instance switched off in
+                    // Settings › Models must not answer a chat that once pinned one of its models.
+                    if (!instance.isEnabled) return false
                     val apiKey = providerRepository.usableApiKey(instance) ?: ""
                     currentModel = entry.model
                     _modelName.value = entry.model.displayName
@@ -6200,7 +6246,7 @@ class ChatViewModel(
             bodyPartsJson = queuedPaste?.partsJson,
         )
         val userEntity = chatRepository.appendMessage(sid, "user", userPartsJson)
-        io.github.nanomuse.sync.ConversationSync.sent() // nanoMuse: pushed at send (C8)
+        io.github.nanomuse.sync.ConversationSync.sent(sid) // nanoMuse: pushed at send (C8), then "working" (C9)
         agentHistory.add(
             LLMMessage(
                 role = LLMMessage.Role.USER,
@@ -6347,7 +6393,7 @@ class ChatViewModel(
                 bodyPartsJson = drainPaste?.partsJson,
             )
             chatRepository.appendMessage(sid, "user", userPartsJson)
-            io.github.nanomuse.sync.ConversationSync.sent() // nanoMuse: pushed at send (C8)
+            io.github.nanomuse.sync.ConversationSync.sent(sid) // nanoMuse: pushed at send (C8), then "working" (C9)
 
             agentHistory.add(LLMMessage(
                 role = LLMMessage.Role.USER,
@@ -6548,9 +6594,26 @@ class ChatViewModel(
     private val _nmAllowance = kotlinx.coroutines.flow.MutableStateFlow<io.github.nanomuse.cloud.AllowanceSignal.Exhausted?>(null)
     val nmAllowance: kotlinx.coroutines.flow.StateFlow<io.github.nanomuse.cloud.AllowanceSignal.Exhausted?> = _nmAllowance
 
-    /** The error text to show for a failed turn — the allowance sentence when the relay said so, [fallback] otherwise. */
+    /**
+     * The error text to show for a failed turn — the allowance sentence when the relay said so
+     * (with the ways-on card under it), the relay's other refusals as a canonical line the chat
+     * renders as one sentence and a button (`RelayRefusal`: 413 → *New chat*, 401 → *Sign in*,
+     * busy → *Try again* …), the reach card's canonical line when a provider's 401/403/429 was
+     * kept aside by `ReachSignal`, [fallback] otherwise.
+     */
     private fun nmAllowanceErrorText(fallback: String): String {
-        val info = io.github.nanomuse.cloud.AllowanceSignal.takeFresh() ?: return fallback
+        val info = io.github.nanomuse.cloud.AllowanceSignal.takeFresh()
+        if (info == null) {
+            io.github.nanomuse.cloud.AllowanceSignal.takeFreshRefusal()?.let { refusal ->
+                // a key the relay no longer takes: the account's state follows (contract C12)
+                if (refusal.kind == io.github.nanomuse.cloud.RelayRefusal.Kind.SIGNED_OUT) {
+                    viewModelScope.launch { runCatching { io.github.nanomuse.cloud.NanoMuseCloud.refresh(context) } }
+                }
+                return io.github.nanomuse.cloud.RelayRefusal.canonical(refusal)
+            }
+            val reach = io.github.nanomuse.net.ReachSignal.takeFresh() ?: return fallback
+            return io.github.nanomuse.net.ProviderReach.canonical(reach)
+        }
         _nmAllowance.value = info
         _messages.value = _messages.value.filterNot { it.id == nmAllowanceCardId } + ChatMessage(
             id = nmAllowanceCardId,
@@ -6560,6 +6623,8 @@ class ChatViewModel(
         )
         // the cached account shows the pool as spent until the next /v1/me
         viewModelScope.launch { runCatching { io.github.nanomuse.cloud.NanoMuseCloud.refresh(context) } }
+        if (info.dailyCap) return context.getString(R.string.nm_ways_title_day)
+        if (info.paused) return context.getString(R.string.nm_cloud_err_allowance_paused)
         return io.github.nanomuse.cloud.NanoMuseCloud.allowanceSentence(context)
     }
 
@@ -6927,7 +6992,7 @@ class ChatViewModel(
                 bodyPartsJson = pasted?.partsJson,
             )
             val persistedUser = chatRepository.appendMessage(activeSessionId, "user", userPartsJson)
-            io.github.nanomuse.sync.ConversationSync.sent() // nanoMuse: the person's line reaches the other devices at send (C8)
+            io.github.nanomuse.sync.ConversationSync.sent(activeSessionId) // nanoMuse: the person's line reaches the other devices at send (C8), then "working" (C9)
 
             val userMsg = ChatMessage(
                 id = persistedUser.id,
@@ -7246,6 +7311,16 @@ class ChatViewModel(
      *   - Sync the DB: if we popped a trailing assistant, drop just its
      *     persisted row so a re-load doesn't resurrect the failed turn.
      */
+    // nanoMuse: "Use nanoMuse Cloud this time" — a turn on a model of the person's own that
+    // failed is retried once on the relay's chat model; the chat's binding and every slot of
+    // Settings → Models stay as they are (io.github.nanomuse.chat.CloudRetry).
+    private var nmOneTurnProvider: LLMProvider? = null
+    fun nmOffersCloudRetry(): Boolean = io.github.nanomuse.chat.CloudRetry.offered(context, _activeEntryId.value)
+    fun nmRetryLastOnCloud() {
+        nmOneTurnProvider = io.github.nanomuse.chat.CloudRetry.provider(context) ?: return
+        retryLast()
+    }
+
     fun retryLast() {
         if (_isStreaming.value) return
         // T-streaming-side-channel: belt-and-suspenders flush in case any
@@ -7309,7 +7384,8 @@ class ChatViewModel(
             }
         }
 
-        val initialProvider = currentProvider ?: return
+        // nanoMuse: one turn on the relay when the card asked for it; currentProvider is untouched
+        val initialProvider = nmOneTurnProvider?.also { nmOneTurnProvider = null } ?: currentProvider ?: return
         var provider: LLMProvider = initialProvider
         _error.value = null
 

@@ -10,7 +10,7 @@
 
 ## 0. 背景
 
-- 仓库 https://github.com/nano-muse/nanoMuse （GPL-3.0-or-later）。桌面端在 `harness/`：
+- 仓库 https://github.com/zeeshanhaque21/nanoMuse （GPL-3.0-or-later）。桌面端在 `harness/`：
   `harness/dsh-nanomuse` 是跑在 DeepSeek Harness（dsh）里的 nanoMuse 插件包（TypeScript，React
   通过 `h()` 写，样式在 `src/client/styles.ts` 一个文件里），`harness/desktop` 是 Electron 外壳
   （`src/main.ts` 主进程、`src/preload.ts`、`resources/*.html` 启动页/发光层/胶囊），
@@ -33,7 +33,7 @@ xcode-select --install 2>/dev/null || true          # 命令行工具（git、co
 brew install node@22 pnpm python@3.12 cliclick       # Node 22（CI 同版本）、pnpm 11、Python 3.12、cliclick（读/写鼠标位置）
 export PATH="/opt/homebrew/opt/node@22/bin:$PATH"    # Intel Mac 是 /usr/local/opt/node@22/bin
 node -v   # v22.x
-git clone https://github.com/nano-muse/nanoMuse.git && cd nanoMuse
+git clone https://github.com/zeeshanhaque21/nanoMuse.git && cd nanoMuse
 git checkout -b mac-check-0.1.36
 ```
 

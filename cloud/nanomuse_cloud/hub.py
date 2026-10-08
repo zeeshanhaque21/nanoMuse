@@ -23,6 +23,7 @@ From the hub:
     {"type":"error","code","message","id"?}               e.g. device_offline, not_controllable
     {"type":"pong"}
     {"type":"sync","what":"conversations","cursor","from"}  another device pushed chats; pull (0.19)
+    {"type":"working","cid","from","device_name","working","at"}  a turn started or ended there (0.20)
 
 `key` in hello is for browsers, which cannot set an Authorization header. A
 `web` device is a front door only: it can call, it cannot be called. Devices of
@@ -39,6 +40,7 @@ import logging
 import re
 import time
 import uuid
+from collections import deque
 from dataclasses import dataclass, field
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -62,6 +64,15 @@ _ID = re.compile(r"^[A-Za-z0-9._:-]{4,80}$")
 FRAMES_PER_S = 60.0
 BYTES_PER_S = 8 * 1024 * 1024.0
 FLOOD_CLOSE_AFTER = 600
+
+# What the relay holds for one socket that is not reading: frames queued for it, and
+# their bytes. A send never waits on the peer (so a slow phone cannot stall the computer
+# calling it); past either bound the socket is closed with 4009 `slow_consumer` and the
+# app reconnects with backoff. Dropping frames instead would lose calls and results
+# without a word. 32 MiB is four seconds of the sustained rate above, or two frames of
+# the largest size.
+SEND_QUEUE_FRAMES = 512
+SEND_QUEUE_BYTES = 32 * 1024 * 1024
 
 
 class Bucket:
@@ -101,8 +112,13 @@ class Connection:
     actions: list[str] = field(default_factory=list)
     ip: str = ""  # 0.10: where the socket came from, for the operator
     connected_at: int = field(default_factory=now)
-    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     closed: bool = False
+    # the outbound queue: send() appends, the writer task drains in order
+    queue: deque[str] = field(default_factory=deque)
+    queued_bytes: int = 0
+    wake: asyncio.Event = field(default_factory=asyncio.Event)
+    writer: asyncio.Task | None = None
+    overflowed: bool = False  # closed for not reading fast enough
     frames: Bucket = field(default_factory=lambda: Bucket(FRAMES_PER_S, 2 * FRAMES_PER_S))
     bytes: Bucket = field(default_factory=lambda: Bucket(BYTES_PER_S, 2 * BYTES_PER_S))
     dropped: int = 0  # frames dropped in a row for flooding
@@ -122,16 +138,56 @@ class Connection:
     def brief(self) -> dict:
         return {"id": self.device_id, "name": self.name, "kind": self.kind}
 
+    def start(self) -> None:
+        """Begin draining the queue to the socket; called once the connection is attached."""
+        self.writer = asyncio.create_task(self._drain(), name=f"hub-writer:{self.device_id[:12]}")
+
+    def stop(self) -> None:
+        """No more frames: the writer task ends; what is still queued is dropped (the socket
+        is being closed anyway)."""
+        self.closed = True
+        self.wake.set()
+        if self.writer is not None and not self.writer.done():
+            self.writer.cancel()
+
     async def send(self, frame: dict) -> None:
+        """Queue a frame for the socket and return at once. Over SEND_QUEUE_FRAMES frames or
+        SEND_QUEUE_BYTES bytes waiting, the peer is not reading: the socket is closed with
+        4009 and the frame is not kept."""
         if self.closed:
             return
         text = json.dumps(frame, ensure_ascii=False, separators=(",", ":"))
-        async with self.lock:
+        if len(self.queue) >= SEND_QUEUE_FRAMES or self.queued_bytes + len(text) > SEND_QUEUE_BYTES:
+            log.warning(
+                "hub: %s is not reading (%d frames, %d bytes waiting); closing", self.device_id[:12], len(self.queue), self.queued_bytes
+            )
+            self.overflowed = True
+            self.stop()
+            asyncio.get_running_loop().create_task(self._close(4009, "slow_consumer"))
+            return
+        self.queue.append(text)
+        self.queued_bytes += len(text)
+        self.wake.set()
+
+    async def _drain(self) -> None:
+        while not self.closed:
+            if not self.queue:
+                self.wake.clear()
+                await self.wake.wait()
+                continue
+            text = self.queue.popleft()
+            self.queued_bytes -= len(text)
             try:
                 await self.ws.send_text(text)
             except Exception as e:  # the socket went away under us; the receive loop notices too
                 log.debug("send to %s failed: %s", self.device_id, e)
                 self.closed = True
+
+    async def _close(self, code: int, reason: str) -> None:
+        try:
+            await self.ws.close(code=code, reason=reason)
+        except Exception as e:  # already gone
+            log.debug("close %s: %s", self.device_id, e)
 
 
 @dataclass
@@ -154,6 +210,8 @@ class Hub:
         # for the operator's self-check: frames dropped and sockets closed for flooding, ever
         self.dropped_total = 0
         self.flood_closes = 0
+        # ... and sockets closed because they stopped reading (SEND_QUEUE_*)
+        self.slow_closes = 0
 
     # -- presence -------------------------------------------------------------------
 
@@ -169,6 +227,7 @@ class Hub:
             "pending_calls": len(self.pending),
             "dropped_frames": self.dropped_total,
             "flood_closes": self.flood_closes,
+            "slow_closes": self.slow_closes,
         }
 
     def devices(self, account_id: str) -> list[dict]:
@@ -238,6 +297,16 @@ class Hub:
         frame = {"type": "sync", "what": "conversations", "cursor": int(cursor), "from": from_device}
         await asyncio.gather(*(c.send(frame) for c in conns))
 
+    async def notify_working(self, account_id: str, body: dict) -> None:
+        """0.20: a device said it is working (or done) on a synced conversation; every *other*
+        connected device of the account hears it and shows or clears the line under the
+        message. `body` is what sync.Presence.set returned: cid, from, device_name, working, at."""
+        conns = [c for c in self.online.get(account_id, {}).values() if c.device_id != str(body.get("from") or "")]
+        if not conns:
+            return
+        frame = {"type": "working", **body}
+        await asyncio.gather(*(c.send(frame) for c in conns))
+
     def forget(self, account_id: str, device_id: str) -> None:
         if device_id in self.online.get(account_id, {}):
             raise CloudError(409, "device_online", "That device is connected right now; sign it out there first")
@@ -247,11 +316,20 @@ class Hub:
         """When an account is deleted or disabled: every socket of it is closed
         (the receive loops then remove themselves) so no device keeps a live line."""
         for c in list(self.online.get(account_id, {}).values()):
-            c.closed = True
-            try:
-                await c.ws.close(code=4001, reason="account_gone")
-            except Exception as e:  # already gone
-                log.debug("close %s: %s", c.device_id, e)
+            c.stop()
+            await c._close(4001, "account_gone")
+
+    async def drop_all(self, reason: str = "hub_paused") -> int:
+        """0.22: the operator turned the hub (or the whole service) off — every socket is
+        closed with 4003 and the reason; the apps reconnect with backoff and are refused
+        with the same code until it is on again. Returns how many were closed."""
+        n = 0
+        for conns in list(self.online.values()):
+            for c in list(conns.values()):
+                c.stop()
+                n += 1
+                await c._close(4003, reason)
+        return n
 
     # -- one socket ------------------------------------------------------------------
 
@@ -260,7 +338,8 @@ class Hub:
         await ws.accept()
         try:
             raw = await asyncio.wait_for(ws.receive_text(), HELLO_TIMEOUT_S)
-        except (TimeoutError, WebSocketDisconnect):
+        except (TimeoutError, WebSocketDisconnect, KeyError):
+            # KeyError: a binary frame — Starlette's receive_text has no text to give
             await self._close(ws, 4000, "hello expected")
             return
         hello = _loads(raw)
@@ -300,10 +379,15 @@ class Hub:
                     # RuntimeError: Starlette's WebSocketDisconnected, when the socket was closed
                     # under this loop (the same device connected again and took its place)
                     break
-                if len(raw) > self.frame_limit:
+                except KeyError:
+                    # a binary frame: Starlette's receive_text has no text to give. The protocol
+                    # is JSON text (docs/hub.md); below it is answered with bad_frame and the
+                    # socket stays open — it still counts towards the flood limit.
+                    raw = None
+                if raw is not None and len(raw) > self.frame_limit:
                     await conn.send({"type": "error", "code": "too_large", "message": f"Frames are capped at {self.frame_limit} bytes"})
                     continue
-                if conn.over_rate(len(raw)):
+                if conn.over_rate(len(raw or "")):
                     self.dropped_total += 1
                     if conn.dropped >= FLOOD_CLOSE_AFTER:
                         self.flood_closes += 1
@@ -320,6 +404,9 @@ class Hub:
                                 "message": f"At most {FRAMES_PER_S:.0f} frames and {BYTES_PER_S / 1048576:.0f} MB a second; this frame was dropped",
                             }
                         )
+                    continue
+                if raw is None:
+                    await conn.send({"type": "error", "code": "bad_frame", "message": "Frames are JSON text, not binary"})
                     continue
                 frame = _loads(raw)
                 if not isinstance(frame, dict):
@@ -357,9 +444,10 @@ class Hub:
         account = self.online.setdefault(conn.account_id, {})
         old = account.get(conn.device_id)
         if old is not None:
-            old.closed = True
+            old.stop()
             await self._close(old.ws, 4003, "replaced by a newer connection")
         account[conn.device_id] = conn
+        conn.start()
         if conn.kind != "web":
             self.db.upsert_device(conn.account_id, conn.device_id, conn.name, conn.kind, conn.os, conn.version, json.dumps(conn.actions))
         log.info(
@@ -367,7 +455,9 @@ class Hub:
         )
 
     async def _detach(self, conn: Connection) -> None:
-        conn.closed = True
+        conn.stop()
+        if conn.overflowed:
+            self.slow_closes += 1
         account = self.online.get(conn.account_id, {})
         if account.get(conn.device_id) is conn:
             del account[conn.device_id]
@@ -412,6 +502,9 @@ class Hub:
         kind = frame.get("type")
         if kind == "ping":
             await conn.send({"type": "pong", "time": now()})
+            # every client pings; a caller with one call outstanding and nothing more to
+            # ask would otherwise never hear `timeout` (the sweep ran on new calls only)
+            await self._sweep()
         elif kind == "devices":
             await conn.send({"type": "devices", "devices": self.devices(conn.account_id)})
         elif kind == "call":

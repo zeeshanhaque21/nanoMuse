@@ -22,6 +22,25 @@ from nanomuse_cloud.service import Cloud, CloudError
 PNG_1PX = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")
 
 
+# the catalogue's facts the two 0.17 key ways carry since 0.21 (providers.py; additive fields)
+WAY_FACTS = {
+    "bailian": {
+        "name": "Alibaba Cloud Bailian",
+        "name_zh": "阿里云百炼",
+        "key_url": "https://bailian.console.aliyun.com/?apiKey=1",
+        "covers": ["chat", "vision", "image", "video"],
+        "auth": ["key"],
+    },
+    "openrouter": {
+        "name": "OpenRouter",
+        "name_zh": "OpenRouter",
+        "key_url": "https://openrouter.ai/keys",
+        "covers": ["chat", "vision", "image"],
+        "auth": ["key", "oauth-openrouter"],
+    },
+}
+
+
 def fake_upstream() -> FastAPI:
     up = FastAPI()
     up.state.requests = []
@@ -255,20 +274,20 @@ async def test_signup_grants_and_lists_models(stack):
 
 async def test_wrong_code_and_expiry_rules(stack):
     app, client, sender, up, cloud = stack
-    r = await client.post("/v1/auth/code", json={"identifier": "a@b.co"})
+    r = await client.post("/v1/auth/code", json={"identifier": "a@mail.example"})
     assert r.status_code == 204
-    r = await client.post("/v1/auth/verify", json={"identifier": "a@b.co", "code": "000000"})
+    r = await client.post("/v1/auth/verify", json={"identifier": "a@mail.example", "code": "000000"})
     assert r.status_code == 400 and r.json()["error"]["code"] == "code_wrong"
-    r = await client.post("/v1/auth/verify", json={"identifier": "a@b.co", "code": "12"})
+    r = await client.post("/v1/auth/verify", json={"identifier": "a@mail.example", "code": "12"})
     assert r.status_code == 400
-    r = await client.post("/v1/auth/verify", json={"identifier": "nobody@b.co", "code": "123456"})
+    r = await client.post("/v1/auth/verify", json={"identifier": "nobody@mail.example", "code": "123456"})
     assert r.json()["error"]["code"] == "code_expired"
     r = await client.post("/v1/auth/code", json={"identifier": "garbage"})
     assert r.status_code == 400 and r.json()["error"]["code"] == "bad_identifier"
     # Three codes in ten minutes is the ceiling per identifier.
     for _ in range(2):
-        assert (await client.post("/v1/auth/code", json={"identifier": "a@b.co"})).status_code == 204
-    r = await client.post("/v1/auth/code", json={"identifier": "a@b.co"})
+        assert (await client.post("/v1/auth/code", json={"identifier": "a@mail.example"})).status_code == 204
+    r = await client.post("/v1/auth/code", json={"identifier": "a@mail.example"})
     assert r.status_code == 429 and r.json()["error"]["code"] == "code_too_often"
 
 
@@ -607,12 +626,14 @@ async def test_open_signup_members_unlimited_everyone_else_has_one_allowance():
         "contribute_bonus_available": False,
 "own_key_docs": "https://relay.test/own-key",
         "openrouter_url": "https://openrouter.ai/keys",
-        # 0.17: a mainland phone account is pointed to Bailian first, then OpenRouter, then an invite
+        # 0.17: a mainland phone account is pointed to Bailian first, then OpenRouter, then an invite;
+        # 0.21 adds the catalogue's facts to the two key ways (additive) and the whole card as `guidance`
         "ways": [
-            {"id": "bailian", "url": "https://relay.test/own-key", "mainland_only": True},
-            {"id": "openrouter", "url": "https://openrouter.ai/keys", "mainland_only": False},
+            {"id": "bailian", "url": "https://relay.test/own-key", "mainland_only": True, **WAY_FACTS["bailian"]},
+            {"id": "openrouter", "url": "https://openrouter.ai/keys", "mainland_only": False, **WAY_FACTS["openrouter"]},
             {"id": "invite", "url": guest["invite"]["url"], "bonus_cny": 5},
         ],
+        "guidance": guest["spend"]["guidance"],
         # what a 0.4 app still reads: the pool as the "cap", no midnight
         "daily_cap": 0.002,
         "daily_cap_usd": 0.0003,
@@ -1866,6 +1887,31 @@ async def test_requests_under_way_are_held_against_the_allowance():
     assert r.status_code == 429 and r.json()["error"]["code"] == "too_many_in_flight"
 
 
+async def test_samples_page_by_ts_and_id_so_a_busy_second_loses_nothing(stack):
+    """The export reads 1000 rows a page and the console 20; both used to page by `ts<last`,
+    which skipped every other row written in the same second as the page's last one."""
+    app, client, sender, up, cloud = stack
+    data = await sign_up(client, sender)
+    aid = data["account"]["id"]
+    ids = [cloud.db.add_sample(aid, "m", '[{"role":"user","content":"hi"}]', str(i), 1, 1) for i in range(2300)]
+    # all of them land within a second or two: the paging has to cope with a page ending mid-second,
+    # and the order stays newest first by the order they happened, not by the random id
+    lines = [json.loads(ln) for ln in "".join(cloud.export_samples()).splitlines() if ln]
+    assert [ln["id"] for ln in lines] == ids[::-1]
+    # the console's paged view, through the API, same thing
+    admin = {"X-Admin-Token": "admin"}
+    seen: list[str] = []
+    before, before_id = 0, ""
+    while True:
+        q = f"/v1/admin/samples?account_id={aid}&limit=700" + (f"&before={before}&before_id={before_id}" if before else "")
+        items = (await client.get(q, headers=admin)).json()["samples"]
+        if not items:
+            break
+        seen += [s["id"] for s in items]
+        before, before_id = items[-1]["ts"], items[-1]["id"]
+    assert seen == ids[::-1]
+
+
 async def test_admin_health_is_aggregates_only(stack):
     app, client, sender, up, cloud = stack
     admin = {"X-Admin-Token": "admin"}
@@ -1884,8 +1930,10 @@ async def test_admin_health_is_aggregates_only(stack):
     assert health["last_hour"]["requests"] == 1 and health["last_hour"]["upstream_errors"] == 0
     assert health["last_hour"]["sign_ins"] == 1 and health["db"]["writable"] is True
     assert health["hub"]["online"] == 0 and health["hub"]["dropped_frames"] == 0
-    # nothing in it names an account
-    assert data["account"]["id"] not in r.text and "138" not in r.text
+    # nothing in it names an account (not the id, not the number, not its hint;
+    # a bare "138" would also match the epoch in "time" for part of each day)
+    assert data["account"]["id"] not in r.text
+    assert "13800138000" not in r.text and data["account"]["hint"] not in r.text
 
 
 async def test_session_keys_expire_on_their_own(stack):
@@ -1909,6 +1957,12 @@ async def test_session_keys_expire_on_their_own(stack):
     r = await client.post("/v1/auth/session-key", headers=headers, json={"ttl_s": 10**9})
     assert r.json()["expires_at"] - __import__("time").time() <= cloud.SESSION_KEY_MAX_S + 1
     assert (await client.post("/v1/auth/session-key", headers=headers, json={"ttl_s": "soon"})).status_code == 400
+    # a session key cannot mint another: a key good for two minutes would otherwise hand
+    # itself ninety days, and a leaked container key would hold the account for ever
+    before = len((await client.get("/v1/me/sessions", headers=headers)).json()["sessions"])
+    r = await client.post("/v1/auth/session-key", headers=short_headers, json={"ttl_s": 86400})
+    assert r.status_code == 403 and r.json()["error"]["code"] == "session_from_session"
+    assert len((await client.get("/v1/me/sessions", headers=headers)).json()["sessions"]) == before
     # past its time it is no key at all — without being revoked by anyone
     key_hash = __import__("hashlib").sha256(short["api_key"].encode()).hexdigest()
     cloud.db._conn.execute("UPDATE api_keys SET expires_at=? WHERE key_hash=?", (int(__import__("time").time()) - 1, key_hash))
@@ -1990,26 +2044,19 @@ async def test_reasoning_passes_through_and_is_paid_for(stack):
     back in the history go upstream as they are, the reasoning in the reply (whole or as
     stream deltas) comes back untouched, and the reasoning tokens are counted as completion
     tokens whichever way the provider reports them."""
-    from nanomuse_cloud.service import usage_from_json
+    from nanomuse_cloud.service import Usage, usage_from_json
 
     # the counting rule on its own: OpenAI's shape has them inside, DashScope's apart
     assert usage_from_json(
         {"usage": {"prompt_tokens": 10, "completion_tokens": 50, "completion_tokens_details": {"reasoning_tokens": 30}}}
-    ) == (
-        10,
-        50,
-    )
-    assert usage_from_json({"usage": {"prompt_tokens": 10, "completion_tokens": 6, "output_tokens_details": {"reasoning_tokens": 20}}}) == (
-        10,
-        26,
-    )
-    assert usage_from_json({"usage": {"prompt_tokens": 10, "completion_tokens": 6, "completion_tokens_details": {}}}) == (10, 6)
+    ) == Usage(10, 50)
+    assert usage_from_json(
+        {"usage": {"prompt_tokens": 10, "completion_tokens": 6, "output_tokens_details": {"reasoning_tokens": 20}}}
+    ) == Usage(10, 26)
+    assert usage_from_json({"usage": {"prompt_tokens": 10, "completion_tokens": 6, "completion_tokens_details": {}}}) == Usage(10, 6)
     assert usage_from_json(
         {"usage": {"prompt_tokens": 10, "completion_tokens": 0, "completion_tokens_details": {"reasoning_tokens": 7}}}
-    ) == (
-        10,
-        7,
-    )
+    ) == Usage(10, 7)
 
     app, client, sender, up, cloud = stack
     data = await sign_up(client, sender)
@@ -2134,8 +2181,8 @@ async def test_me_says_where_the_person_is_and_orders_the_ways_on_by_it(tmp_path
     # the ways on, in order: the mainland to Bailian, the rest to OpenRouter, the invitation last
     cn_ways = (await client.get("/v1/me", headers=auth(phone, "8.8.8.8"))).json()["spend"]["ways"]
     assert [w["id"] for w in cn_ways] == ["bailian", "openrouter", "invite"]
-    assert cn_ways[0] == {"id": "bailian", "url": "https://relay.test/own-key", "mainland_only": True}
-    assert cn_ways[1] == {"id": "openrouter", "url": "https://openrouter.ai/keys", "mainland_only": False}
+    assert cn_ways[0] == {"id": "bailian", "url": "https://relay.test/own-key", "mainland_only": True, **WAY_FACTS["bailian"]}
+    assert cn_ways[1] == {"id": "openrouter", "url": "https://openrouter.ai/keys", "mainland_only": False, **WAY_FACTS["openrouter"]}
     assert (
         cn_ways[2]["id"] == "invite" and cn_ways[2]["url"].startswith("https://relay.test/web/?invite=") and cn_ways[2]["bonus_cny"] == 5
     )
@@ -2156,14 +2203,19 @@ async def test_me_says_where_the_person_is_and_orders_the_ways_on_by_it(tmp_path
     err = await exhaust(phone, "8.8.8.8")
     assert err["region"] == "cn" and [w["id"] for w in err["ways"]] == ["bailian", "openrouter", "invite"]
     assert "阿里云百炼" in err["message"] and "free tier for mainland China" in err["message"] and "OpenRouter" not in err["message"]
+    assert "one key" in err["message"] and "a plan you already pay for (ChatGPT, Claude or Kimi" in err["message"]
+    assert err["guidance"]["region"] == "cn" and err["guidance"]["providers"][0]["id"] == "bailian"
     err = await exhaust(us, "8.8.8.8")
     assert err["region"] == "intl" and [w["id"] for w in err["ways"]] == ["openrouter", "bailian", "invite"]
-    assert "OpenRouter is the easy way outside mainland China: one account, one key, pay as you go" in err["message"]
-    assert "Alibaba Cloud Bailian only signs up accounts from the mainland" in err["message"]
+    assert "OpenRouter, with one account, one key and pay as you go, or OpenAI first" in err["message"]
+    assert "Alibaba Cloud Bailian only signs up accounts from mainland China" in err["message"]
+    assert "a plan you already pay for (ChatGPT, Claude or Kimi" in err["message"]
     assert err["openrouter_url"] == "https://openrouter.ai/keys" and err["own_key_docs"] == "https://relay.test/own-key"
+    assert [p["id"] for p in err["guidance"]["providers"][:2]] == ["openrouter", "openai"]
     err = await exhaust(nowhere, "9.9.9.9")
-    assert err["region"] == "unknown" and "OpenRouter outside mainland China, Alibaba Cloud Bailian inside" in err["message"]
+    assert err["region"] == "unknown" and "OpenRouter or OpenAI outside mainland China, Alibaba Cloud Bailian inside" in err["message"]
     assert "invite a friend (+¥5 for each of you)" in err["message"] and "keep working" in err["message"]
+    assert [p["id"] for p in err["guidance"]["providers"][:2]] == ["openrouter", "bailian"]
     # a picture refused up front says the same
     r = await client.post("/v1/images/generations", headers=auth(us, "8.8.8.8"), json={"model": "qwen-image-3.0", "prompt": "a cat"})
     assert r.status_code == 429 and r.json()["error"]["region"] == "intl"

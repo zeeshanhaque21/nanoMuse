@@ -14,7 +14,7 @@ import com.openminis.app.ui.navigation.Routes
  *   minis://settings                            → Settings home
  *   minis://settings/providers                  → Provider list
  *   minis://settings/providers/<instanceId>     → Provider detail
- *   minis://settings/providers/add[?preset=bailian|openrouter] → Add a provider (nanoMuse: pre-filled)
+ *   minis://settings/providers/add[?preset=<catalogue id>[:oauth]] → Add a provider (nanoMuse: pre-filled for a vendor of assets/nanomuse/providers.json; `:oauth` opens on its sign-in)
  *   minis://settings/model-groups               → Model Groups (incl. Agent Loop section)
  *   minis://settings/model-groups/<groupId>     → Model Group detail
  *   minis://settings/usage                      → Token usage
@@ -195,12 +195,14 @@ object DeepLinkHandler {
             "appearance" -> DeepLinkAction.OpenSettingsScreen(Routes.APPEARANCE)
             "soul" -> DeepLinkAction.OpenSettingsScreen(Routes.SOUL) // nanoMuse: the name pill links here
             "avatar", "face" -> DeepLinkAction.OpenSettingsScreen(io.github.nanomuse.ui.avatar.ROUTE_AVATAR_STUDIO) // nanoMuse: the avatar studio
-            "media", "models" -> DeepLinkAction.OpenSettingsScreen(io.github.nanomuse.ui.media.ROUTE_MEDIA_MODELS) // nanoMuse: image & video models
+            "media" -> DeepLinkAction.OpenSettingsScreen(io.github.nanomuse.ui.media.ROUTE_MEDIA_MODELS) // nanoMuse: image & video models
+            "models" -> DeepLinkAction.OpenSettingsScreen(io.github.nanomuse.ui.models.ROUTE_MODELS) // nanoMuse: Settings → Models
             "hands", "screen" -> DeepLinkAction.OpenSettingsScreen(io.github.nanomuse.ui.hands.ROUTE_HANDS) // nanoMuse: the screen as a hand
             "computers", "pc" -> DeepLinkAction.OpenSettingsScreen(io.github.nanomuse.ui.reach.ROUTE_COMPUTERS) // nanoMuse: the account's computers
             "cloud", "devices" -> DeepLinkAction.OpenSettingsScreen(io.github.nanomuse.ui.cloud.ROUTE_CLOUD_ACCOUNT) // nanoMuse: the account and its devices on the hub
             "coding", "agents" -> DeepLinkAction.OpenSettingsScreen(io.github.nanomuse.ui.coding.ROUTE_CODING) // nanoMuse: the coding agents on the account's computers
             "profile" -> DeepLinkAction.OpenSettingsScreen(io.github.nanomuse.ui.profile.ROUTE_AGENT_PROFILE) // nanoMuse: the face links here
+            "network", "proxy" -> DeepLinkAction.OpenSettingsScreen(io.github.nanomuse.ui.net.ROUTE_NETWORK) // nanoMuse: the proxy for own providers
             "background" -> DeepLinkAction.OpenSettingsScreen(Routes.BACKGROUND)
             "about" -> DeepLinkAction.OpenSettingsScreen(Routes.ABOUT)
             "permissions" -> DeepLinkAction.OpenPermissionSettings

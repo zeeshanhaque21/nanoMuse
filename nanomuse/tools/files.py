@@ -41,7 +41,7 @@ def pdf_text(path: Path, max_pages: int = 60) -> str:
             try:
                 reader.decrypt("")
             except Exception:  # noqa: BLE001
-                return "(this PDF is encrypted — the text cannot be read without its password)"
+                return "(this PDF is encrypted; the text cannot be read without its password)"
         pages = len(reader.pages)
     except Exception as exc:  # noqa: BLE001 — a damaged file is a result, not a crash
         return f"(this PDF could not be read: {type(exc).__name__}: {str(exc)[:200]})"
@@ -57,7 +57,7 @@ def pdf_text(path: Path, max_pages: int = 60) -> str:
     text = "\n\n".join(parts)
     if not any(p.split("---\n", 1)[-1].strip() for p in parts):
         return (
-            f"(this PDF has {pages} page{'s' if pages != 1 else ''} but no text layer — it is "
+            f"(this PDF has {pages} page{'s' if pages != 1 else ''} but no text layer; it is "
             "probably scanned images; the text cannot be extracted here)"
         )
     return text
@@ -150,13 +150,18 @@ class Files(BaseTool):
                 target = self._resolve(path, must_exist=True)
                 if target.is_dir():
                     return await self.execute(action="list", path=path)
-                text = (
-                    pdf_text(target)
-                    if target.suffix.lower() == ".pdf"
-                    else target.read_text("utf-8", errors="replace")
-                )
+                if target.suffix.lower() == ".pdf":
+                    text = pdf_text(target)
+                    if len(text) > MAX_READ_CHARS:
+                        text = text[:MAX_READ_CHARS] + f"\n... [truncated, {len(text)} chars total]"
+                    return ToolResult(output=text or "(empty file)")
+                # read what fits and one more character, not the whole file: a log of a few
+                # hundred MB is truncated either way, and need not be loaded for it
+                with target.open("r", encoding="utf-8", errors="replace") as fh:
+                    text = fh.read(MAX_READ_CHARS + 1)
                 if len(text) > MAX_READ_CHARS:
-                    text = text[:MAX_READ_CHARS] + f"\n... [truncated, {len(text)} chars total]"
+                    size = target.stat().st_size
+                    text = text[:MAX_READ_CHARS] + f"\n... [truncated, {size} bytes total]"
                 return ToolResult(output=text or "(empty file)")
             if action in ("write", "append"):
                 if content is None:
@@ -183,13 +188,17 @@ class Files(BaseTool):
                 if not pattern:
                     return ToolResult.fail("`pattern` is required")
                 root = self._resolve(path)
+                # matches are named relative to the workspace when the root is in it, and
+                # as absolute paths under an extra root (relative_to raised there before)
+                ws = self.workspace.resolve()
+                in_ws = root == ws or ws in root.parents
                 matches = []
                 scanned = 0
                 note = ""
                 for p in root.rglob("*"):
                     scanned += 1
                     if p.is_file() and fnmatch.fnmatch(p.relative_to(root).as_posix(), pattern):
-                        matches.append(p.relative_to(self.workspace.resolve()).as_posix())
+                        matches.append(p.relative_to(ws).as_posix() if in_ws else str(p))
                     if len(matches) >= 200:
                         break
                     if scanned >= SEARCH_MAX_ENTRIES:

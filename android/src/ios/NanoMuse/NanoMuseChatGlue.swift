@@ -62,6 +62,8 @@ extension AIChatViewModel {
         NanoMuseFirstConversation.shared.afterTurn(session: key, assistantText: reply, vm: self)
         NanoMuseSessionAddenda.onTurnFinished(session: key)
         NanoMuseSync.shared.turnFinished(session: key)
+        // "Use nanoMuse Cloud this time" covered this one turn; where the turn ran decides whether the next failure offers it
+        NanoMuseCloudOnce.turnEnded(onCloud: resolveCurrentEntry()?.providerInstanceId == NanoMuseCloud.instance?.id)
     }
 
     /// Appended to the system prompt of this session (empty when there is nothing to add).
@@ -137,5 +139,22 @@ extension AIChatViewModel {
     func nmSendNow(_ text: String) {
         inputText = text
         send()
+    }
+
+    // MARK: C9 presence
+
+    /// Put "{device} is working…" under the last message when it is another device's user line
+    /// and presence says that device is at work on this conversation; take it off otherwise
+    /// (the reply arrived, presence said done, or ten minutes passed). Cheap: the last row only.
+    func nmApplyPresence() {
+        let key = nmSessionKey
+        let last = messages.last
+        let remote = last.map { $0.role == .user && $0.nmFromDevice != nil } ?? false
+        var entry: NanoMusePresence.Working?
+        if remote, let sid = sessionId, let cid = NanoMuseSync.shared.cid(for: sid) {
+            entry = NanoMusePresence.shared.working(for: cid)
+        }
+        let line = NanoMusePresence.line(lastIsRemoteUser: remote, lastFromDevice: last?.nmFromDevice, entry: entry, me: NanoMuseHub.shared.deviceId)
+        NanoMusePresence.shared.show(line, on: last, session: key)
     }
 }

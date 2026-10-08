@@ -30,7 +30,7 @@ On the phone, in any chat:
 - "让电脑把项目编译一遍，把日志发给我" — `nanomuse-pc task "…" --on desk`
 - "电脑截个图给我看" — `nanomuse-pc screen --on desk`
 
-On the computer, in the terminal (`nanomuse-desktop`):
+On the computer, in nanoMuse Desktop (or `nanomuse chat` in a terminal):
 
 - "on my phone, take a screenshot" — `device_screen`
 - "tell the phone's Muse to read me the last notification" — `delegate`
@@ -47,12 +47,22 @@ Two kinds of request travel over the hub:
   phone's ShellGuard, the desktop's `guard.py`): reads and builds go quietly,
   deleting / sending / paying / system commands wait for the approval card on
   the device that asked.
-- **Tasks** — `task {text}`: a whole job in words for the target device's own
-  Muse, in a conversation of its own. It may take minutes. When that Muse hits
+- **Tasks** — `task {text, conversation?, language?}`: a whole job in words for the target device's own
+  Muse, in a conversation of its own (`conversation` names it; the sender's id
+  when absent). `language` (runtime 0.1.42, optional) is the BCP-47 tag of the
+  asking device's screens; the target answers in it instead of guessing from
+  the text. It may take minutes. When that Muse hits
   something that needs approval, it does not decide alone: the question travels
   back as an `event {stage:"approval"}` and the asking device shows its usual
   card (RiskGate on the phone, the terminal prompt on the desktop, a card in the
   web console). The answer goes back as `approve {approval_id, allow}`.
+  The asking device may end a task it started with `stop {call}` (the id of
+  its `task` frame) or `stop {conversation}` (the conversation it named, or
+  its own per-device one when it named none): the target cancels the run
+  after the step in flight, answers `{stopped: true}`, and the `task` call
+  itself then fails with `cancelled`. `{stopped: false}` means there was
+  nothing of the caller's to stop; a device never stops another device's
+  task. The runtime, the desktop app and the phone all do this.
 
   While a task runs the target sends `event` frames whose `body.stage` tells
   the caller what to draw, so the run reads the same in the caller's chat as in
@@ -66,24 +76,78 @@ Two kinds of request travel over the hub:
 - **Coding agents** — `coding.agents`, `coding.sessions`, `coding.session`,
   `coding.send`, `coding.stop`, `coding.runs`: the Cursor / Codex / Claude Code
   sessions on a computer, read from disk and steered through the agents' own
-  CLIs by the runtime there. `coding.send {agent, text, session_id?, workspace?,
-  wait}` streams the run back as `event` frames (`started`, `text`, `tool`,
-  `done`, `error`, each with the run id so the caller can `coding.stop`) and
-  answers with the finished run. Only a runtime that has the module announces
-  these actions. [coding-agents.md](coding-agents.md).
+  CLIs by the runtime or the desktop app there. `coding.send {agent, text,
+  session_id?, workspace?, wait}` streams the run back as `event` frames
+  (`started`, `text`, `tool`, `done`, `error`, each with the run id so the
+  caller can `coding.stop`) and answers with the finished run. Only a computer
+  announces these actions: a runtime that has the module, or the desktop app.
+  [coding-agents.md](coding-agents.md).
 
-Each device decides what it lets others do. **Remote control** off (phone:
-*Settings → nanoMuse Cloud → Devices*; desktop: `set remote_control off`) makes
-the device answer `info` and nothing else — it still sees and drives the others.
+Each device decides what it lets others do. On the phone, *Let other devices
+operate this phone* (*Settings → nanoMuse Cloud → Devices*) off makes the phone
+answer `info` and nothing else — it still sees and drives the others.
 With it on, a raw action that does something *to* the device (`shell`, `files`,
 `file.get`, `file.put`, `open`, `screen`, `coding.send`, `coding.stop`) is first
 agreed to by the person at that device: the usual approval card, *once* or
 *always for that device* — the standing answer is a grant
-(`remote_control:<device id>`) under Permissions. Nobody there, and the caller
+(`remote_control:<device id>`) under Permissions. nanoMuse Desktop asks with the
+same card by default; its *Remote control without asking* (*Settings → Devices*)
+lets every device of the account run things there without the card. Nobody there, and the caller
 hears `not_allowed` when the card expires. `info` and `notify` never ask; a
 `task` runs under the device's own Sentinel, whose cards travel back to the
 caller as before. A device may `approve` only cards of its own runs that were
 sent to it — never the card asking whether it may run something.
+
+### Proposed: `proxy_fetch` — the phone uses the computer's connection
+
+Not built yet; written down here so the three implementations agree before
+anyone starts. The case: the phone's network does not reach `chatgpt.com` or a
+provider's host (the card in [own-key.md](own-key.md#when-the-provider-cannot-be-reached)),
+the person's computer does. The computer's runtime would relay the provider
+call — only that — the way a proxy would, over the hub.
+
+```
+→ call   {id, to, action:"proxy_fetch",
+          args:{method, url, headers:{…}, body?, stream?}}     body base64; stream: want SSE chunks as events
+← event  {id, from, body:{stage:"headers", status, headers:{…}}}
+← event  {id, from, body:{stage:"chunk", data}}                data base64; one per SSE chunk when stream is true
+← result {id, ok:true, body:{status, headers:{…}, data?}}      data base64 when stream was false
+← result {id, ok:false, error:"not_allowed" | "host_refused" | "too_large" | "upstream", message}
+```
+
+The rules that make it acceptable, each one a line of code on the serving
+side:
+
+- **Opt-in on the computer.** The desktop plugin announces `proxy_fetch` in its
+  `hello` only while *Let my phone use this computer's connection for
+  providers* is on (*Settings → Devices*); off, the action is `unknown_call`.
+  Same trust as `device_shell`: the device's *Remote control* must be on, and
+  the first call from a device raises the usual card — *once* or *always for
+  this device* (a `remote_control:<device id>` grant).
+- **Hosts, not the open internet.** The computer forwards only to hosts of the
+  provider catalogue (`providers.json`), `chatgpt.com` and `auth.openai.com`,
+  and to the custom base URLs of its own configured providers; anything else
+  is `host_refused`. Never the relay, never a LAN address, never `file:`.
+- **Headers pass, secrets do not stay.** The phone sends its own
+  `Authorization` (the plan's token, its own key); the computer forwards it and
+  logs the host, the status and the size — never a header or a body.
+- **Bounded.** Request bodies over 8 MB and responses over `HUB_FRAME_LIMIT`
+  per frame are `too_large`; a stream is cut at ten minutes; one call at a time
+  per asking device.
+- **The phone chooses.** The reach card offers *Use my computer's connection*
+  only when a computer that announces `proxy_fetch` is online; the choice is
+  kept per provider instance and shows on the instance as a line, so nobody
+  forgets that their key travels through the computer.
+
+Why it is a design and not code in this change: the hub frame itself is small,
+but the serving side is a new trust surface on the computer (a forwarder that
+carries the person's provider tokens) and the phone's two HTTP stacks would
+each need a transport that turns a request into frames and frames back into a
+response — three implementations and a fourth place that must agree on the
+host list, which this round's budget did not cover honestly. The proxy setting
+([own-key.md](own-key.md#when-the-provider-cannot-be-reached)) covers the
+common case meanwhile: a proxy on the computer (Clash, a `ssh -D`) with the
+phone pointed at it.
 
 ## Frames
 
@@ -93,21 +157,53 @@ the key in `hello` instead).
 ```
 → hello    {device:{id,name,kind,os,version,actions[]}}     kind: phone | computer | web
 ← welcome  {device_id, devices:[…], server:{version,frame_limit,time}}
-← devices  {devices:[{id,name,kind,os,version,online,last_seen,controllable}]}
+← devices  {devices:[{id,name,kind,os,version,actions[],online,last_seen,controllable,ip}]}
 
 → call     {id, to, action, args}
 ← call     {id, from:{id,name,kind}, action, args}          (delivered to the target)
 → event    {id, body}          ← event  {id, from, body}    progress, approvals, images
 → result   {id, ok, body | error, message}                  ← result (to the caller)
-← error    {code, message, id?}   device_offline · not_controllable · self_call · unknown_call · too_large · bad_frame
+← error    {code, message, id?}   device_offline · not_controllable · self_call · unknown_call · timeout
+                                  too_large · rate_limited · bad_frame · device_online · bad_key · bad_device
 
 → devices  {}        → rename {name}        → forget {device_id}        → ping  ← pong
 ← profile  {rev, device}       the account's name, look or connectors changed (PUT /v1/me/profile); fetch it
 ← sync     {what:"conversations", cursor, from}   another device pushed or deleted synced conversations; pull /v1/sync/changes
+← working  {cid, from, device_name, working, at}  another device started (true) or finished (false) a turn in that synced conversation
 ```
 
-Close codes: `4000` hello expected, `4001` bad key, `4002` bad device,
-`4003` replaced by a newer connection of the same device id.
+Close codes: `4000` hello expected (no hello within 15 s, or a frame that is
+not a hello first — a binary frame counts), `4001` bad key (reason `bad_key`
+or `account_deleted`; `account_gone` when the account was deleted or disabled
+under a live socket), `4002` bad device, `4003` replaced
+by a newer connection of the same device id — or, with the reason
+`hub_paused` (relay 0.22), the operator switched the hub or the whole service
+off: a client waits and reconnects later instead of retrying at once
+([cloud.md › Controls](cloud.md#controls)) — `4008` too many frames (the
+rate limit below was ignored) — and `4009` slow consumer (the relay had 512
+frames or 32 MB queued for a socket that was not reading them; the client
+reconnects with backoff like after any network close).
+
+A key refused in the `Authorization` header is answered the same way as one
+refused in `hello`: the handshake completes, an `error` frame carries the
+code, then the close with `4001`. A client that sees `4001` or `4002` stops
+reconnecting and asks the person to sign in again; any other close is the
+network and is retried with backoff.
+
+Frames the relay does not know (`type` it has no handler for, a text frame
+that is not a JSON object, a binary frame) are answered with
+`error bad_frame` and the socket stays open, so a newer client talking to an
+older relay loses one frame, not the connection. Frames over `frame_limit`
+get `too_large`; more than 60 frames or 8 MB a second get `rate_limited`
+(one warning a second, the extra frames dropped) and, if that goes on,
+the close with `4008`. A send to a device never waits on that device: frames
+queue per connection and are written in order as the socket drains; a socket
+that stops reading is closed with `4009` once 512 frames or 32 MB are waiting,
+so one stalled phone cannot hold the computer calling it. A `call` nobody
+answers within 15 minutes fails with `timeout` to its caller (the relay checks
+when a call or a `ping` arrives, so a caller that pings hears it within a
+minute of the deadline); `forget` of a device that is connected right now is
+refused with `device_online`.
 
 Device ids are per installation (`phone-…`, `pc-…`); names are for people and
 can be changed on the device. A `web` device is never a target and is not
@@ -140,9 +236,16 @@ and the hub only carries the nudge. After a push that the relay accepted, or a
 deletion, every *other* socket of the account gets `sync {what:"conversations",
 cursor, from}` — `cursor` is the account's counter after the change, `from` the
 device id that made it — and pulls what is new from its own cursor. A device that
-sees its own id in `from` ignores the frame. Nothing else is synchronised — keys,
-providers and settings stay where they were entered, and files and images stay on
-the device that made them. How the apps use it is in
+sees its own id in `from` ignores the frame. Since 0.1.38 (relay 0.20) the hub
+also carries **who is answering**: a device that starts or ends a turn in a
+synced conversation posts `/v1/sync/working`, and the other sockets get
+`working {cid, from, device_name, working, at}` — the apps show *kwai is
+working…* under the last message until `working: false` arrives, the reply
+itself lands, or ten minutes pass. The relay keeps these in memory only. By
+default only the main conversation is synced; side chats travel only from and to
+devices that turned *Also sync side chats* on. Nothing else is synchronised —
+keys, providers and settings stay where they were entered, and files and images
+stay on the device that made them. How the apps use it is in
 [every-device.md](every-device.md#the-same-conversations-everywhere).
 
 ## The code
@@ -159,10 +262,13 @@ computer's own hands — is in [every-device.md](every-device.md).
   others, including `task` through the headless chat runner), `HubService`
   (foreground, `remoteMessaging`). `nanomuse-pc` (`io.github.nanomuse.reach`)
   reaches the hub devices from the phone's sandbox shell.
-- Desktop binary: [`desktop/nanomuse_desktop/hub.py`](../desktop/nanomuse_desktop/hub.py),
-  `app.py` (incoming calls, approvals), `agent.py` (the `device_*` and
-  `delegate` tools).
-- Runtime (the windowed desktop, `nanomuse serve`): [`nanomuse/cloud.py`](../nanomuse/cloud.py)
+- nanoMuse Desktop: [`harness/dsh-nanomuse/src/hub.ts`](../harness/dsh-nanomuse/src/hub.ts)
+  (the socket, reconnect), [`harness/dsh-nanomuse/src/actions.ts`](../harness/dsh-nanomuse/src/actions.ts)
+  (what this computer does for others, the card before a remote action) — [desktop.md](desktop.md).
+- iOS: [`NanoMuse/NanoMuseHub.swift`](../android/src/ios/NanoMuse/NanoMuseHub.swift) —
+  `info`, `open`, `notify`, `task`; `screen` is refused (`no_screen`), the shell and
+  files actions with `not_supported`.
+- Runtime (`nanomuse serve`): [`nanomuse/cloud.py`](../nanomuse/cloud.py)
   (the account), [`nanomuse/hub/client.py`](../nanomuse/hub/client.py) (the
   socket, reconnect), [`nanomuse/hub/actions.py`](../nanomuse/hub/actions.py)
   (what this computer does for others), [`nanomuse/hub/service.py`](../nanomuse/hub/service.py)

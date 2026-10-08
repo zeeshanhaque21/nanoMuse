@@ -96,6 +96,8 @@ class HubClient(
     private val onProfile: (JSONObject) -> Unit = {},
     /** another device pushed conversations: `{"type": "sync", "what", "cursor", "from"}` (contract C7) */
     private val onSync: (JSONObject) -> Unit = {},
+    /** a turn started or ended on another device: `{"type": "working", "cid", "from", "device_name", "working", "at"}` (contract C9) */
+    private val onWorking: (JSONObject) -> Unit = {},
 ) {
     private class Pending(val onEvent: ((JSONObject) -> Unit)?) {
         val done = CountDownLatch(1)
@@ -149,14 +151,20 @@ class HubClient(
         ws = http.newWebSocket(req, listener)
     }
 
-    private fun scheduleReconnect(reason: String) {
+    /**
+     * Drops the socket and tries again after the backoff (1 s doubling to 30 s), or after
+     * [atLeastMs] when the relay said to wait: a paused hub, a replaced connection, a key it
+     * refused at the handshake.
+     */
+    private fun scheduleReconnect(reason: String, atLeastMs: Long = 0L) {
         connected = false
         ws = null
         failAll("disconnected", "the hub connection dropped")
         onState(false, reason)
         if (stopped) return
         retry?.cancel(false)
-        retry = timer.schedule({ connect() }, delayMs, TimeUnit.MILLISECONDS)
+        val wait = maxOf(delayMs, atLeastMs)
+        retry = timer.schedule({ connect() }, wait, TimeUnit.MILLISECONDS)
         delayMs = (delayMs * 2).coerceAtMost(30_000L)
     }
 
@@ -171,7 +179,9 @@ class HubClient(
         }
 
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-            webSocket.close(code, reason)
+            // Acknowledge with a normal close: echoing the relay's own code back (4003, say)
+            // means nothing to it, and OkHttp refuses codes outside the ranges it knows.
+            runCatching { webSocket.close(1000, null) }
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
@@ -185,11 +195,27 @@ class HubClient(
                 onState(false, if (code == 4001) "bad_key" else "bad_device")
                 return
             }
-            scheduleReconnect("closed $code $reason")
+            // 4003: replaced by a newer connection of this device (wait 30 s, as the desktop
+            // does), or the operator paused the hub (`hub_paused`: two minutes, as the desktop
+            // and the iPhone wait); the row under Devices says which.
+            if (code == 4003 && reason == "hub_paused") {
+                scheduleReconnect("hub_paused", atLeastMs = HUB_PAUSED_RETRY_MS)
+                return
+            }
+            scheduleReconnect("closed $code $reason", atLeastMs = if (code == 4003) REPLACED_RETRY_MS else 0L)
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-            AppLogger.info(TAG, "hub socket failed: ${t.message}")
+            val status = response?.code
+            AppLogger.info(TAG, "hub socket failed: ${t.message}" + (status?.let { " (HTTP $it)" } ?: ""))
+            if (status == 401 || status == 403) {
+                // The relay refused the key before the socket opened (it closes 4001 before
+                // accepting, which reaches us as a failed handshake). The same key will be
+                // refused again in a second; say so and try again slowly, a new sign-in makes
+                // a new client.
+                scheduleReconnect("bad_key", atLeastMs = REFUSED_RETRY_MS)
+                return
+            }
             scheduleReconnect(t.message ?: t.javaClass.simpleName)
         }
     }
@@ -209,6 +235,7 @@ class HubClient(
             }
             "profile" -> runCatching { onProfile(frame) }
             "sync" -> runCatching { onSync(frame) }
+            "working" -> runCatching { onWorking(frame) }
             "call" -> {
                 val call = IncomingCall(
                     id = frame.optString("id"),
@@ -307,5 +334,11 @@ class HubClient(
 
     companion object {
         private const val TAG = "HubClient"
+        /** After 4003 without a reason (replaced by a newer connection): what the desktop waits too. */
+        private const val REPLACED_RETRY_MS = 30_000L
+        /** After 4003 `hub_paused` (the operator paused the hub): what the desktop and the iPhone wait too. */
+        private const val HUB_PAUSED_RETRY_MS = 120_000L
+        /** After the relay refused the key at the handshake: what the runtime waits too. */
+        private const val REFUSED_RETRY_MS = 60_000L
     }
 }

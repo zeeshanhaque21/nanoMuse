@@ -15,12 +15,14 @@ import { useLive, type UpdateInfo } from './live.ts'
 import { DOCS_URL, ISSUES_URL, REPO_URL } from './panels.ts'
 import { Sheet } from './ui.tsx'
 
-export const RELEASES_URL = 'https://github.com/nano-muse/nanoMuse/releases'
+export const RELEASES_URL = 'https://github.com/zeeshanhaque21/nanoMuse/releases'
 
 interface AppInfo {
   version: string
   platform: string
   arch: string
+  /** The Linux build runs from an AppImage (shell 0.1.42); absent from older shells. */
+  appImage?: boolean
 }
 
 let appInfo: AppInfo | undefined
@@ -73,7 +75,7 @@ let autoChecked = false
 export function UpdateRow({ t, bundle }: { t: Translate; bundle: string }): ReactNode {
   const app = useAppInfo()
   const { info, checking, check } = useUpdateCheck()
-  const asset = info && app ? pickAsset(info.assets, app.platform, app.arch) : undefined
+  const asset = info && app ? pickAsset(info.assets, app.platform, app.arch, app.appImage === true) : undefined
   // nothing known yet (the host's daily check has not run): one check per window, on sight
   useEffect(() => { if (!info && !checking && !autoChecked) { autoChecked = true; check() } }, [info === null])
   const installed = app ? t('vrInstalled', { app: app.version || '—', bundle: bundle || '—' }) : t('abVersionBundle', { bundle: bundle || '—' })
@@ -82,7 +84,7 @@ export function UpdateRow({ t, bundle }: { t: Translate; bundle: string }): Reac
   if (checking || !info) {
     found = t('vrChecking')
   } else if (info.source === 'none') {
-    found = h(Fragment, null, t('vrFailed'), ' — ', h('button', { type: 'button', className: 'nm-ob-link nm-inline', onClick: check }, t('vrCheckNow')))
+    found = h(Fragment, null, t('vrFailed'), ' · ', h('button', { type: 'button', className: 'nm-ob-link nm-inline', onClick: check }, t('vrCheckNow')))
   } else if (info.newer) {
     found = t('vrOut', { version: info.latest })
     action = h('button', { type: 'button', className: 'nm-pill nm-pill-sm', onClick: () => openLink(asset?.url ?? info.page) }, t('vrUpdate'))

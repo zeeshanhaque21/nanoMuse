@@ -570,6 +570,8 @@ fun ChatScreen(
     // nanoMuse: the screen stays on while the agent drives the browser or another app's screen.
     io.github.nanomuse.status.KeepAwake.Effect(isStreaming)
     val canResume by viewModel.canResume.collectAsState()
+    // nanoMuse: the rows the account's other devices wrote — never this phone's turn to resume (C9)
+    val nmRemoteRows by io.github.nanomuse.sync.ConversationSync.remoteRows.collectAsState()
     val nmContinueAsk by viewModel.nmContinueAsk.collectAsState() // nanoMuse: "continue?" card replaces the banner while shown
     // nanoMuse: Muse's header carries only the name; the model rows under it are a
     // Setting (Appearance → Home), off by default on the main chat of the home shell.
@@ -3475,7 +3477,7 @@ fun ChatScreen(
                         }
                     }
                 }
-                val hasFloatingTools = nmShowSteps && (isStreaming || nmBarLingers) && nmAnyToolStep
+                val hasFloatingTools = nmShowSteps && (isStreaming || nmBarLingers) && nmAnyToolStep // nanoMuse: the steps bar
                 val visualOverlayHeight = 65.dp  // thumbnailHeight in FloatingToolStatusBar
                 // Halve the breathing room above the input bar in both
                 // states — felt too sparse before. The thumbnail's 65dp
@@ -4120,7 +4122,16 @@ fun ChatScreen(
                             )
                         }
                     }
-                    if (canResume && !isStreaming && error == null && !lastAssistantHasError && nmContinueAsk == null) {
+                    // nanoMuse: the last line came from another device (C9) — never this phone's
+                    // turn to resume; while that device works, say so in the banner's place.
+                    val nmLastId = messages.lastOrNull()?.id
+                    val nmRemoteTail = nmLastId != null && nmLastId.substringBefore('#') in nmRemoteRows
+                    if (nmRemoteTail) {
+                        item(key = "__nm_working__", contentType = "nm_working") {
+                            io.github.nanomuse.ui.chat.NmWorkingLine(viewModel.realSessionId.ifEmpty { sessionId }, nmLastId)
+                        }
+                    }
+                    if (canResume && !isStreaming && error == null && !lastAssistantHasError && nmContinueAsk == null && !nmRemoteTail) {
                         item(key = "__resume_banner__", contentType = "resume_banner") {
                             ResumeBanner(onResume = {
                                 viewModel.resume()
@@ -4530,13 +4541,28 @@ fun ChatScreen(
                                 }
                             }
                             is FlatChatItem.AssistantTyping -> TypingIndicator()
-                            is FlatChatItem.AssistantError -> InlineErrorBanner(
+                            // nanoMuse: a provider that could not be reached (or refused the
+                            // region, or whose sign-in ran out) is a card, not the socket's text
+                            is FlatChatItem.AssistantError -> io.github.nanomuse.ui.chat.NmProviderErrorOrBanner(
                                 error = item.error,
                                 onRetry = {
                                     coroutineScope.launch { tracedScrollToItem("INLINE-RETRY-LAST", 0, 0) }
                                     safeMutate { viewModel.retryLast() }
                                 },
-                            )
+                                // nanoMuse: one turn on nanoMuse Cloud after a model of the person's own failed; nothing is switched
+                                onRetryOnCloud = if (viewModel.nmOffersCloudRetry()) ({
+                                    coroutineScope.launch { tracedScrollToItem("INLINE-RETRY-LAST", 0, 0) }
+                                    safeMutate { viewModel.nmRetryLastOnCloud() }
+                                }) else null,
+                            ) {
+                                InlineErrorBanner(
+                                    error = item.error,
+                                    onRetry = {
+                                        coroutineScope.launch { tracedScrollToItem("INLINE-RETRY-LAST", 0, 0) }
+                                        safeMutate { viewModel.retryLast() }
+                                    },
+                                )
+                            }
                             is FlatChatItem.AssistantLegacyContent -> BoundsTrackedBlock(
                                 messageId = item.messageId,
                                 slotKey = "legacy",
@@ -5589,7 +5615,7 @@ fun ChatScreen(
                                 shadowPaint,
                             )
                         }
-                        .padding(top = if (attachments.isNotEmpty()) 8.dp else if (nmPill) 0.dp else 4.dp),
+                        .padding(top = if (attachments.isNotEmpty()) 8.dp else if (nmPill) 0.dp else 4.dp), // nanoMuse: pill composer
                 ) {
                     // T185: Move-to capsule lives INSIDE the composer card,
                     // pinned 8dp from the top-right corner, mirroring iOS
@@ -7321,13 +7347,15 @@ fun ChatScreen(
                 } else {
                     viewModel.selectEntry(entryId)
                     showModelPicker = false
-                    // nanoMuse: a pick among the Cloud's models is meant as "the model from
-                    // now on" — the default group follows it, and a line says so, since the
-                    // picker's own binding is per chat and the next new chat would otherwise
-                    // have gone back to the recommended model without a word.
-                    if (entry != null && io.github.nanomuse.cloud.NanoMuseCloud.owns(context, entry)) {
+                    // nanoMuse: a pick in the picker is meant as "the model from now on" —
+                    // the default for new chats follows it (a group named after the pick's
+                    // provider, Settings → Models shows the same), and a line says so, since
+                    // the picker's own binding is per chat and the next new chat would
+                    // otherwise have gone back to the old default without a word. Since
+                    // 0.1.41 this holds for every provider, not the Cloud's models alone.
+                    if (entry != null) {
                         val name = entry.model.displayName.ifBlank { entry.model.id }
-                        val sticks = io.github.nanomuse.cloud.NanoMuseCloud.followPick(context, entryId)
+                        val sticks = io.github.nanomuse.models.ModelSlots.followPick(context, entryId)
                         android.widget.Toast.makeText(
                             context,
                             context.getString(if (sticks) R.string.nm_model_switched_sticky else R.string.nm_model_switched, name),

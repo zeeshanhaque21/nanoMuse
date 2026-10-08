@@ -1621,7 +1621,7 @@ struct ContentView: View {
             }
         }
         .task {
-            sessions = await ChatStore.shared.listSessions()
+            sessions = NanoMuseSync.shared.visible(await ChatStore.shared.listSessions()) // nanoMuse: C10 — another account's conversations stay hidden
             // Folders must load WITH the first session batch: groupedSessionIDs
             // treats a folder_id whose folder isn't loaded as an orphan and
             // renders the session ungrouped, so a first paint with sessions
@@ -4139,7 +4139,7 @@ struct ContentView: View {
         }
         sessionRefreshInFlight = true
         Task(priority: .utility) { @MainActor in
-            sessions = await ChatStore.shared.listSessions()
+            sessions = NanoMuseSync.shared.visible(await ChatStore.shared.listSessions()) // nanoMuse: C10 — another account's conversations stay hidden
             folders = await ChatStore.shared.listFolders()
             sessionRefreshInFlight = false
             if sessionRefreshPending {
@@ -7691,7 +7691,7 @@ private struct SettingsSheet: View {
                                 .background(.indigo, in: Circle())
                         }
                     }
-                    Link(destination: URL(string: "https://github.com/nano-muse/nanoMuse/blob/main/docs/privacy.md")!) {
+                    Link(destination: URL(string: "https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/privacy.md")!) {
                         Label {
                             Text("Privacy Policy")
                         } icon: {
@@ -7964,7 +7964,7 @@ private struct SettingsSheet: View {
 
         """
 
-        var components = URLComponents(string: "https://github.com/nano-muse/nanoMuse/issues/new")
+        var components = URLComponents(string: "https://github.com/zeeshanhaque21/nanoMuse/issues/new")
         components?.queryItems = [
             URLQueryItem(name: "template", value: "bug_report.md"),
             URLQueryItem(name: "title", value: "[Bug] "),

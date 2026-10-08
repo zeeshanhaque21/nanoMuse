@@ -205,7 +205,10 @@ class HubService:
         logger.info("cloud account seeded from the environment")
 
     async def stop(self) -> None:
+        """Leave the hub, end the profile's pending push or pull, then close the HTTP client —
+        in that order, so that nothing is still talking to the relay when its client goes."""
         await self.leave()
+        await self.profile.stop()
         await self.cloud.close()
 
     async def join(self) -> None:
@@ -235,8 +238,13 @@ class HubService:
         client, self.client = self.client, None
         if client is not None:
             await client.stop()
-        for t in list(self._tasks):
+        tasks = [t for t in self._tasks if not t.done()]
+        for t in tasks:
             t.cancel()
+        if tasks:
+            # the models refresh, the runs other devices asked for: ended, not left to finish
+            # (and to reach for the relay) after this returns
+            await asyncio.wait(tasks)
         self._sync_tools(False)
         self.publish()
 
@@ -319,6 +327,14 @@ class HubService:
         self.last_me = {k: v for k, v in data.items() if k != "api_key"}
         self.svc.app.vault.set(CLOUD_KEY, key)
         account: dict[str, Any] = data["account"] if isinstance(data.get("account"), dict) else {}
+        previous = self.svc.sync.account_id or str(
+            (self.data.get("cloud") or {}).get("account_id") or ""
+        )
+        if previous and previous != str(account.get("id") or ""):
+            # a different account (contract C10): the socket to the relay, its device list
+            # and the account's models start over under the new key
+            await self.leave()
+            self.chat_models, self.gui_models, self.models = [], [], []
         self.data["cloud"] = {
             "base_url": self.cloud.base_url,
             "hint": str(account.get("hint") or ""),
@@ -346,7 +362,10 @@ class HubService:
         # becomes the model, as it does for a hosted runtime.
         if self._llm_is_cloud():
             self.svc.connections._swap_llm()
-        elif not (self.settings.llm.api_key or (self.data.get("llm") or {}).get("api_key")):
+        elif self.settings.cloud.models and not (
+            self.settings.llm.api_key or (self.data.get("llm") or {}).get("api_key")
+        ):
+            # not while the person switched the account's models off: a sign-in changes no slot
             with contextlib.suppress(CloudError, Exception):
                 await self.use_as_model()
         if self.settings.hub.enabled:
@@ -514,6 +533,8 @@ class HubService:
             "base_url": self.cloud.base_url,
             "signed_in": self.signed_in,
             "required": self.settings.cloud.required,
+            # the apps' *Use nanoMuse Cloud models*: the account's models as a source
+            "models": self.settings.cloud.models,
             "hint": str(cloud.get("hint") or ""),
             "channel": str(cloud.get("channel") or ""),
             "signed_in_at": cloud.get("signed_in_at"),
@@ -527,11 +548,40 @@ class HubService:
             ),
         }
 
+    def set_models(self, on: bool) -> dict[str, Any]:
+        """Switch the account's models on or off as a source (``[cloud] models``, kept in
+        app-settings). Off, the relay leaves the automatic order of the hands, pictures and
+        clips and the providers' listing; the sign-in stays. The chat model is the one slot
+        this cannot move: the runtime holds a single ``[llm]`` and no list of other keys, so
+        while the chat model is the account's the switch is refused (``409 chat_on_cloud``)
+        and the person picks another chat model first."""
+        if not on and self._llm_is_cloud():
+            raise CloudError(
+                409,
+                "chat_on_cloud",
+                "The chat model is nanoMuse Cloud's. Pick another chat model first; then the "
+                "account's models can be switched off.",
+            )
+        cloud = dict(self.data.get("cloud") or {})
+        cloud["models"] = bool(on)
+        self.data["cloud"] = cloud
+        self.settings.cloud.models = bool(on)
+        self._save()
+        self.svc.connections._publish()
+        self.publish()
+        return self.account_view()
+
     async def use_as_model(self, model: str = "") -> dict[str, Any]:
         """Make the relay the model provider: the Cloud key from the vault, the recommended
-        chat model unless one is named."""
+        chat model unless one is named. The explicit ask of the Connections page, so it
+        switches the account's models back on when they were off."""
         if not self.signed_in:
             raise CloudError(401, "bad_key", "Sign in first.")
+        if not self.settings.cloud.models:
+            cloud = dict(self.data.get("cloud") or {})
+            cloud["models"] = True
+            self.data["cloud"] = cloud
+            self.settings.cloud.models = True
         self.cloud.api_key = self._key()
         if not model:
             try:
@@ -606,7 +656,7 @@ class HubService:
             raise HubError(
                 "no_hub",
                 "not connected to the hub"
-                + ("" if self.signed_in else " — sign in to nanoMuse Cloud first"),
+                + ("" if self.signed_in else "; sign in to nanoMuse Cloud first"),
             )
         return await self.client.call(to, action, args, timeout=timeout, on_event=on_event)
 
@@ -791,7 +841,15 @@ class HubService:
         self._incoming[call.id] = thread.id
         queue = self.svc.bus.subscribe()
         try:
-            self.svc.send(thread.id, text, source="device", label=call.sender_name)
+            # `language`: the asking device's UI language (optional, docs/hub.md); the
+            # answer is written in it rather than guessed from the text
+            self.svc.send(
+                thread.id,
+                text,
+                source="device",
+                label=call.sender_name,
+                language=str(call.args.get("language") or "")[:20],
+            )
             final = await asyncio.wait_for(
                 self._relay_run(thread, call, queue), timeout=TASK_TIMEOUT_S
             )
@@ -910,17 +968,18 @@ class HubService:
     async def _forward_artifact(self, call: IncomingCall, rel: str) -> None:
         try:
             path = self.svc.resolve_workspace_path(rel)
-        except ValueError:
-            return
-        if not path.is_file() or path.stat().st_size > actions.FILE_LIMIT:
-            return
-        mime = _mime(path.name)
+            if not path.is_file() or path.stat().st_size > actions.FILE_LIMIT:
+                return
+            mime = _mime(path.name)
+            data = path.read_bytes() if mime.startswith("image/") else b""
+        except (ValueError, OSError):
+            return  # outside the workspace, unreadable, or gone between the event and now
         if mime.startswith("image/"):
             await call.event(
                 {
                     "stage": "image",
                     "mime": mime,
-                    "data": base64.b64encode(path.read_bytes()).decode(),
+                    "data": base64.b64encode(data).decode(),
                     "from": self.device_name,
                     "name": path.name,
                 }
@@ -1042,11 +1101,16 @@ class HubService:
                     }
                 )
 
+        args: dict[str, Any] = {"text": text, "from": self.device_name, "conversation": tid}
+        if thread.agent.ui_language:
+            # the person reads this chat in that language; the other device's runtime
+            # answers in it (docs/hub.md, `task`)
+            args["language"] = thread.agent.ui_language
         try:
             result = await self.call(
                 device_id,
                 "task",
-                {"text": text, "from": self.device_name, "conversation": tid},
+                args,
                 timeout=REMOTE_TASK_TIMEOUT_S,
                 on_event=on_event,
             )

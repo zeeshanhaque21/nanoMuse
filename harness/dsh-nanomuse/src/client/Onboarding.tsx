@@ -4,8 +4,9 @@
  * three feature rows, the free/open-source notice, "Sign in — free"); the sign-in itself
  * (a phone number or an e-mail, the six boxes of the code, or the password); a password
  * page for an account that was just created; "Which model answers?" (the Cloud model, or
- * a key of one's own → the harness's model settings); the models page for one's own key;
- * the two permissions the hands need (macOS only — elsewhere the page is skipped); and
+ * a key of one's own); the own-key step (C11: the region's providers from the catalogue, a
+ * key taken inline, the ChatGPT sign-in, *More ways*; Continue once one is in, Skip for now
+ * until then); the two permissions the hands need (macOS only — elsewhere the page is skipped); and
  * "Meet <name>" with Start, which opens the main chat as the first conversation, where
  * the app speaks first (`FirstRun.tsx`).
  *
@@ -20,16 +21,17 @@ import { useModalLayer } from '@deepseek-ai/dsh-client-ui-primitives'
 import { createElement as h, Fragment, useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { firstRunNeeded, stageOf, dotOf, type Stage } from '../firstrun.ts'
-import { call, type CloudStatus, type Translate } from './api.ts'
+import { call, type CloudStatus, type Translate, failureText } from './api.ts'
 import { useCloudConfig, type AccountSheet } from './AccountPage.tsx'
 import { Avatar } from './Avatar.tsx'
 import { BrandMark } from './BrandMark.tsx'
 import { gatedPermissions, openLink, type PermissionKind } from './bridge.ts'
-import { usePermissions, type Permissions } from './permissions.ts'
+import { permissionSub, permissionTitle, usePermissions, type Permissions } from './permissions.ts'
 import { BlackScreenNotice, HandsTryRows } from './HandsCheck.tsx'
 import { IconCheck, IconHand, IconMessage, IconMonitor, IconSettings, IconUsers } from './icons.tsx'
 import { useLive } from './live.ts'
 import { setMainChatId } from './MuseChats.tsx'
+import { OwnKeyStep } from './OwnKey.tsx'
 import { REPO_URL } from './panels.ts'
 import { nav, roomsCall, useRooms } from './rooms.ts'
 
@@ -57,9 +59,8 @@ type SignInView = 'identifier' | 'code' | 'password'
 
 /** How long Start may take to open the main chat before we stop waiting. */
 const START_MS = 12_000
-const PRIVACY_URL = 'https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/privacy.md'
-const TERMS_URL = 'https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/terms.md'
-const HANDS_URL = 'https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/sentinel.md'
+  const PRIVACY_URL = 'https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/privacy.md'
+  const HANDS_URL = 'https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/sentinel.md'
 
 function Pill({ children, onClick, disabled, type = 'button', ghost = false, small = false, className = '' }: {
   children?: ReactNode
@@ -172,12 +173,7 @@ export function makeOnboarding(t: Translate, _actions: OnboardingActions) {
           permissionsSeen: rooms.firstRun.permissionsSeen,
         })
       : null
-    // the models page waits for a key added in the model settings dialog beside it
-    useEffect(() => {
-      if (stage !== 'models') return
-      const timer = window.setInterval(() => { call<CloudStatus>('status').then((next) => setStatus(next)).catch(() => undefined) }, 3000)
-      return () => window.clearInterval(timer)
-    }, [stage])
+    // the own-key step stays until Continue or Skip: a key saved there does not flip the page by itself
 
     const finish = useCallback(() => {
       setFading(true)
@@ -205,7 +201,7 @@ export function makeOnboarding(t: Translate, _actions: OnboardingActions) {
       try {
         await work()
       } catch (err: unknown) {
-        setError(t('failed', { message: (err as Error).message }))
+        setError(failureText(t, err))
       } finally {
         setBusy(false)
       }
@@ -266,7 +262,14 @@ export function makeOnboarding(t: Translate, _actions: OnboardingActions) {
     }
     const choose = (source: 'cloud' | 'own') => {
       void roomsCall('firstrun/set', { sourceChosen: source }).catch(() => undefined)
-      if (source === 'own') openSection('models')
+    }
+    // the own-key step (C11): done once a key is saved or the ChatGPT sign-in finished; Continue then, Skip for now until then
+    const [ownDone, setOwnDone] = useState(false)
+    const onOwnDone = useCallback((done: boolean) => setOwnDone(done), [])
+    const leaveOwnKeyStep = () => {
+      setModelsSkipped(true)
+      // the host's `ready` follows the key just saved: read it again so the later pages and the completion rule see it
+      call<CloudStatus>('status').then((next) => setStatus(next)).catch(() => undefined)
     }
     const permissionsDone = () => { void roomsCall('firstrun/set', { permissionsSeen: true }).catch(() => undefined) }
 
@@ -284,7 +287,9 @@ export function makeOnboarding(t: Translate, _actions: OnboardingActions) {
         h(BrandMark, { size: 72, className: 'nm-fr-hero-mark' }),
         h('h1', { className: 'nm-ob-title' }, t('obSignInTitle')),
         h('input', { className: 'nm-field', value: identifier, placeholder: t('obIdentifier'), autoComplete: 'username', autoFocus: true, 'aria-label': t('obIdentifier'), onChange: (e: FormEvent<HTMLInputElement>) => setIdentifier(e.currentTarget.value) }),
-        h('p', { className: 'nm-ob-fine' }, t('obTermsLead'), ' ', link(TERMS_URL, t('obTerms')), t('obTermsAnd'), link(PRIVACY_URL, t('obPrivacy')), t('obTermsEnd')),
+        // SMS codes reach mainland-China numbers only; everyone else gets an e-mail (the Settings sign-in says the same)
+        h('p', { className: 'nm-ob-fine' }, t('identifierHint')),
+        h('p', { className: 'nm-ob-fine' }, t('obTermsLead'), link(PRIVACY_URL, t('obPrivacy')), t('obTermsEnd')),
         error ? h('div', { className: 'nm-ob-error', role: 'alert' }, error) : null,
         h(Pill, { type: 'submit', disabled: busy || identifier.trim().length < 3, className: 'nm-ob-wide' }, busy ? t('sending') : t('obContinue')),
         h('button', { type: 'button', className: 'nm-ob-link', onClick: () => { setError(undefined); setSignIn(null) } }, t('obBack')))
@@ -356,14 +361,17 @@ export function makeOnboarding(t: Translate, _actions: OnboardingActions) {
           h(ChoiceRow, { title: t('frSourceCloud'), sub: t('frSourceCloudSub'), disabled: !status.signedIn, onClick: () => choose('cloud') }),
           h(ChoiceRow, { title: t('frOwnKey'), sub: t('frSourceOwnSub'), onClick: () => choose('own') })))
     } else if (stage === 'models') {
+      // the own-key step (C11): the region's first group with the ChatGPT row, more ways behind a link;
+      // a saved key or a finished sign-in turns Skip for now into Continue
       body = h(Page, {
         title: t('frModelsTitle'),
-        sub: t('frModelsSub'),
-        primary: { label: t('frModelsOpen'), onClick: () => openSection('models') },
-        secondary: { label: t('frSkipModels'), onClick: () => setModelsSkipped(true) },
+        sub: t('ownKeyStepSub'),
+        primary: ownDone ? { label: t('ownKeyStepDone'), onClick: leaveOwnKeyStep } : undefined,
+        secondary: ownDone ? undefined : { label: t('frSkipModels'), onClick: leaveOwnKeyStep },
         fine: t('frModelsFine'),
         t,
-      })
+      },
+        h(OwnKeyStep, { t, onDone: onOwnDone }))
     } else if (stage === 'permissions') {
       body = h(PermissionsPage, { t, name, onDone: permissionsDone })
     } else {
@@ -477,8 +485,8 @@ function PermissionsPage({ t, name, onDone }: { t: Translate; name: string; onDo
     t,
   },
     h('div', { className: 'nm-ob-card' },
-      h(PermissionRow, { t, kind: 'accessibility', icon: h(IconHand, { size: 18 }), title: t('obAccessibility'), sub: t('obAccessibilitySub', { name }), perms }),
-      h(PermissionRow, { t, kind: 'screen', icon: h(IconMonitor, { size: 18 }), title: t('obScreen'), sub: t('obScreenSub', { name }), perms })),
+      h(PermissionRow, { t, kind: 'accessibility', icon: h(IconHand, { size: 18 }), title: permissionTitle(t, 'accessibility'), sub: permissionSub(t, 'accessibility', name), perms }),
+      h(PermissionRow, { t, kind: 'screen', icon: h(IconMonitor, { size: 18 }), title: permissionTitle(t, 'screen'), sub: permissionSub(t, 'screen', name), perms })),
     h(RelaunchNotice, { t, perms }),
     // the two checks from Settings → Computer use: a test screenshot (black = Screen Recording
     // not in effect yet) and a small mouse move (fails without Accessibility)

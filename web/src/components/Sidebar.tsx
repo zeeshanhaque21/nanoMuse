@@ -14,7 +14,7 @@ function bugReportUrl(version: string): string {
   const bridge = desktopBridge();
   const where = bridge ? `Desktop app (${bridge.platform}, shell ${bridge.version})` : `Web app (${navigator.userAgent})`;
   const params = new URLSearchParams({ template: "bug_report.yml", version: version || "", os: where });
-  return `https://github.com/nano-muse/nanoMuse/issues/new?${params.toString()}`;
+  return `https://github.com/zeeshanhaque21/nanoMuse/issues/new?${params.toString()}`;
 }
 
 /**

@@ -281,7 +281,7 @@ enum NanoMuseActivity {
     static func load() async -> [NanoMuseActivityEntry] {
         let startOfToday = Calendar.current.startOfDay(for: Date())
         let since = startOfToday.addingTimeInterval(-24 * 3600)
-        let sessions = await ChatStore.shared.listSessions()
+        let sessions = await NanoMuseSync.shared.visible(await ChatStore.shared.listSessions()) // C12: this account's chats only
             .filter { $0.updatedAt >= since && $0.remoteDeviceId == nil }
             .sorted { $0.updatedAt > $1.updatedAt }
             .prefix(12)
@@ -558,7 +558,7 @@ struct NanoMuseShareCard: View {
         ZStack {
             palette.background
             VStack(spacing: 0) {
-                Text(String(format: AppLocalized("Hi, I'm %@, a personal AI agent. Meet nanoMuse — open source, runs on your phone."), agentName))
+                Text(String(format: AppLocalized("Hi, I'm %@, a personal AI agent. Meet nanoMuse: open source, runs on your phone."), agentName))
                     .font(.system(size: 42))
                     .foregroundStyle(Color(red: 0.106, green: 0.106, blue: 0.122))
                     .multilineTextAlignment(.center)
@@ -586,7 +586,7 @@ struct NanoMuseShareCard: View {
             VStack(alignment: .leading, spacing: 8) {
                 Spacer()
                 Text("nanoMuse").font(.system(size: 40, weight: .bold)).foregroundStyle(palette.accent)
-                Text(AppLocalized("Your personal AI agent, open source · github.com/nano-muse/nanoMuse"))
+                Text(AppLocalized("Your personal AI agent, open source · github.com/zeeshanhaque21/nanoMuse"))
                     .font(.system(size: 28)).foregroundStyle(.black.opacity(0.6))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -670,7 +670,7 @@ struct NanoMuseAvatarShareSheet: View {
         }
         .sheet(isPresented: Binding(get: { sharing != nil }, set: { if !$0 { sharing = nil } })) {
             if let sharing {
-                NanoMuseShareSheet(items: [sharing, String(format: AppLocalized("My new look — %@. Have a look."), agentName)])
+                NanoMuseShareSheet(items: [sharing, String(format: AppLocalized("My new look: %@. Have a look."), agentName)])
             }
         }
     }

@@ -15,7 +15,7 @@ import { createElement as h, Fragment, useCallback, useEffect, useId, useRef, us
 import { createPortal } from 'react-dom'
 import { UpdateRow } from './About.tsx'
 import { openStar } from './AccountPage.tsx'
-import { call, type CloudStatus, type Translate } from './api.ts'
+import { call, type CloudStatus, type Translate, failureText } from './api.ts'
 import { Avatar } from './Avatar.tsx'
 import { openLink } from './bridge.ts'
 import { settingsBus } from './bus.ts'
@@ -38,10 +38,11 @@ export const WALLET_SECTION = 'nanomuse-wallet'
 export const STORAGE_SECTION = 'nanomuse-storage'
 export const CHANNELS_SECTION = 'nanomuse-channels'
 export const HARNESS_SECTION = 'nanomuse-harness'
-/** Muse's nav, in its order; the account page, models and presets are Advanced (the account card on General opens the first). */
 /** Desk-B's Media page (image and video models), as registered in `index.ts`. */
 const MEDIA_SECTION = 'nanomuse-media'
-const PRIMARY: readonly string[] = ['general', 'nanomuse-connectors', COMPUTER_SECTION, MEDIA_SECTION, 'nanomuse-files', 'nanomuse-dictation', WALLET_SECTION, STORAGE_SECTION, 'nanomuse-permissions', CHANNELS_SECTION, 'nanomuse-devices', DATA_SECTION, HELP_SECTION, LEGAL_SECTION]
+/** Settings → Models (0.1.41): the four slots, right after General. */
+const MODELS_SECTION = 'nanomuse-models'
+const PRIMARY: readonly string[] = ['general', MODELS_SECTION, 'nanomuse-connectors', COMPUTER_SECTION, MEDIA_SECTION, 'nanomuse-files', 'nanomuse-dictation', WALLET_SECTION, STORAGE_SECTION, 'nanomuse-permissions', CHANNELS_SECTION, 'nanomuse-devices', DATA_SECTION, HELP_SECTION, LEGAL_SECTION]
 
 export interface SectionRow {
   id: string
@@ -92,6 +93,7 @@ function navIcon(id: string): ReactNode {
     case 'general': return h(IconSliders, { size: 16 })
     case 'nanomuse-cloud': return h(IconUser, { size: 16 })
     case 'models': return h(IconDatabase, { size: 16 })
+    case MODELS_SECTION: return h(IconDatabase, { size: 16 })
     case 'agent-presets': return h(IconSparkle, { size: 16 })
     case 'nanomuse-devices': return h(IconDevices, { size: 16 })
     case COMPUTER_SECTION: return h(IconHand, { size: 16 })
@@ -141,7 +143,7 @@ function SettingsPanel({ t, rows, renderSlot, activeId, onSelect, onClose }: Pan
     'aria-current': row.id === active ? 'true' : undefined,
     'data-modal-autofocus': row.id === active ? '' : undefined,
     onClick: () => onSelect(row.id),
-  }, navIcon(row.id), h('span', { className: 'nm-settings-cell-label' }, row.id === 'nanomuse-cloud' ? t('navAccount') : row.label))
+  }, navIcon(row.id), h('span', { className: 'nm-settings-cell-label' }, row.label))
 
   const [signOutError, setSignOutError] = useState<string | undefined>()
   const signOut = () => {
@@ -149,7 +151,7 @@ function SettingsPanel({ t, rows, renderSlot, activeId, onSelect, onClose }: Pan
     setSignOutError(undefined)
     void call('sign-out', {})
       .then(() => onClose())
-      .catch((err: unknown) => setSignOutError(t('failed', { message: (err as Error).message })))
+      .catch((err: unknown) => setSignOutError(failureText(t, err)))
       .finally(() => setSigningOut(false))
   }
 

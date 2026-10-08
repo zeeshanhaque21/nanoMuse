@@ -179,3 +179,108 @@ test('without a key nothing connects until restart', async () => {
   assert.equal(sockets.length, 1)
   client.stop()
 })
+
+test('the sync frame carries the cursor and the device; the working frame (C9) reaches its listener as it came', async () => {
+  const h = harness()
+  const s = await connected(h)
+  const syncs = []
+  const working = []
+  const offSync = h.client.onSync((cursor, from) => syncs.push([cursor, from]))
+  const offWorking = h.client.onWorking((frame) => working.push(frame))
+  s.push({ type: 'sync', what: 'conversations', cursor: 42, from: 'phone-1' })
+  s.push({ type: 'sync', what: 'something-else', cursor: 43, from: 'phone-1' })
+  s.push({ type: 'working', cid: 'c1', from: 'phone-1', device_name: 'Pixel 8', working: true, at: 1738000000 })
+  s.push({ type: 'working', cid: 'c1', from: 'phone-1', device_name: 'Pixel 8', working: false, at: 1738000009 })
+  s.push({ type: 'working', cid: 'c2' })
+  assert.deepEqual(syncs, [[42, 'phone-1']])
+  assert.deepEqual(working, [
+    { cid: 'c1', from: 'phone-1', device_name: 'Pixel 8', working: true, at: 1738000000 },
+    { cid: 'c1', from: 'phone-1', device_name: 'Pixel 8', working: false, at: 1738000009 },
+    { cid: 'c2', from: '', device_name: '', working: false, at: 0 },
+  ])
+  offSync()
+  offWorking()
+  s.push({ type: 'working', cid: 'c3', from: 'phone-1', device_name: 'Pixel 8', working: true, at: 1 })
+  assert.equal(working.length, 3)
+  h.client.stop()
+})
+
+test('a restart while the key is still being read opens one socket, not two', async () => {
+  // The key comes from the vault asynchronously; a sign-in's restart() landing in that
+  // window used to leave the first attempt's socket open next to the new one.
+  let release
+  const gate = new Promise((r) => (release = r))
+  const sockets = []
+  const client = new HubClient({
+    url: 'ws://relay/v1/hub',
+    key: async () => {
+      await gate
+      return 'nm_test'
+    },
+    device: () => DEVICE,
+    socket: (url) => {
+      const s = new FakeSocket(url)
+      sockets.push(s)
+      return s
+    },
+    backoffMs: { min: 5, max: 20 },
+    pingMs: 100_000,
+  })
+  client.start()
+  await tick()
+  client.restart()
+  await tick()
+  assert.equal(sockets.length, 0)
+  release()
+  await tick()
+  await tick()
+  assert.equal(sockets.length, 1, 'the attempt that lost the race opens nothing')
+  client.stop()
+})
+
+test('a restart fails the calls in flight at once and is offline until the new welcome', async () => {
+  const h = harness()
+  const s1 = await connected(h)
+  const states = []
+  h.client.onState(() => states.push(h.client.connected))
+  const inFlight = h.client.call('phone-1', 'info', {}, { timeoutMs: 60_000 })
+  h.client.restart()
+  await assert.rejects(inFlight, (e) => e instanceof HubError && e.code === 'disconnected')
+  assert.equal(h.client.connected, false, 'not connected between the sockets')
+  assert.deepEqual(states, [false])
+  // a call made before the new socket is open is refused, not written into a closed socket
+  await assert.rejects(h.client.call('phone-1', 'info', {}), (e) => e instanceof HubError && e.code === 'offline')
+  await tick()
+  const s2 = h.sockets.at(-1)
+  assert.notEqual(s2, s1)
+  assert.equal(s2.sent.length, 0, 'nothing is sent before the socket opens')
+  s2.open()
+  s2.push({ type: 'welcome', device_id: DEVICE.id, devices: [], server: {} })
+  assert.equal(h.client.connected, true)
+  assert.deepEqual(states, [false, true])
+  h.client.stop()
+})
+
+test('hub_paused waits well beyond the normal back-off; a refused device stays closed without signing out', async () => {
+  const h = harness()
+  const s = await connected(h)
+  s.drop(4003, 'hub_paused')
+  assert.equal(h.client.lastError, 'the hub is paused on the relay')
+  await wait(60)
+  assert.equal(h.sockets.length, 1, 'no reconnect within the normal back-off')
+  h.client.stop()
+
+  const h2 = harness()
+  let unauthorized = 0
+  h2.client.onUnauthorized(() => (unauthorized += 1))
+  const s2 = await connected(h2)
+  s2.drop(4002, 'bad device')
+  await wait(60)
+  assert.equal(h2.sockets.length, 1, 'the same device again would be refused again')
+  assert.equal(h2.client.lastError, 'the relay refused this device')
+  assert.equal(unauthorized, 0, 'a refused device is not a refused key')
+  h2.client.restart()
+  await tick()
+  assert.equal(h2.sockets.length, 2, 'a restart (a new sign-in, a rename) tries again')
+  h2.client.stop()
+})

@@ -3,10 +3,11 @@
 // model's at the turn's end, the whole history backfilled oldest first, the main chat as the
 // account's one main conversation (adopted, merged in time order, our echo never twice), the
 // other devices' chats as sessions here from the moment they are pulled, tombstones, the
-// switch and the refusals.
+// switch and the refusals. Contract C9: the side-chat switch (scope), the first pull's tail,
+// the working presence both ways, and the host doing no work while nothing changes.
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { SyncEngine, SyncRelay, MAX_POST_MESSAGES, migrate, RemoteStore, meanwhileNote } from '../lib/sync.js'
+import { SyncEngine, SyncRelay, MAX_POST_MESSAGES, TAIL, emptyState, migrate, RemoteStore, meanwhileNote } from '../lib/sync.js'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -24,10 +25,10 @@ async function until(pred, ms = 2000) {
 
 /** The relay's /v1/sync/* with the contract's rules, behind a fetch. */
 function fakeRelay() {
-  const r = { enabled: true, seq: 0, convs: new Map(), msgs: new Map(), pushes: [], calls: [], refuse: null }
+  const r = { enabled: true, seq: 0, convs: new Map(), msgs: new Map(), pushes: [], calls: [], gets: [], refuse: null, working: [], refuseWorking: false, presence: new Map() }
   const next = () => ++r.seq
   const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
-  const state = () => ({ enabled: r.enabled, cursor: r.seq, counts: { conversations: [...r.convs.values()].filter((c) => !c.deleted).length, messages: r.msgs.size }, limits: {} })
+  const state = () => ({ enabled: r.enabled, cursor: r.seq, counts: { conversations: [...r.convs.values()].filter((c) => !c.deleted).length, messages: r.msgs.size }, limits: {}, working: [...r.presence.values()] })
   r.add = (cid, kind, title, device = 'phone-1', name = 'Pixel 8') => {
     r.convs.set(cid, { cid, kind, title, device, device_name: name, created_at: 1738000000, updated_at: 1738000000, deleted: false, seq: next() })
   }
@@ -62,10 +63,30 @@ function fakeRelay() {
     if (path === '/v1/sync/changes' && method === 'GET') {
       const since = Number(u.searchParams.get('since') ?? 0)
       const limit = Number(u.searchParams.get('limit') ?? 500)
-      const rows = [...[...r.convs.values()].map((c) => ['c', c]), ...[...r.msgs.values()].map((m) => ['m', m])].filter(([, x]) => x.seq > since).sort((a, b) => a[1].seq - b[1].seq)
+      // C9: scope=main is the main conversation alone; tail=K (with since=0) the newest K messages of the scope and their conversations
+      const scope = u.searchParams.get('scope') ?? 'all'
+      const tail = since === 0 ? Number(u.searchParams.get('tail') ?? 0) : 0
+      r.gets.push({ since, limit, scope, tail })
+      const inScope = (cid) => scope !== 'main' || r.convs.get(cid)?.kind === 'main'
+      const convs = [...r.convs.values()].filter((c) => inScope(c.cid))
+      const msgs = [...r.msgs.values()].filter((m) => inScope(m.cid))
+      if (tail > 0) {
+        const newest = msgs.sort((a, b) => a.seq - b.seq).slice(-tail)
+        const cids = new Set(newest.map((m) => m.cid))
+        return json(200, { cursor: r.seq, more: false, skipped: msgs.length - newest.length, conversations: convs.filter((c) => cids.has(c.cid)), messages: newest })
+      }
+      const rows = [...convs.map((c) => ['c', c]), ...msgs.map((m) => ['m', m])].filter(([, x]) => x.seq > since).sort((a, b) => a[1].seq - b[1].seq)
       const more = rows.length > limit
       const page = rows.slice(0, limit)
       return json(200, { cursor: more ? page[page.length - 1][1].seq : r.seq, more, conversations: page.filter(([k]) => k === 'c').map(([, x]) => x), messages: page.filter(([k]) => k === 'm').map(([, x]) => x) })
+    }
+    if (path === '/v1/sync/working' && method === 'POST') {
+      if (r.refuseWorking) return json(500, { error: { code: 'boom', message: 'no' } })
+      const body = JSON.parse(init.body)
+      r.working.push(body)
+      if (body.working) r.presence.set(body.cid, { cid: body.cid, from: body.device, device_name: 'Desk', at: Math.floor(Date.now() / 1000) })
+      else r.presence.delete(body.cid)
+      return new Response(null, { status: 204 })
     }
     if (path === '/v1/sync/changes' && method === 'POST') {
       const body = JSON.parse(init.body)
@@ -113,14 +134,14 @@ function fakeRelay() {
 
 /** The sessions as the engine sees them: titles, lines, creation, the rows kept from elsewhere, the notes to the model. */
 function fakeSessions() {
-  const s = { rows: new Map(), lines: new Map(), appended: [], forgotten: [], injected: [], renamed: [], created: 0 }
+  const s = { rows: new Map(), lines: new Map(), appended: [], forgotten: [], injected: [], renamed: [], created: 0, listCalls: 0, lineCalls: 0 }
   s.add = (id, title, lines = [], createdAt = 1738000000000) => {
     s.rows.set(id, { id, title, blank: lines.length === 0, createdAt, updatedAt: createdAt })
     s.lines.set(id, lines)
   }
   s.api = {
-    list: async () => [...s.rows.values()],
-    lines: async (id) => s.lines.get(id) ?? [],
+    list: async () => { s.listCalls += 1; return [...s.rows.values()] },
+    lines: async (id) => { s.lineCalls += 1; return s.lines.get(id) ?? [] },
     create: async (title) => {
       const id = `session-${++s.created}`
       s.add(id, title, [], Date.now())
@@ -129,29 +150,35 @@ function fakeSessions() {
     rename: async (id, title) => { s.renamed.push([id, title]); if (s.rows.has(id)) s.rows.get(id).title = title },
     keep: async (id, line) => { s.appended.push([id, line]) },
     forget: async (id, mid) => { s.forgotten.push([id, mid]) },
+    forgetAll: async () => { s.forgotAll += 1 },
     inject: async (id, text) => { s.injected.push([id, text]) },
   }
+  s.forgotAll = 0
   /** What one session shows from elsewhere, in the order it was kept. */
   s.remote = (id) => s.appended.filter(([sid]) => sid === id).map(([, line]) => line)
   return s
 }
 
+/** The C7/C8 tests ran with every chat syncing; C9's default (main only) is tested on its own below. */
 function engine(relay, sessions, extra = {}) {
   let saved
+  let changes = 0
   const e = new SyncEngine({
     relay: new SyncRelay('https://relay.test', relay.fetch),
     sessions: sessions.api,
     token: async () => (extra.signedOut ? undefined : 'key'),
     deviceId: () => 'pc-1',
     isTaskSession: (id) => id.startsWith('task-'),
-    load: () => extra.state,
+    load: () => extra.state ?? { ...emptyState(), sideChats: extra.sideChats ?? true },
     save: async (state) => { saved = JSON.parse(JSON.stringify(state)) },
+    onChange: () => { changes += 1 },
     log: () => undefined,
     pushDelayMs: 5,
     pullEveryMs: 60_000,
+    frameCoalesceMs: 5,
     ...extra.options,
   })
-  return { engine: e, saved: () => saved }
+  return { engine: e, saved: () => saved, changes: () => changes }
 }
 
 test('the person’s words go up when sent, the model’s at the turn’s end; the main chat is the account’s main conversation', async () => {
@@ -323,6 +350,8 @@ test('the hub frame pulls, our own echo does not; the switch and the refusals', 
   const sessions = fakeSessions()
   const { engine: e } = engine(relay, sessions)
   relay.add('c1', 'side', 'Elsewhere')
+  // (a first pull is a tail pull: it carries the conversations of the newest messages, so the chat needs one)
+  relay.say('c1', 'user', 'hello')
   e.onFrame({ cursor: relay.seq, from: 'pc-1' })
   await tick(20)
   assert.equal(relay.calls.filter((c) => c.startsWith('GET /v1/sync/changes')).length, 0)
@@ -363,13 +392,17 @@ test('the hub frame pulls, our own echo does not; the switch and the refusals', 
   assert.equal(e.view().paused, true)
   await e.accountChanged('acct-1')
   assert.equal(await e.active(), true)
-  // a different account starts from zero
+  // a different account starts from zero; the mapping stays, owned by the last account (C10)
   e.state.cursor = 9
   e.state.cids.x = 'y'
+  e.state.owners.x = 'acct-1'
+  e.state.conversations.y = { kind: 'side', title: 't', device: 'd', deviceName: 'D', createdAt: 1, updatedAt: 1 }
   await e.accountChanged('acct-2')
   assert.equal(e.state.cursor, 0)
-  assert.deepEqual(e.state.cids, {})
+  assert.equal(e.state.cids.x, 'y')
+  assert.deepEqual(e.state.conversations, {})
   assert.equal(e.state.accountId, 'acct-2')
+  assert.ok(e.view().foreign.includes('x'))
   e.stop()
 })
 
@@ -448,5 +481,350 @@ test('a pull keeps the other devices’ rows for the transcript and hands the mo
   assert.deepEqual(sessions.forgotten, [[sid, p2]])
   assert.ok(e.view().hidden.includes(p2))
   assert.equal(sessions.injected.length, 1)
+  e.stop()
+})
+
+// ---- contract C9: main first ------------------------------------------------------------------
+
+test('C9: side chats stay local by default — only the main conversation goes up, the pull asks for scope=main, a side row makes no session; the switch turns both on and off', async () => {
+  const relay = fakeRelay()
+  relay.add('their-side', 'side', 'Dinner plans')
+  relay.say('their-side', 'user', 'book a table')
+  const sessions = fakeSessions()
+  sessions.add('s-main', 'Main here', [{ id: 'u1', role: 'user', text: 'main question', at: 1738000000000 }], 1738000000000)
+  sessions.add('s-side', 'Side here', [{ id: 'u2', role: 'user', text: 'side question', at: 1738000001000 }], 1738000001000)
+  const { engine: e, saved } = engine(relay, sessions, { sideChats: false })
+  assert.equal(e.view().sideChats, false)
+  await e.setMain('s-main')
+  await e.accountChanged('acct-1')
+  await until(() => [...relay.msgs.values()].some((m) => m.text === 'main question'))
+  await tick(30)
+  // the main alone went up; the side chat here was neither listed nor read
+  assert.deepEqual([...relay.convs.values()].filter((c) => c.device === 'pc-1').map((c) => c.kind), ['main'])
+  assert.ok(!relay.pushes.some((p) => p.messages.some((m) => m.text === 'side question')))
+  // every pull asked for the main conversation alone; the first one for the tail
+  assert.ok(relay.gets.length > 0 && relay.gets.every((g) => g.scope === 'main'))
+  assert.deepEqual(relay.gets[0], { since: 0, limit: 500, scope: 'main', tail: TAIL })
+  // the relay's side conversation is not a chat here
+  assert.equal(sessions.created, 0)
+  assert.equal(e.state.conversations['their-side'], undefined)
+  assert.deepEqual(sessions.appended, [])
+  // a side row that still arrives (a relay without scope) is ignored: no session, nothing kept
+  relay.fetch2 = relay.fetch
+  const unscoped = relay.fetch
+  relay.fetch = (url, init) => unscoped(String(url).replace('&scope=main', ''), init)
+  relay.say('their-side', 'assistant', 'Booked for 7')
+  await e.pull()
+  assert.equal(sessions.created, 0)
+  assert.deepEqual(sessions.appended, [])
+  relay.fetch = unscoped
+  // a turn in the side chat here stays here
+  const pushes = relay.pushes.length
+  e.messageSent('s-side')
+  e.turnEnded('s-side')
+  await tick(30)
+  assert.equal(relay.pushes.length, pushes)
+  // on: one pull from zero for the newest side turns, then this device's side chats go up oldest first
+  relay.gets.length = 0
+  const on = await e.setSideChats(true)
+  assert.equal(on.sideChats, true)
+  assert.equal(saved().sideChats, true)
+  await until(() => [...relay.msgs.values()].some((m) => m.text === 'side question'))
+  assert.deepEqual(relay.gets[0], { since: 0, limit: 500, scope: 'all', tail: TAIL })
+  assert.equal(sessions.created, 1)
+  const sid = [...sessions.rows.keys()].find((id) => sessions.rows.get(id).title === 'Dinner plans')
+  assert.deepEqual(sessions.remote(sid).map((l) => l.text), ['book a table', 'Booked for 7'])
+  assert.equal([...relay.convs.values()].find((c) => c.title === 'Side here')?.kind, 'side')
+  // off again: nothing is deleted, side turns stop moving either way, the main still syncs
+  await until(() => e.state.cursor === relay.seq)
+  const off = await e.setSideChats(false)
+  assert.equal(off.sideChats, false)
+  assert.ok(relay.convs.has('their-side') && sessions.rows.has(sid))
+  relay.say('their-side', 'user', 'make it 8')
+  const kept = sessions.appended.length
+  await e.pull()
+  assert.equal(sessions.appended.length, kept)
+  sessions.lines.get('s-side').push({ id: 'a2', role: 'assistant', text: 'side answer', at: 1738000002000 })
+  sessions.lines.get('s-main').push({ id: 'a1', role: 'assistant', text: 'main answer', at: 1738000002000 })
+  e.turnEnded('s-side')
+  e.turnEnded('s-main')
+  await until(() => [...relay.msgs.values()].some((m) => m.text === 'main answer'))
+  await tick(30)
+  assert.ok(![...relay.msgs.values()].some((m) => m.text === 'side answer'))
+  // the setting survives a sign-in to another account; a 0.1.37 state reads as off
+  await e.accountChanged('acct-2')
+  assert.equal(e.state.sideChats, false)
+  assert.equal(migrate({ accountId: 'a', cursor: 1, enabled: true, mainSession: '', cids: {}, mids: {}, titles: {}, conversations: {}, pulled: {}, hidden: [], toArchive: [] }).sideChats, false)
+  e.stop()
+})
+
+test('C9: the first pull takes the newest 300 messages and their conversations, the cursor is the account’s latest; later pulls continue from it', async () => {
+  const relay = fakeRelay()
+  relay.add('their-main', 'main', 'Main chat')
+  relay.add('old-side', 'side', 'Old side chat')
+  relay.say('old-side', 'user', 'long ago')
+  for (let i = 0; i < 400; i++) relay.say('their-main', i % 2 ? 'assistant' : 'user', `turn ${i}`, 'phone-1', 'Pixel 8', 1738000000 + i)
+  const sessions = fakeSessions()
+  const { engine: e } = engine(relay, sessions)
+  await e.start()
+  await until(() => e.state.cursor === relay.seq)
+  assert.deepEqual(relay.gets[0], { since: 0, limit: 500, scope: 'all', tail: TAIL })
+  // the main chat exists here with the newest 300 turns; the old side chat, none of whose rows were in the tail, is not here
+  const mainSid = e.state.mainSession
+  assert.ok(mainSid)
+  assert.equal(sessions.remote(mainSid).length, TAIL)
+  assert.equal(sessions.remote(mainSid)[0].text, 'turn 100')
+  assert.equal(sessions.created, 1)
+  // the next pull continues from the cursor: one new row, no page from zero
+  relay.say('their-main', 'user', 'turn 400')
+  assert.equal(await e.pull(), 1)
+  assert.equal(relay.gets.at(-1).since, relay.seq - 1)
+  assert.equal(relay.gets.at(-1).tail, 0)
+  e.stop()
+})
+
+test('C9: presence — the turn’s start and end are told after the push, once, best-effort; the other device’s working line comes and goes', async () => {
+  const relay = fakeRelay()
+  relay.add('their-main', 'main', 'Main chat')
+  const sessions = fakeSessions()
+  sessions.add('s-main', 'Main here', [{ id: 'u1', role: 'user', text: 'desk question', at: 1738000000000 }])
+  const { engine: e, changes } = engine(relay, sessions)
+  await e.setMain('s-main')
+  await e.accountChanged('acct-1')
+  await until(() => e.state.cids['s-main'] === 'their-main')
+  // the person sends: the prompt goes up, then working:true for the conversation
+  relay.working.length = 0
+  sessions.lines.get('s-main').push({ id: 'u2', role: 'user', text: 'another', at: 1738000010000 })
+  e.messageSent('s-main')
+  await until(() => relay.working.length === 1)
+  assert.deepEqual(relay.working, [{ cid: 'their-main', working: true, device: 'pc-1' }])
+  assert.ok(relay.calls.lastIndexOf('POST /v1/sync/changes') < relay.calls.lastIndexOf('POST /v1/sync/working'))
+  // the turn ends: the text goes up, then working:false — and the relay refusing it changes nothing, no retry
+  relay.refuseWorking = true
+  sessions.lines.get('s-main').push({ id: 'a2', role: 'assistant', text: 'answer', at: 1738000011000 })
+  e.turnEnded('s-main')
+  await until(() => [...relay.msgs.values()].some((m) => m.text === 'answer'))
+  await tick(30)
+  assert.equal(relay.calls.filter((c) => c === 'POST /v1/sync/working').length, 2)
+  assert.equal(e.error, '')
+  relay.refuseWorking = false
+  // a session that does not sync tells nothing
+  sessions.add('task-1', 'Task', [{ id: 'u9', role: 'user', text: 'x', at: 1 }])
+  e.messageSent('task-1')
+  await tick(30)
+  assert.equal(relay.calls.filter((c) => c === 'POST /v1/sync/working').length, 2)
+  // the phone works on the main conversation: the line under its last prompt, the view moved
+  const now = Math.floor(Date.now() / 1000)
+  const before = changes()
+  e.onWorking({ cid: 'their-main', from: 'phone-1', device_name: 'Pixel 8', working: true, at: now })
+  assert.deepEqual(e.workingOf('s-main'), { from: 'phone-1', deviceName: 'Pixel 8', at: now * 1000 })
+  assert.equal(changes(), before + 1)
+  // the same frame again moves nothing; our own echo is ignored
+  e.onWorking({ cid: 'their-main', from: 'phone-1', device_name: 'Pixel 8', working: true, at: now })
+  e.onWorking({ cid: 'their-main', from: 'pc-1', device_name: 'Desk', working: true, at: now + 1 })
+  assert.equal(changes(), before + 1)
+  // the reply arriving clears it
+  relay.say('their-main', 'assistant', 'the phone’s answer', 'phone-1', 'Pixel 8', now)
+  await e.pull()
+  assert.equal(e.workingOf('s-main'), null)
+  // working:false clears it too
+  e.onWorking({ cid: 'their-main', from: 'phone-1', device_name: 'Pixel 8', working: true, at: now })
+  assert.ok(e.workingOf('s-main'))
+  e.onWorking({ cid: 'their-main', from: 'phone-1', device_name: 'Pixel 8', working: false, at: now })
+  assert.equal(e.workingOf('s-main'), null)
+  // an old presence (10 minutes) is over; an unknown conversation has none
+  e.onWorking({ cid: 'their-main', from: 'phone-1', device_name: 'Pixel 8', working: true, at: now - 601 })
+  assert.equal(e.workingOf('s-main'), null)
+  assert.equal(e.workingOf('nowhere'), null)
+  // the relay's state seeds it after a restart
+  relay.presence.set('their-main', { cid: 'their-main', from: 'phone-1', device_name: 'Pixel 8', at: now })
+  await e.relayStatus()
+  assert.equal(e.workingOf('s-main')?.deviceName, 'Pixel 8')
+  e.stop()
+})
+
+test('the host is quiet while nothing changes: no listing or reading of sessions after the push, one read per session per push, frames coalesced', async () => {
+  const relay = fakeRelay()
+  const sessions = fakeSessions()
+  sessions.add('s1', 'One', [{ id: 'u1', role: 'user', text: 'a', at: 1 }], 1)
+  sessions.add('s2', 'Two', [{ id: 'u2', role: 'user', text: 'b', at: 2 }], 2)
+  sessions.add('s3', 'Three', [{ id: 'u3', role: 'user', text: 'c', at: 3 }], 3)
+  const { engine: e } = engine(relay, sessions)
+  await e.accountChanged('acct-1')
+  await until(() => relay.msgs.size === 3)
+  await until(() => e.state.cursor === relay.seq)
+  await tick(30)
+  // one round: each session's lines read once (no second pass to see what is left)
+  assert.equal(sessions.lineCalls, 3)
+  const lists = sessions.listCalls
+  // idle for many push delays: the sessions are not listed or read again
+  await tick(60)
+  assert.equal(sessions.listCalls, lists)
+  assert.equal(sessions.lineCalls, 3)
+  // a turn that adds nothing new is one listing and one read, then quiet again
+  e.turnEnded('s1')
+  await tick(40)
+  assert.equal(sessions.listCalls, lists + 1)
+  assert.equal(sessions.lineCalls, 4)
+  await tick(40)
+  assert.equal(sessions.listCalls, lists + 1)
+  // five frames within the window: one pull
+  const gets = relay.gets.length
+  relay.add('c1', 'side', 'Elsewhere')
+  for (let i = 0; i < 5; i++) e.onFrame({ cursor: relay.seq, from: 'phone-1' })
+  await until(() => e.state.conversations.c1 !== undefined)
+  await tick(20)
+  assert.equal(relay.gets.length, gets + 1)
+  e.stop()
+})
+
+test('SyncRelay: the query carries scope and tail only when asked; working posts the conversation and the flag', async () => {
+  const urls = []
+  const r = new SyncRelay('https://relay.test/', async (url, init) => {
+    urls.push([String(url), init?.method ?? 'GET', init?.body])
+    return url.endsWith('/working') ? new Response(null, { status: 204 }) : new Response(JSON.stringify({ cursor: 0, more: false, conversations: [], messages: [] }), { status: 200 })
+  })
+  await r.changes('k', 0)
+  await r.changes('k', 0, 500, 'main', 300)
+  await r.changes('k', 42, 500, 'all', 300)
+  await r.working('k', 'pc-1', 'c1', true)
+  assert.deepEqual(urls.map((u) => u[0].slice('https://relay.test'.length)), [
+    '/v1/sync/changes?since=0&limit=500',
+    '/v1/sync/changes?since=0&limit=500&scope=main&tail=300',
+    '/v1/sync/changes?since=42&limit=500',
+    '/v1/sync/working',
+  ])
+  assert.deepEqual(JSON.parse(urls[3][2]), { cid: 'c1', working: true, device: 'pc-1' })
+})
+
+// ---- contract C10: a device shows and syncs the current account's conversations only ---------
+
+test('C10: a session joins the account on its first push or pull; another account hides it, never pushes it, pulls afresh; switching back shows it again', async () => {
+  const relay = fakeRelay()
+  const relayB = fakeRelay()
+  // the same engine; the relay underneath swaps with the key, as a new account's key points it at another store
+  const relays = { current: relay }
+  const sessions = fakeSessions()
+  sessions.add('s-a', 'A’s chat', [{ id: 'ua1', role: 'user', text: 'from a', at: 1738000000000 }], 1738000000000)
+  sessions.add('s-local', 'Never synced', [{ id: 'ul1', role: 'user', text: 'offline words', at: 1738000001000 }], 1738000001000)
+  sessions.add('task-1', 'Task', [{ id: 'ut1', role: 'user', text: 'x', at: 1 }], 1)
+  const { engine: e, changes } = engine({ fetch: (url, init) => relays.current.fetch(url, init) }, sessions)
+  // signed out (never signed in): everything shows, nothing is owned, nothing moves
+  assert.deepEqual(e.view().foreign, [])
+  assert.equal(e.owns('s-a'), true)
+  // A signs in: the main chat is pushed and becomes A's; the side chat that never synced has no owner yet
+  await e.setMain('s-a')
+  await e.accountChanged('acct-a')
+  await until(() => [...relay.msgs.values()].some((m) => m.text === 'from a'))
+  await until(() => e.state.cursor === relay.seq)
+  assert.equal(e.state.owners['s-a'], 'acct-a')
+  await tick(30)
+  // s-local is a side chat and side chats sync here (the test engine's default), so it went up too and is A's
+  assert.equal(e.state.owners['s-local'], 'acct-a')
+  // a conversation pulled from A's relay is a session here, owned by A
+  relay.add('c-a', 'side', 'Pulled for A', 'phone-1', 'Pixel 8')
+  relay.say('c-a', 'user', 'hello from the phone')
+  await e.pull()
+  const pulledSid = Object.keys(e.state.cids).find((sid) => e.state.cids[sid] === 'c-a')
+  assert.ok(pulledSid)
+  assert.equal(e.state.owners[pulledSid], 'acct-a')
+  assert.deepEqual(e.view().foreign, [])
+  assert.deepEqual(new Set(e.view().sessions), new Set(['s-a', 's-local', pulledSid]))
+  const aCids = { ...e.state.cids }
+  const aMids = { ...e.state.mids }
+  // the phone works on A's conversation: a working line
+  e.onWorking({ cid: 'c-a', from: 'phone-1', device_name: 'Pixel 8', working: true, at: Math.floor(Date.now() / 1000) })
+  assert.ok(e.workingOf(pulledSid))
+
+  // A signs out, B signs in on the same computer: a different account.id
+  e.signedOut()
+  assert.deepEqual(e.view().foreign, [])
+  const before = changes()
+  relays.current = relayB
+  await e.accountChanged('acct-b')
+  assert.ok(changes() > before)
+  // the account-scoped state started over: cursor 0, no relay rows, nothing pulled, presence gone, the kept turns dropped once
+  assert.equal(e.state.accountId, 'acct-b')
+  assert.equal(e.state.cursor, 0)
+  assert.deepEqual(e.state.conversations, {})
+  assert.deepEqual(e.state.pulled, {})
+  assert.equal(sessions.forgotAll, 1)
+  assert.equal(e.workingOf(pulledSid), null)
+  // A's mapping is kept, so switching back works; A's main chat is no longer the main chat here
+  assert.deepEqual(e.state.cids, aCids)
+  assert.deepEqual(e.state.mids, aMids)
+  assert.equal(e.state.mainSession, '')
+  // A's sessions are hidden, not deleted; B owns nothing yet
+  assert.deepEqual(new Set(e.view().foreign), new Set(['s-a', 's-local', pulledSid]))
+  assert.deepEqual(e.view().sessions, [])
+  assert.equal(e.owns('s-a'), false)
+  assert.equal(await e.setMain('s-a'), '')
+  // nothing of A's goes to B: a turn in A's chat pushes nothing
+  await until(() => e.state.cursor === relayB.seq)
+  sessions.lines.get('s-a').push({ id: 'aa2', role: 'assistant', text: 'a’s answer', at: 1738000005000 })
+  e.turnEnded('s-a')
+  e.messageSent('s-a')
+  await tick(40)
+  assert.equal(relayB.pushes.length, 0)
+  assert.ok(![...relayB.msgs.values()].some((m) => m.text === 'from a' || m.text === 'offline words'))
+  // a chat written now, before B ever synced it, has no owner: it is listed and goes up to B, and becomes B's
+  sessions.add('s-b', 'B’s chat', [{ id: 'ub1', role: 'user', text: 'from b', at: 1738000010000 }], 1738000010000)
+  assert.equal(e.owns('s-b'), true)
+  await e.setMain('s-b')
+  e.messageSent('s-b')
+  await until(() => [...relayB.msgs.values()].some((m) => m.text === 'from b'))
+  assert.equal(e.state.owners['s-b'], 'acct-b')
+  assert.ok(relayB.pushes.every((p) => p.messages.every((m) => m.text === 'from b')))
+  // signed out again: every local chat shows, A's and B's alike, and nothing moves
+  e.signedOut()
+  assert.deepEqual(e.view().foreign, [])
+  assert.equal(e.owns('s-a'), true)
+  // A back: A's chats return, B's hide; the pull starts over for A
+  relays.current = relay
+  const keptBefore = sessions.remote(pulledSid).filter((l) => l.text === 'hello from the phone').length
+  await e.accountChanged('acct-a')
+  assert.equal(e.state.cursor, 0)
+  assert.deepEqual(e.view().foreign, ['s-b'])
+  assert.ok(e.owns('s-a') && e.owns(pulledSid))
+  assert.equal(sessions.forgotAll, 2)
+  // A's rows come back on the fresh pull and are kept again (the kept store was emptied with the switch)
+  await until(() => e.state.cursor === relay.seq)
+  assert.ok(sessions.remote(pulledSid).filter((l) => l.text === 'hello from the phone').length > keptBefore)
+  e.stop()
+})
+
+test('C10: the same account again changes nothing; a 0.1.38 state gives its mapping to the account it synced with; the switch on again re-sends only this account’s chats', async () => {
+  // the same account signing in again: the cursor and the rows stay
+  const relay = fakeRelay()
+  const sessions = fakeSessions()
+  sessions.add('s1', 'One', [{ id: 'u1', role: 'user', text: 'a', at: 1 }], 1)
+  const { engine: e } = engine(relay, sessions)
+  await e.accountChanged('acct-1')
+  await until(() => relay.msgs.size === 1)
+  await until(() => e.state.cursor === relay.seq)
+  const cursor = e.state.cursor
+  await e.accountChanged('acct-1')
+  assert.equal(e.state.cursor, cursor)
+  assert.equal(sessions.forgotAll, 0)
+  // a 0.1.38 state: no owners; every mapped session belongs to the account it was synced with
+  const old = migrate({ accountId: 'acct-old', cursor: 5, enabled: true, mainSession: 's1', sideChats: true, cids: { s1: 'c1', s2: 'c2' }, mids: {}, titles: {}, conversations: {}, pulled: {}, hidden: [], toArchive: [] })
+  assert.deepEqual(old.owners, { s1: 'acct-old', s2: 'acct-old' })
+  assert.equal(old.cursor, 5)
+  // a state that never signed in has no owners to give
+  assert.deepEqual(migrate({ ...emptyState(), cids: { s1: 'c1' } }).owners, {})
+  // the switch off and on again as B: A's lines keep their pushed ids, B's and the ownerless are re-sent
+  sessions.add('s-a', 'A’s', [{ id: 'ua', role: 'user', text: 'a-words', at: 2 }], 2)
+  e.state.owners['s-a'] = 'acct-other'
+  e.state.cids['s-a'] = 'c-other'
+  e.state.mids.ua = 'pushed-under-a'
+  e.state.titles['s-a'] = 'A’s'
+  await e.setEnabled(false)
+  await e.setEnabled(true)
+  assert.equal(e.state.mids.ua, 'pushed-under-a')
+  assert.equal(e.state.titles['s-a'], 'A’s')
+  assert.equal(e.state.mids.u1, undefined)
+  await until(() => relay.msgs.size === 1)
+  await tick(30)
+  assert.ok(![...relay.msgs.values()].some((m) => m.text === 'a-words'))
   e.stop()
 })

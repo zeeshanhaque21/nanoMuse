@@ -190,6 +190,20 @@ final class NanoMuseLogicTests: XCTestCase {
         XCTAssertEqual(routine.nextDue(after: date(2026, 10, 3, 10, 0, cal), calendar: cal), date(2026, 10, 5, 9, 0, cal))
     }
 
+    func testOnceRoutineCreatedAfterItsTimeRunsTomorrow() {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "UTC")!
+        var routine = NanoMuseRoutine(label: "Call", prompt: "x", hour: 18, minute: 0, repeatMode: .once)
+        routine.createdAt = date(2026, 10, 1, 19, 0, cal)
+        // made at 19:00 for 18:00 → tomorrow at 18:00, not never
+        XCTAssertEqual(routine.nextDue(after: date(2026, 10, 1, 19, 5, cal), calendar: cal), date(2026, 10, 2, 18, 0, cal))
+        // made before its time → today; once run → spent
+        routine.createdAt = date(2026, 10, 1, 15, 0, cal)
+        XCTAssertEqual(routine.nextDue(after: date(2026, 10, 1, 15, 5, cal), calendar: cal), date(2026, 10, 1, 18, 0, cal))
+        routine.lastFiredAt = date(2026, 10, 1, 18, 0, cal)
+        XCTAssertNil(routine.nextDue(after: date(2026, 10, 1, 18, 5, cal), calendar: cal))
+    }
+
     func testIntervalRoutineCountsFromTheLastRun() {
         let cal = Calendar(identifier: .gregorian)
         var routine = NanoMuseRoutine(label: "Check-in", prompt: "x", hour: 9, minute: 0)
@@ -263,8 +277,11 @@ final class NanoMuseLogicTests: XCTestCase {
     // MARK: - First run
 
     func testFirstRunNeeded() {
-        XCTAssertTrue(NanoMuseFirstRun.needed(signedIn: false, hasProviders: true, hasSessions: true, done: true))
-        XCTAssertTrue(NanoMuseFirstRun.needed(signedIn: true, hasProviders: false, hasSessions: true, done: true))
+        // Neither a sign-in nor a key of one's own: nothing could answer, the setup comes back.
+        XCTAssertTrue(NanoMuseFirstRun.needed(signedIn: false, hasProviders: false, hasSessions: true, done: true))
+        // Signed out with a key of one's own, the chat stays; so does a signed-in phone whose Cloud models are off.
+        XCTAssertFalse(NanoMuseFirstRun.needed(signedIn: false, hasProviders: true, hasSessions: true, done: true))
+        XCTAssertFalse(NanoMuseFirstRun.needed(signedIn: true, hasProviders: false, hasSessions: true, done: true))
         XCTAssertTrue(NanoMuseFirstRun.needed(signedIn: true, hasProviders: true, hasSessions: false, done: false))
         XCTAssertFalse(NanoMuseFirstRun.needed(signedIn: true, hasProviders: true, hasSessions: false, done: true))
         XCTAssertFalse(NanoMuseFirstRun.needed(signedIn: true, hasProviders: true, hasSessions: true, done: false))
@@ -272,6 +289,9 @@ final class NanoMuseLogicTests: XCTestCase {
 
     func testFirstRunStages() {
         XCTAssertEqual(NanoMuseFirstRun.stage(signedIn: false, hasGroups: false, sourceChosen: false, modelsSkipped: false, fresh: false, passwordAnswered: false), .welcome)
+        // Signed out with a key of one's own: past the welcome, and the account's pages (password, source) are skipped.
+        XCTAssertEqual(NanoMuseFirstRun.stage(signedIn: false, hasProviders: true, hasGroups: false, sourceChosen: false, modelsSkipped: false, fresh: false, passwordAnswered: false), .models)
+        XCTAssertEqual(NanoMuseFirstRun.stage(signedIn: false, hasProviders: true, hasGroups: true, sourceChosen: false, modelsSkipped: false, fresh: false, passwordAnswered: false), .meet)
         XCTAssertEqual(NanoMuseFirstRun.stage(signedIn: true, hasGroups: false, sourceChosen: false, modelsSkipped: false, fresh: true, passwordAnswered: false), .password)
         XCTAssertEqual(NanoMuseFirstRun.stage(signedIn: true, hasGroups: false, sourceChosen: false, modelsSkipped: false, fresh: true, passwordAnswered: true), .source)
         XCTAssertEqual(NanoMuseFirstRun.stage(signedIn: true, hasGroups: false, sourceChosen: true, modelsSkipped: false, fresh: false, passwordAnswered: false), .models)
@@ -491,11 +511,14 @@ final class NanoMuseLogicTests: XCTestCase {
 
         XCTAssertTrue(NanoMuseVideoGen.failureMessage(["code": "Arrearage", "message": "Model not activated for this account"]).contains("activate"))
         XCTAssertEqual(NanoMuseVideoGen.failureMessage(["code": "InvalidParameter", "message": "bad size"]), "InvalidParameter: bad size")
-        XCTAssertEqual(NanoMuseVideoGen.failureMessage(["task_status": "FAILED"]), "Video task FAILED")
-        XCTAssertEqual(NanoMuseVideoGen.failureMessage([:]), "Video task failed")
-        XCTAssertEqual(NanoMuseVideoGen.apiMessage(Data("{\"message\":\"nope\"}".utf8)), ": nope")
-        XCTAssertEqual(NanoMuseVideoGen.apiMessage(Data("{\"error\":{\"message\":\"clips used up\"}}".utf8)), ": clips used up")
+        XCTAssertTrue(NanoMuseVideoGen.failureMessage(["task_status": "CANCELED"]).contains("CANCELED"))
+        XCTAssertTrue(NanoMuseVideoGen.failureMessage([:]).contains("FAILED"))
+        XCTAssertEqual(NanoMuseVideoGen.apiMessage(Data("{\"message\":\"nope\"}".utf8)), "nope")
+        XCTAssertEqual(NanoMuseVideoGen.apiMessage(Data("{\"error\":{\"message\":\"clips used up\"}}".utf8)), "clips used up")
         XCTAssertEqual(NanoMuseVideoGen.apiMessage(Data("not json".utf8)), "")
+        let refused = NanoMuseMediaWords.refused(status: 401, vendorMessage: "Invalid API-key provided.")
+        XCTAssertTrue(refused.contains("401") && refused.contains("Invalid API-key provided."))
+        XCTAssertFalse(NanoMuseMediaWords.refused(status: 503, vendorMessage: "").contains(":"))
 
         XCTAssertNil(NanoMuseVideoGen.frameScale(width: 768, height: 768))
         XCTAssertEqual(NanoMuseVideoGen.frameScale(width: 2048, height: 2048), 0.5)
@@ -532,6 +555,61 @@ final class NanoMuseLogicTests: XCTestCase {
         XCTAssertTrue(p.signedIn, "a missing moment keeps its default")
         XCTAssertEqual(p.cooldownDays, 0)
         XCTAssertEqual(p.maxAsks, 2)
+    }
+
+    func testNudgePolicyReadsTheOperatorsSentence() {
+        let d = NanoMuseNudgePolicy.defaults
+        XCTAssertEqual(d.text, "")
+        XCTAssertEqual(d.textZh, "")
+        XCTAssertNil(d.sentence(chinese: false), "without a sentence the app's own line stays")
+        XCTAssertNil(d.sentence(chinese: true))
+
+        // A cached copy from before the fields: neither key, both empty, the same policy.
+        var old: [String: Any] = d.json
+        var star: [String: Any] = old["star"] as? [String: Any] ?? [:]
+        star.removeValue(forKey: "text")
+        star.removeValue(forKey: "text_zh")
+        old["star"] = star
+        XCTAssertEqual(NanoMuseNudgePolicy.parse(old), d)
+
+        let p = NanoMuseNudgePolicy.parse([
+            "star": ["text": "  Stars help.  ", "text_zh": "\n点个 star。\t"] as [String: Any],
+        ])
+        XCTAssertEqual(p.text, "Stars help.", "trimmed")
+        XCTAssertEqual(p.textZh, "点个 star。")
+        XCTAssertEqual(NanoMuseNudgePolicy.parse(p.json), p, "round trip through the cache")
+
+        let odd = NanoMuseNudgePolicy.parse(["star": ["text": 42, "text_zh": ["x"]] as [String: Any]])
+        XCTAssertEqual(odd.text, "", "not a string: empty, never a crash")
+        XCTAssertEqual(odd.textZh, "")
+    }
+
+    func testNudgePolicyDropsASentenceOver200Characters() {
+        let ok = String(repeating: "a", count: 200)
+        let tooLong = String(repeating: "a", count: 201)
+        let p = NanoMuseNudgePolicy.parse(["star": ["text": ok, "text_zh": tooLong] as [String: Any]])
+        XCTAssertEqual(p.text, ok)
+        XCTAssertEqual(p.textZh, "")
+        let padded = String(repeating: " ", count: 10) + ok + String(repeating: " ", count: 10)
+        XCTAssertEqual(NanoMuseNudgePolicy.parse(["star": ["text": padded] as [String: Any]]).text, ok, "the limit applies after trimming")
+    }
+
+    func testNudgePolicySentenceFallsBackInOrder() {
+        var both = NanoMuseNudgePolicy.defaults
+        both.text = "English line"
+        both.textZh = "中文句子"
+        XCTAssertEqual(both.sentence(chinese: true), "中文句子")
+        XCTAssertEqual(both.sentence(chinese: false), "English line")
+
+        var englishOnly = NanoMuseNudgePolicy.defaults
+        englishOnly.text = "English line"
+        XCTAssertEqual(englishOnly.sentence(chinese: true), "English line", "Chinese without text_zh takes text")
+        XCTAssertEqual(englishOnly.sentence(chinese: false), "English line")
+
+        var chineseOnly = NanoMuseNudgePolicy.defaults
+        chineseOnly.textZh = "中文句子"
+        XCTAssertEqual(chineseOnly.sentence(chinese: true), "中文句子")
+        XCTAssertNil(chineseOnly.sentence(chinese: false), "another language never takes text_zh")
     }
 
     func testStarGate() {

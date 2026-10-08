@@ -3,7 +3,7 @@
 Covers debug and release paths at the configuration layer (no network):
 - Python runtime defaults to empty (no nanomuse.cn); custom base passes through.
 - Empty relay raises relay_unconfigured from _request without network I/O.
-- Desktop and relay-package defaults contain no nanomuse.cn (file-level check).
+- Desktop sources and relay-package defaults contain no nanomuse.cn (file-level check).
 """
 
 from __future__ import annotations
@@ -40,11 +40,11 @@ def test_empty_relay_fails_clear_without_network() -> None:
     assert "NANOMUSE_CLOUD_BASE_URL" in exc.value.message
 
 
-def test_desktop_default_has_no_unwanted_backend() -> None:
-    text = (ROOT / "desktop" / "nanomuse_desktop" / "config.py").read_text(encoding="utf-8")
-    assert 'DEFAULT_CLOUD = ""' in text
-    assert "cloud.nanomuse.cn" not in text
-    assert "nanomuse.cn" not in text
+@pytest.mark.parametrize("tree", ["harness/desktop/src", "harness/dsh-nanomuse/src"])
+def test_desktop_sources_have_no_unwanted_backend(tree: str) -> None:
+    for path in (ROOT / tree).rglob("*"):
+        if path.is_file() and path.suffix in {".ts", ".tsx", ".mjs", ".js"}:
+            assert "nanomuse.cn" not in path.read_text(encoding="utf-8"), path
 
 
 def test_relay_package_defaults_have_no_unwanted_backend() -> None:

@@ -3,8 +3,10 @@ pass calls; a second account sees nothing of it."""
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -13,6 +15,7 @@ from starlette.websockets import WebSocketDisconnect
 from nanomuse_cloud.api import create_app
 from nanomuse_cloud.config import Settings
 from nanomuse_cloud.db import Database
+from nanomuse_cloud.hub import SEND_QUEUE_FRAMES, Connection
 from nanomuse_cloud.senders import LogSender
 from nanomuse_cloud.service import Cloud
 
@@ -137,6 +140,40 @@ def test_target_leaving_fails_the_pending_call(client):
         assert {d["id"]: d["online"] for d in kinds["devices"]["devices"]} == {"phone-1": True, "pc-1": False}
 
 
+def test_a_lone_pending_call_times_out_on_the_callers_ping(client):
+    """The sweep ran only when another `call` arrived, so a caller with one call outstanding
+    and nothing more to ask never heard `timeout`; every client pings, so it sweeps too."""
+    from nanomuse_cloud import hub as hub_mod
+
+    key = sign_up(client, "someone@example.com")
+    with connect(client, key) as phone, connect(client, key) as pc:
+        phone.send_json(hello("phone", "phone-1", "Pixel"))
+        phone.receive_json()
+        phone.receive_json()
+        pc.send_json(hello("computer", "pc-1", "desk"))
+        pc.receive_json()
+        pc.receive_json()
+        phone.receive_json()  # devices: pc joined
+        phone.send_json({"type": "call", "id": "c1", "to": "pc-1", "action": "shell", "args": {"command": "sleep"}})
+        assert pc.receive_json()["action"] == "shell"
+        hub = client.app.state.hub
+        assert ("hub", "c1") not in hub.pending and len(hub.pending) == 1
+        # a ping while the call is young: a pong and nothing else
+        phone.send_json({"type": "ping"})
+        assert phone.receive_json()["type"] == "pong"
+        # the call ages past the limit; the next ping delivers the timeout
+        for p in hub.pending.values():
+            p.started -= hub_mod.CALL_TTL_S + 1
+        phone.send_json({"type": "ping"})
+        assert phone.receive_json()["type"] == "pong"
+        err = phone.receive_json()
+        assert err == {"type": "error", "id": "c1", "code": "timeout", "message": "the device did not answer in time"}
+        assert not hub.pending
+        # a late result from the target is an unknown call now
+        pc.send_json({"type": "result", "id": "c1", "ok": True, "body": {}})
+        assert pc.receive_json()["code"] == "unknown_call"
+
+
 def test_web_tab_authenticates_in_hello_and_cannot_be_called(client):
     key = sign_up(client, "13800138000")
     with connect(client, None) as web, connect(client, key) as pc:
@@ -175,6 +212,111 @@ def test_bad_key_and_bad_hello(client):
         ws.send_json({"type": "call"})
         with pytest.raises(WebSocketDisconnect):
             ws.receive_json()  # closed: hello expected
+
+
+def test_a_bad_bearer_header_is_refused_with_4001_after_the_handshake(client):
+    """The apps send the key in the header. A refusal must reach them as a close with
+    4001 and the code (docs/hub.md), not as a failed handshake: a failed handshake looks
+    like the network and the phone would retry it forever."""
+    with connect(client, "nm_nothing") as ws:
+        err = ws.receive_json()
+        assert err["type"] == "error" and err["code"] == "bad_key"
+        with pytest.raises(WebSocketDisconnect) as closed:
+            ws.receive_json()
+        assert closed.value.code == 4001 and closed.value.reason == "bad_key"
+
+
+def test_binary_and_unknown_frames_are_answered_not_fatal(client):
+    key = sign_up(client, "13800138000")
+    # before hello a binary frame is as wrong as any other non-hello: closed, 4000
+    with connect(client, key) as ws:
+        ws.send_bytes(b"\x00\x01")
+        with pytest.raises(WebSocketDisconnect) as closed:
+            ws.receive_json()
+        assert closed.value.code == 4000
+    # after hello the socket stays open and says what was wrong
+    with connect(client, key) as ws:
+        ws.send_json(hello("phone", "phone-1", "Pixel"))
+        assert ws.receive_json()["type"] == "welcome"
+        ws.receive_json()  # devices broadcast
+        ws.send_bytes(b"\x00\x01")
+        err = ws.receive_json()
+        assert err["code"] == "bad_frame" and "binary" in err["message"]
+        ws.send_json({"type": "teleport"})
+        err = ws.receive_json()
+        assert err["code"] == "bad_frame" and "teleport" in err["message"]
+        ws.send_text("[1, 2]")
+        assert ws.receive_json()["code"] == "bad_frame"
+        ws.send_json({"type": "ping"})
+        assert ws.receive_json()["type"] == "pong"  # still alive
+
+
+class _StalledSocket:
+    """A peer that reads only when told to: send_text waits on the gate."""
+
+    def __init__(self):
+        self.sent: list[str] = []
+        self.closed: tuple[int, str] | None = None
+        self.gate = asyncio.Event()
+
+    async def send_text(self, text: str) -> None:
+        await self.gate.wait()
+        self.sent.append(text)
+
+    async def close(self, code: int, reason: str = "") -> None:
+        self.closed = (code, reason)
+
+
+def _conn(ws) -> Connection:
+    return Connection(ws=ws, account_id="a", key_hash="k", device_id="pc-1", name="desk", kind="computer")
+
+
+async def test_a_send_never_waits_on_the_peer_and_order_is_kept():
+    """A slow phone used to hold the computer calling it: send awaited the phone's socket
+    inside the caller's receive loop. Now a send queues and returns; the writer drains in
+    order once the peer reads."""
+    ws = _StalledSocket()
+    conn = _conn(ws)
+    conn.start()
+    try:
+        t0 = time.monotonic()
+        for i in range(5):
+            await conn.send({"type": "event", "i": i})
+        assert time.monotonic() - t0 < 0.5 and ws.sent == [] and not conn.closed
+        ws.gate.set()
+        for _ in range(100):
+            if len(ws.sent) == 5:
+                break
+            await asyncio.sleep(0.01)
+        assert [json.loads(t)["i"] for t in ws.sent] == [0, 1, 2, 3, 4]
+        assert conn.queued_bytes == 0 and not conn.queue
+    finally:
+        conn.stop()
+
+
+async def test_a_peer_that_stops_reading_is_closed_with_4009():
+    ws = _StalledSocket()
+    conn = _conn(ws)
+    conn.start()
+    # the writer takes the first frame and blocks in send_text; the queue fills behind it
+    for i in range(SEND_QUEUE_FRAMES + 2):
+        await conn.send({"type": "event", "i": i})
+    assert conn.closed and conn.overflowed
+    for _ in range(100):
+        if ws.closed:
+            break
+        await asyncio.sleep(0.01)
+    assert ws.closed == (4009, "slow_consumer")
+    assert conn.writer is not None and (conn.writer.cancelled() or conn.writer.done())
+    # bytes count too: two frames of 12 MiB fit, the third does not
+    ws2 = _StalledSocket()
+    conn2 = _conn(ws2)
+    conn2.start()
+    big = "x" * (12 * 1024 * 1024)
+    for _ in range(3):
+        await conn2.send({"type": "event", "body": big})
+    assert conn2.overflowed and len(conn2.queue) <= 2
+    conn2.stop()
 
 
 def test_accounts_are_separate_and_frames_are_capped(client):

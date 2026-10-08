@@ -25,6 +25,7 @@ import { api } from "../api";
 import { Avatar } from "../components/Avatar";
 import { AvatarShareSheet } from "../components/AvatarShareSheet";
 import { ApprovalCard, RiskBadge, grantSubject, scopeLabel, toolIcon } from "../components/Cards";
+import { LoadError } from "../components/LoadError";
 import { Sheet } from "../components/Sheet";
 import { intlLocale, useT } from "../i18n";
 import { useStore } from "../store";
@@ -41,7 +42,7 @@ import type {
   UpcomingData,
 } from "../types";
 import { cx, relativeTime, timeShort } from "../util";
-import { describeCadence } from "./GoalsScreen";
+import { describeCadence } from "../goals";
 
 type Pane = 0 | 1 | 2 | 3;
 
@@ -280,11 +281,19 @@ function ApprovalsView({ onDone }: { onDone: () => void }) {
 function UpcomingView({ onSettings }: { onSettings: () => void }) {
   const { state, refreshSettings, toast } = useStore();
   const [data, setData] = useState<UpcomingData | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const name = state.profile?.name ?? "nanoMuse";
   const t = useT();
 
-  const load = () => api.upcoming().then(setData).catch((e: Error) => toast(e.message));
+  const load = () =>
+    api
+      .upcoming()
+      .then((d) => {
+        setData(d);
+        setLoadError(null);
+      })
+      .catch((e: Error) => (data === null ? setLoadError(e.message) : toast(e.message)));
   useEffect(() => {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -312,6 +321,7 @@ function UpcomingView({ onSettings }: { onSettings: () => void }) {
   };
 
   if (!data) {
+    if (loadError) return <LoadError message={loadError} onRetry={() => void load()} />;
     return (
       <div className="py-10 flex justify-center text-muted">
         <Loader2 className="animate-spin" size={20} />
@@ -786,7 +796,7 @@ function TriggerForm({ available, onDone, onCancel }: { available: Record<Trigge
     return (
       <div className="mb-2 rounded-2xl border border-border p-3 space-y-2">
         <div className="text-[13.5px] font-medium">{t("Webhook ready")}</div>
-        <div className="text-[12.5px] text-muted">{t("POST anything to this URL and the work starts. The key is in the URL — share it only with the program that will call it.")}</div>
+        <div className="text-[12.5px] text-muted">{t("POST anything to this URL and the work starts. The key is in the URL; share it only with the program that will call it.")}</div>
         <code className="block break-all rounded-xl bg-surface-2 px-3 py-2 text-[12px]">{made.url}</code>
         <div className="flex justify-end gap-2 pt-0.5">
           <button
@@ -880,13 +890,16 @@ function defaultAt(): string {
 }
 
 // ------------------------------------------------------------------ activity log
-function useActivity(open: boolean): [ActivityData | null, () => Promise<void>] {
+function useActivity(open: boolean): [ActivityData | null, () => Promise<void>, string | null] {
   const [data, setData] = useState<ActivityData | null>(null);
+  // the first failure is shown; later ones (the poll every four seconds) keep the last good list
+  const [error, setError] = useState<string | null>(null);
   const load = async () => {
     try {
       setData(await api.activity(150));
-    } catch {
-      /* offline */
+      setError(null);
+    } catch (e) {
+      setError((e as Error).message || "Could not load.");
     }
   };
   useEffect(() => {
@@ -896,11 +909,11 @@ function useActivity(open: boolean): [ActivityData | null, () => Promise<void>] 
     return () => window.clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
-  return [data, load];
+  return [data, load, error];
 }
 
 function ActivityView({ open }: { open: boolean }) {
-  const [data] = useActivity(open);
+  const [data, load, error] = useActivity(open);
   const { state } = useStore();
   const t = useT();
   const name = state.profile?.name ?? "nanoMuse";
@@ -909,16 +922,22 @@ function ActivityView({ open }: { open: boolean }) {
   return (
     <div className="pb-2">
       <p className="text-[12.5px] text-muted mb-2">
-        {t("Every tool call goes through the Sentinel and is written to the audit log — including the ones it refused.")}
+        {t("Every tool call goes through the Sentinel and is written to the audit log, including the ones it refused.")}
       </p>
       {gui > 0 && (
         <p className="text-[12.5px] text-muted mb-2">
-          {t("On the phone's screen: {gui} of {total} steps ({pct}%). The screen is the last resort — a skill, a fetch or the browser comes first.", {
+          {t("On the phone's screen: {gui} of {total} steps ({pct}%). The screen is the last resort; a skill, a fetch or the browser comes first.", {
             gui: String(gui),
             total: String(entries.length),
             pct: String(Math.round((gui / entries.length) * 100)),
           })}
         </p>
+      )}
+      {!data && error && <LoadError message={error} onRetry={() => void load()} />}
+      {!data && !error && (
+        <div className="py-10 flex justify-center text-muted">
+          <Loader2 className="animate-spin" size={20} />
+        </div>
       )}
       {data && entries.length === 0 && (
         <div className="py-8 text-center text-muted text-[14px]">{t("Nothing yet today. What you ask for and what {name} does about it shows up here.", { name })}</div>

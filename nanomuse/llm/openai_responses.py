@@ -26,6 +26,7 @@ from nanomuse.llm.base import (
     DeltaCallback,
     ThinkStreamFilter,
     ToolsUnsupported,
+    proxied_http,
     says_no_tools,
     split_think,
 )
@@ -107,6 +108,7 @@ class OpenAIResponsesLLM(BaseLLM):
             timeout=settings.timeout,
             max_retries=0,
             default_headers=settings.extra_headers or None,
+            http_client=proxied_http(settings.proxy, settings.timeout),
         )
         if settings.vision == "auto":
             self.vision_available = model_takes_images(settings.model)
@@ -148,7 +150,7 @@ class OpenAIResponsesLLM(BaseLLM):
             if with_images and self.settings.vision == "auto":
                 logger.warning(
                     "the endpoint rejected a message with images ({}); sending text only "
-                    'from now on — set llm.vision = "off" to skip the attempt',
+                    'from now on; set llm.vision = "off" to skip the attempt',
                     str(e).splitlines()[0][:200],
                 )
                 self.vision_available = False

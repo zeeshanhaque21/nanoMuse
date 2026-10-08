@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import uuid
 from datetime import datetime
@@ -11,17 +10,19 @@ from pathlib import Path
 from nanomuse import prompts
 from nanomuse.agent import MuseAgent
 from nanomuse.agent.holds import Holds
+from nanomuse.background import spawn
 from nanomuse.calendar import CalendarFeeds
 from nanomuse.cloud import CLOUD_KEY, DEFAULT_GUI_MODEL, model_url
 from nanomuse.computer.link import ComputerLink
-from nanomuse.config import LLMSettings, Settings
+from nanomuse.config import CHATGPT_PROVIDER, PROTOCOLS, LLMSettings, Settings
 from nanomuse.contacts import ContactBook
 from nanomuse.goals import GoalStore
-from nanomuse.llm import BaseLLM, create_llm
+from nanomuse.llm import BaseLLM, catalogue, create_llm
+from nanomuse.llm.catalogue import Provider
 from nanomuse.logger import logger, setup_logging
 from nanomuse.memory import Embedder, MemoryIndex, MemoryStore
 from nanomuse.phone import PhoneLink
-from nanomuse.phone.operator import COMPUTER, PhoneOperator
+from nanomuse.phone.operator import AUTO_LANGUAGE, COMPUTER, PhoneOperator
 from nanomuse.reminders import ReminderStore
 from nanomuse.runtime import device, device_mcp_server
 from nanomuse.sandbox import Sandbox
@@ -162,7 +163,7 @@ class NanoMuseApp:
             )
         if old is not None:
             with contextlib.suppress(RuntimeError):
-                asyncio.get_running_loop().create_task(old.close())
+                spawn(old.close(), "closing the previous embedder")
 
     def _embedding_key(self) -> str:
         """The key for the embeddings endpoint, resolved from the vault when it refers
@@ -187,7 +188,7 @@ class NanoMuseApp:
                 logger.warning("llm.api_key refers to a vault secret that is not set: {}", key)
                 key = ""
             llm_settings = llm_settings.model_copy(update={"api_key": key})
-        return create_llm(llm_settings)
+        return create_llm(llm_settings, data_dir=self.settings.data_dir)
 
     def llm_is_cloud(self) -> bool:
         """Whether the chat model is the account: the relay as the endpoint, or the Cloud
@@ -198,25 +199,83 @@ class NanoMuseApp:
         base = str(llm.base_url or "").rstrip("/")
         return bool(base) and base == model_url(self.settings.cloud.base_url).rstrip("/")
 
-    def gui_model(self, default_only: bool = False) -> str:
-        """The model the hands use (contract C4): ``[gui] model`` when set; else, with the
-        account, the relay's hands model (``qwen3.8-27b`` unless the relay names another);
-        else the chat model. ``default_only`` answers what it would be without ``[gui]``."""
+    def cloud_signed_in(self) -> bool:
+        """Whether the account is signed in on this runtime (the Cloud key is in the vault),
+        whichever provider the chat model is."""
+        return bool(self.vault.get(CLOUD_KEY))
+
+    def cloud_models_on(self) -> bool:
+        """Whether the account's models are a source: signed in and ``[cloud] models`` not
+        switched off (the apps' *Use nanoMuse Cloud models*). Every automatic rung that
+        would reach the relay (the hands, pictures, clips, the providers' listing) asks
+        this, not :meth:`cloud_signed_in`; the sign-in is a different question."""
+        return self.cloud_signed_in() and self.settings.cloud.models
+
+    def chat_entry(self) -> Provider | None:
+        """The catalogue entry the chat model is on: the one ``[llm] provider`` names, else
+        the one whose host ``base_url`` is. None for the relay, the ChatGPT sign-in and a
+        host the catalogue does not list (a local server, a gateway)."""
+        llm = self.settings.llm
+        if self.llm_is_cloud() or llm.provider == CHATGPT_PROVIDER:
+            return None
+        cat = catalogue.load()
+        if llm.provider not in PROTOCOLS:
+            return cat.get(llm.provider)
+        return cat.by_base_url(llm.base_url)
+
+    def hands_choice(self, default_only: bool = False) -> tuple[str, str]:
+        """Where the hands' model comes from and which it is, in the order of the Models
+        contract (§3): ``("gui", m)`` for an explicit ``[gui] model``; else ``("chat", m)``
+        — the chat provider's own hands model when it is an own provider with vision, the
+        chat model itself on a host the catalogue does not know; else ``("cloud", m)`` —
+        the relay's hands model when the account is signed in and its models are on; else
+        the chat model. ``default_only`` answers what it would be without ``[gui]``."""
         gui, llm = self.settings.gui, self.settings.llm
         if gui.model and not default_only:
-            return gui.model
+            return "gui", gui.model
+        cloud_model = self.cloud_gui_model or DEFAULT_GUI_MODEL
         if self.llm_is_cloud():
-            return self.cloud_gui_model or DEFAULT_GUI_MODEL
-        return llm.model
+            return "cloud", cloud_model
+        entry = self.chat_entry()
+        if entry is None or entry.has("vision"):
+            # an own provider with vision: its hands model; the ChatGPT sign-in reads
+            # pictures; a host the catalogue does not list is whatever the person installed
+            return "chat", (entry.defaults.get("hands") if entry else "") or llm.model
+        if self.cloud_models_on():
+            # a chat provider that cannot see, and an account that can (while its models are on)
+            return "cloud", cloud_model
+        return "chat", llm.model
+
+    def gui_model(self, default_only: bool = False) -> str:
+        """The model the hands use (contract C4): ``[gui] model`` when set; else what
+        :meth:`hands_choice` resolves. ``default_only`` answers what it would be without
+        ``[gui]``."""
+        return self.hands_choice(default_only)[1]
 
     def make_gui_llm(self) -> BaseLLM:
         """The model for the GUI operator: ``[gui]`` where set, the main model's settings
-        for the rest — so one provider and one key can serve both. With the account and no
-        ``[gui]`` model, the relay's hands model is used, not the chat model."""
+        for the rest — so one provider and one key can serve both. Without a ``[gui]``
+        model the hands follow :meth:`hands_choice`: the relay's hands model under the
+        account key when that is the answer, even while the chat model is elsewhere."""
         gui, llm = self.settings.gui, self.settings.llm
-        key = gui.api_key or (
-            llm.api_key if not gui.base_url or gui.base_url == llm.base_url else ""
-        )
+        where, model = self.hands_choice()
+        if where == "cloud" and not self.llm_is_cloud():
+            merged = LLMSettings(
+                provider="openai",
+                model=model,
+                base_url=model_url(self.settings.cloud.base_url),
+                api_key=self.vault.get(CLOUD_KEY) or "",
+                tool_mode="native",
+                stream=False,
+                temperature=0.0,
+                max_tokens=llm.max_tokens,
+                timeout=llm.timeout,
+            )
+            return create_llm(merged, data_dir=self.settings.data_dir)
+        # `[gui] provider` may be a catalogue id, which brings its own endpoint
+        gui_base = gui.endpoint
+        own_host = bool(gui_base) and gui_base != llm.endpoint
+        key = gui.api_key or (llm.api_key if not own_host else "")
         if self.vault.has_placeholders(key):
             key = self.vault.resolve(key, strict=False)
             if self.vault.has_placeholders(key):
@@ -224,8 +283,8 @@ class NanoMuseApp:
                 key = ""
         merged = LLMSettings(
             provider=gui.provider if gui.model else llm.provider,
-            model=self.gui_model(),
-            base_url=gui.base_url or llm.base_url,
+            model=model,
+            base_url=gui_base or llm.base_url,
             api_key=key,
             tool_mode="native",
             stream=False,
@@ -233,9 +292,11 @@ class NanoMuseApp:
             temperature=0.0,
             max_tokens=llm.max_tokens,
             timeout=llm.timeout,
-            extra_headers=dict(llm.extra_headers) if not gui.base_url else {},
+            extra_headers=dict(llm.extra_headers) if not own_host else {},
+            # the same host is reached the same way: through the chat model's proxy
+            proxy=llm.proxy if not own_host else "",
         )
-        return create_llm(merged)
+        return create_llm(merged, data_dir=self.settings.data_dir)
 
     # ------------------------------------------------------------------ tools
     def _build_tools(self) -> ToolCollection:
@@ -302,7 +363,7 @@ class NanoMuseApp:
         if not playwright_available() and s.browser.backend != "device" and self.device is None:
             logger.warning(
                 "browser.enabled=true but playwright is missing: pip install 'nanomuse[browser]' "
-                "— the browser tool will use the phone's WebView when the app is connected"
+                "(the browser tool will use the phone's WebView when the app is connected)"
             )
         return tool
 
@@ -314,7 +375,7 @@ class NanoMuseApp:
 
         def language() -> str:
             lang = self.settings.agent.language
-            return "the language of the query" if lang in ("", "auto") else lang
+            return AUTO_LANGUAGE if lang in ("", "auto") else lang
 
         operator = PhoneOperator(
             self.phone,
@@ -349,7 +410,7 @@ class NanoMuseApp:
 
         def language() -> str:
             lang = self.settings.agent.language
-            return "the language of the query" if lang in ("", "auto") else lang
+            return AUTO_LANGUAGE if lang in ("", "auto") else lang
 
         operator = PhoneOperator(
             self.computer,  # type: ignore[arg-type]  # the same face as the phone link

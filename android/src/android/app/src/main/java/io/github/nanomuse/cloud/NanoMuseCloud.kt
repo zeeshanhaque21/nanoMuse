@@ -30,8 +30,8 @@ import org.json.JSONObject
 /**
  * nanoMuse Cloud: the "start now" path. An e-mail address, a code, and the
  * app has a provider with a starter allowance — no key of one's own needed. The server is the
- * relay in `cloud/` of the repository; anyone can run one, and the sign-in screen lets the
- * person point the app at their own relay.
+ * relay in `cloud/` of the repository; anyone can run one, and "Use a different server" on the
+ * sign-in screen points the phone at it ([RelayAddress]).
  *
  * To the rest of the app the relay is an ordinary OpenAI-compatible provider: an API-key
  * [ProviderInstance] on the relay's base URL, whose key is the `nm_…` token the relay issued.
@@ -72,6 +72,8 @@ object NanoMuseCloud {
     // 0.1.27: an invitation credits both sides (relay 0.9)
     private const val KEY_INVITEE_BONUS = "cloud.invitee_bonus_cny"
     private const val KEY_OWN_KEY_DOCS = "cloud.own_key_docs"
+    /** Relay 0.21, contract C11: the ways-on card as data (`spend.guidance`), kept as sent; the card reads it first. */
+    private const val KEY_GUIDANCE = "cloud.guidance_json"
     private const val KEY_ACCOUNT_ID = "cloud.account_id"
     private const val KEY_CREATED_AT = "cloud.created_at"
     private const val KEY_HAS_PASSWORD = "cloud.has_password"
@@ -90,6 +92,8 @@ object NanoMuseCloud {
     private const val KEY_PRIVACY_URL = "cloud.privacy_url"
     /** The code sign-in created the account: the first-run setup owes the password step. */
     private const val KEY_FRESH = "cloud.fresh_account"
+    /** The relay refused the key and the phone kept the account's data aside (contract C12); the sign-in page says so until the next sign-in. */
+    private const val KEY_ENDED = "cloud.sign_in_ended"
     private const val KEY_WARNED_GRANT = "cloud.warned_grant"
     private const val KEY_SAMPLES = "cloud.samples"
     /** The relay's menu and what lies beyond it, so the picker and the hands can tell them apart. */
@@ -97,6 +101,8 @@ object NanoMuseCloud {
     private const val KEY_CATALOG_IDS = "cloud.catalog_ids"
     private const val KEY_RECOMMENDED = "cloud.recommended"
     private const val KEY_SIGHTED = "cloud.sighted"
+    private const val KEY_CHAT_IDS = "cloud.chat_ids"
+    private const val KEY_GUI_IDS = "cloud.gui_ids"
     private const val KEY_MODELS_AT = "cloud.models_at"
     /** The two lanes' defaults (contract C4), for a relay that does not mark `for` itself. */
     const val DEFAULT_CHAT_MODEL = "deepseek-v4.1-flash"
@@ -106,7 +112,18 @@ object NanoMuseCloud {
     /** Where the privacy policy is when the relay named one; empty means hide the link. */
     const val PRIVACY_URL = ""
 
-    class CloudException(val code: String, message: String, val status: Int = 0) : IOException(message)
+    /**
+     * A refusal of the relay's: its stable [code], its own sentence, the HTTP [status]; relay
+     * 0.22 adds [retryAfterS] (`provider_busy`, `too_many_in_flight`) and [paused] (the
+     * refusal comes from one of the operator's switches, not from use).
+     */
+    class CloudException(
+        val code: String,
+        message: String,
+        val status: Int = 0,
+        val retryAfterS: Int? = null,
+        val paused: Boolean = false,
+    ) : IOException(message)
 
     /** One line of the usage breakdown: a kind (chat, image, video, realtime) or a model. */
     data class UsageRow(
@@ -232,8 +249,8 @@ object NanoMuseCloud {
     private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     /**
-     * The relay this build talks to. No default relay: the person points it at
-     * their own relay; empty means not configured (callers must ask for it).
+     * The relay this phone talks to: the one the person named on the sign-in screen. Empty
+     * means not configured (callers must ask for it). Kept across launches.
      */
     fun baseUrl(context: Context): String =
         prefs(context).getString(KEY_BASE, null)?.takeIf { it.isNotBlank() }?.trimEnd('/')
@@ -249,11 +266,15 @@ object NanoMuseCloud {
 
     fun setBaseUrl(context: Context, url: String?) {
         prefs(context).edit().apply {
-            if (url.isNullOrBlank()) remove(KEY_BASE) else putString(KEY_BASE, url.trim().trimEnd('/'))
+            if (url.isNullOrBlank() || url.trim().trimEnd('/') == DEFAULT_BASE) remove(KEY_BASE) else putString(KEY_BASE, url.trim().trimEnd('/'))
         }.apply()
     }
 
+    /** Every build may point at another relay now (0.1.38); kept for the callers that asked. */
     fun canOverrideBase(): Boolean = true
+
+    /** Asks the relay at [url] for its `/healthz`; the version it reports. Throws [IOException]. */
+    suspend fun checkRelay(url: String): RelayAddress.Health = withContext(Dispatchers.IO) { RelayAddress.check(url) }
 
     /** The provider instance the relay is signed in as, if it still exists. */
     fun instance(context: Context): ProviderInstance? {
@@ -266,9 +287,29 @@ object NanoMuseCloud {
         return !repo(context)?.loadApiKey(inst.id).isNullOrBlank()
     }
 
+    /**
+     * Whether nanoMuse Cloud is one of the model sources: signed in and the Cloud provider
+     * instance switched on (upstream's `isEnabled`, the switch Settings › Models shows as *Use
+     * nanoMuse Cloud models*). Off, no automatic choice and no side call (title, memory,
+     * pictures, clips) goes through the relay; only the explicit *Use nanoMuse Cloud this time*
+     * button does ([io.github.nanomuse.chat.CloudRetry]). The sign-in itself is untouched:
+     * sync, the hub and the account page keep working.
+     */
+    fun modelsOn(context: Context): Boolean {
+        val inst = instance(context) ?: return false
+        return inst.isEnabled && isSignedIn(context)
+    }
+
+    /** Switches the Cloud provider instance on or off as a model source; the sign-in stays. */
+    fun setModelsOn(context: Context, on: Boolean) {
+        val inst = instance(context) ?: return
+        if (inst.isEnabled == on) return
+        repo(context)?.updateInstance(inst.copy(isEnabled = on))
+    }
+
     private val _signedIn = MutableStateFlow<Boolean?>(null)
 
-    /** Whether this phone is signed in, as a flow the home screen can follow (the account is required). */
+    /** Whether this phone is signed in, as a flow the home screen can follow. */
     fun signedIn(context: Context): StateFlow<Boolean?> {
         if (_signedIn.value == null) _signedIn.value = isSignedIn(context)
         return _signedIn
@@ -331,9 +372,23 @@ object NanoMuseCloud {
         )
     }
 
+    /**
+     * The ways-on card as the relay last described it (`spend.guidance` of `/v1/me`, relay
+     * 0.21, contract C11): the region's providers in order, the plans, the local servers, the
+     * caveats. Null from a relay that sends none — the card falls back to the bundled catalogue.
+     */
+    fun guidance(context: Context): Guidance? =
+        prefs(context).getString(KEY_GUIDANCE, null)?.let { Guidance.parse(it) }
+
     /** Whether the last sign-in created the account (until [clearFreshAccount]). */
     fun freshAccount(context: Context): Boolean = prefs(context).getBoolean(KEY_FRESH, false)
     fun clearFreshAccount(context: Context) { prefs(context).edit().remove(KEY_FRESH).apply() }
+
+    /**
+     * True after the relay refused the phone's key and the account's data was put aside
+     * (contract C12) — the sign-in page tells the person so — until the next sign-in.
+     */
+    fun signInEnded(context: Context): Boolean = prefs(context).getBoolean(KEY_ENDED, false)
 
     /**
      * The 80 % heads-up is said once per pool size: true the first time it is asked for a
@@ -492,38 +547,63 @@ object NanoMuseCloud {
         }
     }
 
-    /** Every other device loses its key; with [includingThis] this phone signs out too. */
-    suspend fun signOutEverywhere(context: Context, includingThis: Boolean) = withContext(Dispatchers.IO) {
+    /**
+     * Every other device loses its key; with [includingThis] this phone signs out too, and
+     * its copy of the account's data stays only with [keep] (contract C12).
+     */
+    suspend fun signOutEverywhere(context: Context, includingThis: Boolean, keep: Boolean = false) = withContext(Dispatchers.IO) {
         val key = apiKey(context) ?: throw CloudException("bad_key", "Not signed in")
         call(context, "POST", "/v1/auth/sign-out-all", JSONObject().put("all", includingThis), token = key)
-        if (includingThis) forgetLocally(context)
+        if (includingThis) forgetLocally(context, keep)
         Unit
     }
 
-    /** The person's own request: the account and everything about it goes at the relay. */
+    /**
+     * The person's own request: the account and everything about it goes at the relay, and
+     * everything of it on this phone — chats, memory, feed, goals, face, the key — goes too
+     * (contract C12). The next sign-in with the same address is a new account and starts empty.
+     */
     suspend fun deleteAccount(context: Context) = withContext(Dispatchers.IO) {
         val key = apiKey(context) ?: throw CloudException("bad_key", "Not signed in")
         call(context, "POST", "/v1/auth/delete", null, token = key)
-        forgetLocally(context)
+        forgetLocally(context, keep = false)
     }
 
     private fun deviceName(): String = "${Build.MANUFACTURER} ${Build.MODEL}".trim().take(80)
 
-    private fun forgetLocally(context: Context) {
-        io.github.nanomuse.hub.Hub.stop(context)
-        instance(context)?.let { repo(context)?.removeInstance(it.id) }
-        clear(context)
+    /**
+     * The phone forgets the account: the hub stops, the account's data leaves the fixed paths
+     * (contract C12, [io.github.nanomuse.account.AccountData.leave] — put aside with [keep],
+     * deleted without), the provider and the key go, and the phone's own set comes back.
+     * The account's data moves while the account is still the signed-in key; the phone's set
+     * returns only once the key is gone, so nothing made in the gap is filed under the account
+     * that left. All of it inside the sync lock, so no push reads the gap as deletions.
+     */
+    private suspend fun forgetLocally(context: Context, keep: Boolean) {
+        val ctx = context.applicationContext
+        io.github.nanomuse.hub.Hub.stop(ctx)
+        val account = io.github.nanomuse.account.AccountData.key(ctx)
+        io.github.nanomuse.sync.ConversationSync.exclusive {
+            if (account.isNotEmpty()) io.github.nanomuse.account.AccountData.leave(ctx, account, keep)
+            instance(ctx)?.let { repo(ctx)?.removeInstance(it.id) }
+            clear(ctx)
+            if (account.isNotEmpty()) io.github.nanomuse.account.AccountData.enter(ctx, io.github.nanomuse.account.AccountScope.LOCAL)
+        }
     }
 
     /**
      * A key from the relay (a code or a password sign-in) becomes a usable provider: instance,
      * key, models, a default group with the recommended chat model (only if the user has none
-     * yet), and the image model for the avatar (only if none is set).
+     * yet); the image and video models follow the Models page's order with nothing written.
      */
     private suspend fun adopt(context: Context, reply: JSONObject): Account {
         val repo = repo(context) ?: throw CloudException("no_repository", "Provider storage is not ready")
         val apiKey = reply.optString("api_key").takeIf { it.isNotBlank() }
             ?: throw CloudException("bad_reply", "The relay sent no key")
+        // contract C12: who was here before the key is written — the phone's own set (signed
+        // out), or an account a sign-in reached without a sign-out (nothing of it is deleted
+        // without the sheet's question: it is put aside, as *Keep* would)
+        val before = io.github.nanomuse.account.AccountData.key(context)
         // The host the code was sent to is the host the key is for; the relay's own idea of
         // its public address (`base_url`) is informational.
         val base = baseUrl(context)
@@ -542,7 +622,7 @@ object NanoMuseCloud {
             appendV1Suffix = true,
         ).also { repo.addInstance(it) }
         repo.saveApiKey(inst.id, apiKey)
-        prefs(context).edit().putString(KEY_INSTANCE, inst.id).apply()
+        prefs(context).edit().putString(KEY_INSTANCE, inst.id).remove(KEY_ENDED).apply()
 
         // The models the relay serves — same `/v1/models` call every provider gets; the relay
         // includes modalities so the picture model is recognised as one.
@@ -554,6 +634,13 @@ object NanoMuseCloud {
 
         saveAccount(context, reply)
         if (reply.optBoolean("created", false)) prefs(context).edit().putBoolean(KEY_FRESH, true).apply()
+        val after = io.github.nanomuse.account.AccountData.key(context)
+        if (after != before) {
+            io.github.nanomuse.sync.ConversationSync.exclusive {
+                io.github.nanomuse.account.AccountData.leave(context, before, keep = true)
+                io.github.nanomuse.account.AccountData.enter(context, after)
+            }
+        }
         _signedIn.value = true
         io.github.nanomuse.hub.Hub.restart(context) // the new key joins the hub
         ProfileSync.pullSoon(context) // the name and look the account's other devices wear
@@ -575,10 +662,14 @@ object NanoMuseCloud {
             account(context)
         } catch (e: CloudException) {
             if (e.status == 401) {
-                // Revoked elsewhere, or the relay was reset: the provider cannot answer any more.
-                io.github.nanomuse.hub.Hub.stop(context)
-                repo(context)?.removeInstance(inst.id)
-                clear(context)
+                // Revoked elsewhere, or the relay was reset: the provider cannot answer any
+                // more. Nobody on this phone asked, so the account's data is put aside as
+                // *Keep* would and comes back with the next sign-in as the same account
+                // (contract C12). Only `account_deleted` — the account itself is gone at the
+                // relay — leaves nothing to come back to, and the data goes.
+                val keep = io.github.nanomuse.account.AccountScope.keepOnRefusedKey(e.code)
+                forgetLocally(context, keep)
+                if (keep) prefs(context).edit().putBoolean(KEY_ENDED, true).apply()
                 null
             } else {
                 account(context)
@@ -586,17 +677,19 @@ object NanoMuseCloud {
         }
     }
 
-    /** Revoke this phone's key at the relay and take the provider out of the app. */
-    suspend fun signOut(context: Context) = withContext(Dispatchers.IO) {
+    /**
+     * Revoke this phone's key at the relay and take the provider out of the app. The account's
+     * chats, memory, feed, goals and face stay on the phone — put aside for its return — only
+     * with [keep] (the sign-out sheet's switch, off by default; contract C12).
+     */
+    suspend fun signOut(context: Context, keep: Boolean = false) = withContext(Dispatchers.IO) {
         val repo = repo(context)
         val inst = instance(context)
         val key = inst?.let { repo?.loadApiKey(it.id) }
         if (inst != null && key != null) {
             runCatching { call(context, "POST", "/v1/auth/sign-out", null, token = key) }
         }
-        io.github.nanomuse.hub.Hub.stop(context)
-        if (inst != null) repo?.removeInstance(inst.id)
-        clear(context)
+        forgetLocally(context, keep)
     }
 
     /**
@@ -609,7 +702,11 @@ object NanoMuseCloud {
         inviteBonusText(context),
     )
 
-    /** A sentence for the person, from the relay's stable error codes. */
+    /**
+     * A sentence for the person, from the relay's stable error codes — every code the relay
+     * sends today (docs/cloud.md; the desktop's `refusals.ts` and the runtime's `failures.py`
+     * say the same in their words), never a status code or the wire.
+     */
     fun describe(context: Context, e: Throwable): String = when (e) {
         is CloudException -> when (e.code) {
             "bad_identifier" -> context.getString(R.string.nm_cloud_err_bad_identifier)
@@ -617,14 +714,26 @@ object NanoMuseCloud {
             "code_expired" -> context.getString(R.string.nm_cloud_err_code_expired)
             "code_too_often" -> context.getString(R.string.nm_cloud_err_code_too_often)
             "not_invited" -> context.getString(R.string.nm_cloud_err_not_invited)
+            "signup_closed" -> context.getString(R.string.nm_cloud_err_signup_closed)
             "send_failed" -> context.getString(R.string.nm_cloud_err_send_failed)
-            "phone_region" -> context.getString(R.string.nm_cloud_err_phone_region)
+            "phone_region" -> context.getString(R.string.nm_cloud_sms_region) // the same sentence the sign-in screen shows before asking
             "account_disabled" -> context.getString(R.string.nm_cloud_err_disabled)
             "bad_key" -> context.getString(R.string.nm_cloud_err_bad_key)
+            "account_deleted" -> context.getString(R.string.nm_cloud_err_account_deleted)
             "out_of_tokens" -> context.getString(R.string.nm_cloud_err_out_of_tokens)
             "daily_cap" -> context.getString(R.string.nm_cloud_err_daily_cap)
-            "allowance_exhausted" -> allowanceSentence(context)
-            "rate_limited" -> context.getString(R.string.nm_cloud_err_rate_limited)
+            // relay 0.22: the operator paused the free allowance — not used up, the same card, another lead
+            "allowance_exhausted" -> if (e.paused) context.getString(R.string.nm_cloud_err_allowance_paused) else allowanceSentence(context)
+            "rate_limited", "too_many_in_flight" -> context.getString(R.string.nm_cloud_err_rate_limited)
+            "provider_busy" -> e.retryAfterS?.takeIf { it > 0 }
+                ?.let { context.getString(R.string.nm_cloud_err_provider_busy_wait, io.github.nanomuse.ui.chat.duration(context, it)) }
+                ?: context.getString(R.string.nm_cloud_err_provider_busy)
+            "too_large" -> context.getString(R.string.nm_cloud_err_too_large)
+            "model_not_offered" -> context.getString(R.string.nm_cloud_err_model_not_offered)
+            "service_paused" -> context.getString(R.string.nm_cloud_err_service_paused)
+            "sync_paused" -> context.getString(R.string.nm_cloud_err_sync_paused)
+            "hub_paused" -> context.getString(R.string.nm_cloud_err_hub_paused)
+            "upstream" -> context.getString(R.string.nm_cloud_err_relay_down)
             "unreachable" -> context.getString(R.string.nm_cloud_err_unreachable)
             "bad_credentials" -> context.getString(R.string.nm_cloud_err_bad_credentials)
             "no_password" -> context.getString(R.string.nm_cloud_err_no_password)
@@ -633,7 +742,14 @@ object NanoMuseCloud {
             "password_required" -> context.getString(R.string.nm_cloud_err_password_required)
             "password_short" -> context.getString(R.string.nm_cloud_err_password_short)
             "password_weak", "password_long" -> context.getString(R.string.nm_cloud_err_password_weak)
-            else -> e.message ?: context.getString(R.string.nm_cloud_err_generic)
+            // no code of the relay's: the status says enough for a 413 (a proxy's plain
+            // "Request too large"), a 401 and a 5xx; anything else shows the relay's sentence
+            else -> when {
+                e.status == 413 -> context.getString(R.string.nm_cloud_err_too_large)
+                e.status == 401 -> context.getString(R.string.nm_cloud_err_bad_key)
+                e.status >= 500 -> context.getString(R.string.nm_cloud_err_relay_down)
+                else -> e.message?.takeIf { it.isNotBlank() && !it.startsWith("HTTP ") } ?: context.getString(R.string.nm_cloud_err_generic)
+            }
         }
         is IOException -> context.getString(R.string.nm_cloud_err_unreachable)
         else -> e.message ?: context.getString(R.string.nm_cloud_err_generic)
@@ -645,16 +761,15 @@ object NanoMuseCloud {
         (context.applicationContext as? MinisApp)?.providerRepositoryOrNull
 
     /**
-     * After the key: a default group if the user has none, and the image model for the avatar
-     * if none is set. Nothing of the user's own is replaced — someone who already has a key
-     * and a group keeps them and gets the relay as one more provider.
+     * After the key: a default group if the user has none. Nothing of the user's own is
+     * replaced — someone who already has a key and a group keeps them and gets the relay as
+     * one more provider.
      */
     private fun provisionDefaults(context: Context, repo: ProviderRepository, inst: ProviderInstance, models: JSONArray?) {
         val offered = (0 until (models?.length() ?: 0)).mapNotNull { models?.optJSONObject(it) }
         // the group opens on the chat default (deepseek-v4.1-flash, contract C4); the hands
         // model (qwen3.8-27b) is a setting of its own, read by Hands.screenModel
         val recommendedChat = recommendedChat(offered.filter { !drawsOnly(it) })?.optString("id")
-        val imageModel = offered.firstOrNull { drawsOnly(it) }?.optString("id")
 
         var config = repo.config.value
         var entries = config.modelEntries.filter { it.providerInstanceId == inst.id && !it.isHidden }
@@ -694,10 +809,10 @@ object NanoMuseCloud {
                 repo.defaultPrimaryGroupId = (groups.firstOrNull { chatEntry.id in it.memberEntryIds } ?: groups.firstOrNull { it.name == LABEL && it.memberEntryIds.isNotEmpty() })?.id
             }
         }
-        if (imageModel != null) {
-            val current = ImageGen.endpoint(context)
-            if (current == null || current.instanceId == inst.id) ImageGen.save(context, inst.id, imageModel)
-        }
+        // The image model is not written here any more (0.1.41): with nothing chosen,
+        // ImageGen.endpoint resolves it in the contract's order (the chat provider's own
+        // image model, else the relay's, else the first own provider that draws), so a pick
+        // of the person's own is never shadowed by a choice made for them at sign-in.
     }
 
     private fun drawsOnly(model: JSONObject): Boolean {
@@ -765,12 +880,19 @@ object NanoMuseCloud {
         val sighted = (chats.firstOrNull { lanes(it)?.contains("gui") == true }
             ?: chats.firstOrNull { it.optString("id") == DEFAULT_GUI_MODEL }
             ?: chats.firstOrNull { sees(it) })?.optString("id")
+        // the menu by lane (0.1.41, the Models page): `for` contains `chat` / `gui`; a relay
+        // from before `for` puts every chat model in the chat lane and the sighted one in gui
+        val chatLane = chats.filter { lanes(it)?.contains("chat") != false }.map { it.optString("id") }.filter { it.isNotBlank() }
+        val guiLane = chats.filter { lanes(it)?.contains("gui") == true }.map { it.optString("id") }.filter { it.isNotBlank() }
+            .ifEmpty { listOfNotNull(sighted) }
         prefs(context).edit().apply {
             putString(KEY_MENU_IDS, menu.joinToString(","))
             // the list sent with the key is the menu alone: it must not erase a catalog we know
             if (stamp || catalog.isNotEmpty()) putString(KEY_CATALOG_IDS, catalog.joinToString(","))
             putString(KEY_RECOMMENDED, recommended?.optString("id") ?: "")
             putString(KEY_SIGHTED, sighted ?: "")
+            putString(KEY_CHAT_IDS, chatLane.joinToString(","))
+            putString(KEY_GUI_IDS, guiLane.joinToString(","))
             if (stamp) putLong(KEY_MODELS_AT, System.currentTimeMillis())
         }.apply()
     }
@@ -791,32 +913,24 @@ object NanoMuseCloud {
     /** The menu's model for looking at the screen: the recommended one when it sees pictures, else the first that does. */
     fun sightedModelId(context: Context): String? = prefs(context).getString(KEY_SIGHTED, null)?.takeIf { it.isNotBlank() }
 
+    /** The menu's chat lane (`for` contains `chat`), in the menu's order; the whole menu's chat models when the relay did not say. */
+    fun chatLaneIds(context: Context): List<String> =
+        prefs(context).getString(KEY_CHAT_IDS, null)?.split(',')?.filter { it.isNotBlank() } ?: emptyList()
+
+    /** The menu's lane for the screen (`for` contains `gui`), in the menu's order; the sighted model alone on an older relay. */
+    fun guiLaneIds(context: Context): List<String> =
+        prefs(context).getString(KEY_GUI_IDS, null)?.split(',')?.filter { it.isNotBlank() }?.ifEmpty { null }
+            ?: listOfNotNull(sightedModelId(context))
+
     /** Is this entry served by the relay? (Null when the person is not signed in.) */
     fun owns(context: Context, entry: ModelEntry): Boolean = instance(context)?.id == entry.providerInstanceId
 
-    /**
-     * The person picked one of our models in the chat's picker: the next chats follow it. The
-     * picker's own binding is per chat, and a new chat starts from the default group — ours,
-     * with the recommended model first — so a choice made in the picker was undone by the
-     * next "New chat" (a member who chose deepseek-v4.1-flash found every new chat back on
-     * qwen3.8-27b). Moving the pick to the front of our group is what makes it stick; a
-     * group of the person's own is never touched. True when new chats will follow the pick.
-     */
-    fun followPick(context: Context, entryId: String): Boolean {
-        val repo = repo(context) ?: return false
-        val inst = instance(context) ?: return false
-        val config = repo.config.value
-        val entry = config.modelEntries.firstOrNull { it.id == entryId && it.providerInstanceId == inst.id } ?: return false
-        if (drawsOrFilms(entry.model) || ImageGen.looksLikeImageModel(entry.model.id)) return false
-        val group = config.modelGroups.firstOrNull { it.id == repo.defaultPrimaryGroupId && it.name == LABEL } ?: return false
-        if (group.memberEntryIds.firstOrNull() == entryId) return true
-        val members = (listOf(entryId) + group.memberEntryIds.filter { it != entryId }).toMutableList()
-        repo.updateGroup(group.copy(memberEntryIds = members))
-        return true
-    }
+    // The person picked a model in the chat's picker: the next chats follow it. That used to
+    // live here for the relay's models alone; since 0.1.41 it holds for every provider and is
+    // io.github.nanomuse.models.ModelSlots.followPick.
 
     /** A picture or video model is no chat model, whatever its name says. */
-    private fun drawsOrFilms(model: LLMModel): Boolean {
+    fun drawsOrFilms(model: LLMModel): Boolean {
         val out = model.outputModalities?.map { it.lowercase() } ?: return false
         return "text" !in out && ("image" in out || "video" in out)
     }
@@ -870,6 +984,8 @@ object NanoMuseCloud {
             .putFloat(KEY_ALLOWANCE, spend.optDouble("allowance_cny", 0.0).toFloat())
             .putFloat(KEY_INVITEE_BONUS, spend.optDouble("invitee_bonus_cny", reply.optJSONObject("invite")?.optDouble("invitee_bonus_cny", 0.0) ?: 0.0).toFloat())
             .putString(KEY_OWN_KEY_DOCS, spend.optString("own_key_docs", ""))
+            // relay 0.21: the card as data; an older relay sends none and the bundled catalogue is used
+            .putString(KEY_GUIDANCE, spend.optJSONObject("guidance")?.toString())
             .putFloat(KEY_USD_CNY, spend.optDouble("usd_cny", 0.0).toFloat())
             .putString(KEY_ACCOUNT_ID, account.optString("id"))
             .putLong(KEY_CREATED_AT, account.optLong("created_at", 0))
@@ -900,18 +1016,19 @@ object NanoMuseCloud {
      * The relay's menu changes between versions (0.4 draws with qwen-image-3.0 and animates with
      * wan2.2-i2v-flash instead of the Pro tier and MiniMax-H3). A phone that still points its
      * image or video model at a name the relay no longer offers is moved to what it offers now;
-     * a user's own providers are never touched.
+     * a user's own providers are never touched, and a slot that was never chosen (it follows
+     * the automatic order, which already reads the relay's current menu) is left unchosen.
      */
     private fun migrateMediaModels(context: Context, models: JSONArray?) {
         val inst = instance(context) ?: return
         val offered = (0 until (models?.length() ?: 0)).mapNotNull { models?.optJSONObject(it) }
         if (offered.isEmpty()) return
         val ids = offered.map { it.optString("id") }.toSet()
-        val image = ImageGen.endpoint(context)
+        val image = ImageGen.endpoint(context)?.takeIf { ImageGen.isChosen(context) }
         if (image != null && image.instanceId == inst.id && image.model !in ids) {
             offered.firstOrNull { drawsOnly(it) }?.optString("id")?.let { ImageGen.save(context, inst.id, it) }
         }
-        val video = io.github.nanomuse.media.MediaModels.videoEndpoint(context)
+        val video = io.github.nanomuse.media.MediaModels.videoEndpoint(context)?.takeIf { io.github.nanomuse.media.MediaModels.videoChosen(context) }
         if (video != null && video.instanceId == inst.id && video.model !in ids) {
             val offeredVideo = offered.filter { films(it) }
             val pick = offeredVideo.firstOrNull { it.optJSONObject("nanomuse")?.optBoolean("recommended") == true } ?: offeredVideo.firstOrNull()
@@ -953,11 +1070,11 @@ object NanoMuseCloud {
             .remove(KEY_GRANTED).remove(KEY_USED).remove(KEY_USED_TODAY).remove(KEY_DAILY_CAP).remove(KEY_UNLIMITED).remove(KEY_CHECKED_AT)
             .remove(KEY_MEMBER).remove(KEY_SPENT_TODAY).remove(KEY_SPENT_TOTAL).remove(KEY_USD_CNY)
             .remove(KEY_GRANT).remove(KEY_LEFT).remove(KEY_WARN).remove(KEY_ALLOWANCE).remove(KEY_INVITEE_BONUS)
-            .remove(KEY_OWN_KEY_DOCS)
+            .remove(KEY_OWN_KEY_DOCS).remove(KEY_GUIDANCE)
             .remove(KEY_ACCOUNT_ID).remove(KEY_CREATED_AT).remove(KEY_HAS_PASSWORD).remove(KEY_SESSIONS).remove(KEY_VIA).remove(KEY_REGION).remove(KEY_USAGE)
             .remove(KEY_INVITE_CODE).remove(KEY_INVITE_URL).remove(KEY_INVITES).remove(KEY_INVITE_BONUS).remove(KEY_INVITE_EARNED)
             .remove(KEY_CONTRIBUTE).remove(KEY_SAMPLES).remove(KEY_CONTRIBUTE_DEFAULT).remove(KEY_PRIVACY_URL).remove(KEY_FRESH).remove(KEY_WARNED_GRANT)
-            .remove(KEY_MENU_IDS).remove(KEY_CATALOG_IDS).remove(KEY_RECOMMENDED).remove(KEY_SIGHTED).remove(KEY_MODELS_AT)
+            .remove(KEY_MENU_IDS).remove(KEY_CATALOG_IDS).remove(KEY_RECOMMENDED).remove(KEY_SIGHTED).remove(KEY_CHAT_IDS).remove(KEY_GUI_IDS).remove(KEY_MODELS_AT)
             .apply()
         ProfileSync.forget(context)
         io.github.nanomuse.sync.ConversationSync.forget(context) // the next account starts with its own ids and cursor
@@ -988,6 +1105,9 @@ object NanoMuseCloud {
                 code = err?.optString("code")?.takeIf { it.isNotBlank() } ?: "http_${r.code}",
                 message = err?.optString("message")?.takeIf { it.isNotBlank() } ?: "HTTP ${r.code}",
                 status = r.code,
+                // relay 0.22: when to come back, and whether an operator's switch is the reason
+                retryAfterS = err?.optDouble("retry_after", 0.0)?.takeIf { it > 0 }?.let { kotlin.math.ceil(it).toInt() },
+                paused = err?.optBoolean("paused", false) == true,
             )
         }
     }

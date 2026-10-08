@@ -401,7 +401,7 @@ struct ChatMessageRow: View {
                         }
                     }
                 }
-                NanoMuseFromDeviceCaption(message.nmFromDevice) // nanoMuse: C8 — "From Pixel 8" under a synced line
+                NanoMuseFromDeviceCaption(message.nmFromDevice, working: message.nmWorkingDevice) // nanoMuse: C8 "From Pixel 8" + C9 "{device} is working…"
             }
             .modifier(MinisOpenURLHandler())
             .contentShape(Rectangle())
@@ -545,7 +545,13 @@ struct ChatMessageRow: View {
 
             // Inline error + retry
             if let error = message.error {
-                inlineError(error)
+                // nanoMuse: a provider that could not be reached (or refused the region, or whose sign-in ran out) is a card, not the transport's text
+                if let reach = NanoMuseProviderReach.classify(error) {
+                    NanoMuseProviderReachCard(reach: reach, onRetry: onRetry)
+                } else {
+                    inlineError(error)
+                    NanoMuseCloudOnceRow(onRetry: onRetry) // nanoMuse: "Use nanoMuse Cloud this time" after a key of one's own failed
+                }
             }
 
             // Resume banner for interrupted sessions

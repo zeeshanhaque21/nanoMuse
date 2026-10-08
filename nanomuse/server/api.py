@@ -24,7 +24,12 @@
     GET|PUT /api/settings
     GET  /api/connections                 model, email, browser, MCP servers, vault names
     PUT  /api/connections/llm|embeddings|email|browser|calendar   POST /api/connections/llm|embeddings|email|calendar/test
+    PUT  /api/connections/gui             the hands' model (a protocol or a catalogue id, as for llm)   POST /api/connections/gui/test
+    GET|PUT /api/connections/image|video  where pictures and clips come from: provider (a catalogue id), model, base_url, api_key
     POST /api/llm/models                 the models an endpoint offers (live /models, else the catalogue)
+    GET  /api/providers (?lang=en|zh&region=cn|global)  the provider catalogue, which slots use which, what that covers
+    POST /api/chatgpt/login  GET /api/chatgpt/status  GET /api/chatgpt/usage
+    POST /api/chatgpt/callback {url}  POST /api/chatgpt/logout
     POST /api/connections/calendar/feeds {name,url}  DELETE /api/connections/calendar/feeds/{name}
     PUT  /api/connections/contacts {enabled}  POST /api/connections/contacts/sources {name,url}
     POST /api/connections/contacts/import?name= (body: the .vcf text)  DELETE /api/connections/contacts/sources/{name}
@@ -34,6 +39,8 @@
     POST /api/connections/mcp  DELETE /api/connections/mcp/{name}
     GET  /api/vault  PUT|DELETE /api/vault/{name}   (names only ever come back)
     POST /api/onboarded
+    GET  /api/firstrun (?lang=en|zh)      the first conversation: phase, chips, the three opening lines
+    POST /api/firstrun/start {lang}  POST /api/firstrun/pick {name}  POST /api/firstrun/dismiss
     GET  /api/nudges (?refresh=1)         when the app may ask for a star: the relay's policy, read once a day
     GET|PUT /api/sync/state {enabled}     conversations synced between the account's devices: the switch, the cursor, the relay's counts
     POST /api/sync/delete                 delete what the relay stores for the account (the switch stays)
@@ -75,7 +82,9 @@ from nanomuse.bridge.server import BridgeError
 from nanomuse.cloud import CloudError
 from nanomuse.coding.service import CodingError
 from nanomuse.config import Settings
+from nanomuse.fences import MAX_NAME
 from nanomuse.hub.client import HubError
+from nanomuse.llm.chatgpt import ChatGPTError
 from nanomuse.logger import logger
 from nanomuse.server import tickets
 from nanomuse.server.channels_api import install_channels
@@ -87,7 +96,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 # Said to a client that still puts the token in the URL (taken until 0.1.32).
 LEGACY_TOKEN_MESSAGE = (
     "the token no longer travels in the URL: send it as 'Authorization: Bearer …' "
-    "(or as the socket's first frame) — update the app, or pair again with a #token= link"
+    "(or as the socket's first frame); update the app, or pair again with a #token= link"
 )
 
 
@@ -96,7 +105,7 @@ def _google_page(title: str, message: str, *, ok: bool) -> HTMLResponse:
     color = "#1a7f37" if ok else "#b42318"
     page = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>nanoMuse — {html.escape(title)}</title>
+<title>nanoMuse: {html.escape(title)}</title>
 <style>
  body {{ margin:0; height:100vh; display:grid; place-items:center; background:#0b0d12;
         color:#e6e8ee; font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }}
@@ -115,6 +124,9 @@ class SendBody(BaseModel):
     text: str = Field("", max_length=20_000)
     # workspace paths from POST /api/files/upload; a message may be attachments alone
     files: list[str] = Field(default_factory=list, max_length=10)
+    # the language of the client's screens (a BCP-47 tag such as "en" or "zh-CN"); the reply
+    # is written in it unless Settings fixes one. Optional: without it the message's script decides.
+    language: str = Field("", max_length=20)
 
 
 class ThreadBody(BaseModel):
@@ -198,12 +210,31 @@ class LLMBody(BaseModel):
     tool_mode: str | None = None
     # a new key goes straight into the vault; "" removes the key; None keeps it
     api_key: str | None = None
+    # `[llm] proxy`: http(s):// or socks5(h):// for this slot's requests only; "" clears it
+    proxy: str | None = None
+
+
+class MediaBody(BaseModel):
+    """One of the ``image`` / ``video`` slots. ``provider`` is a catalogue id, or ``openai``
+    / ``openai_responses`` with a ``base_url``; ``model`` empty means the catalogue's default;
+    ``api_key`` goes into the vault, "" removes it, None keeps it. All four "" clears the
+    slot: pictures (clips) come from the chat provider again, or the account."""
+
+    provider: str | None = None
+    model: str | None = None
+    base_url: str | None = None
+    api_key: str | None = None
 
 
 class LLMModelsBody(BaseModel):
     preset: str = ""
     base_url: str = ""
     api_key: str = ""
+
+
+class ChatGptCallbackBody(BaseModel):
+    # the full address the browser landed on: http://localhost:1455/auth/callback?code=…&state=…
+    url: str = Field(min_length=1, max_length=4000)
 
 
 class EmbeddingsBody(BaseModel):
@@ -309,6 +340,15 @@ class OnboardedBody(BaseModel):
     done: bool = True
 
 
+class FirstRunStartBody(BaseModel):
+    # the language the opening is shown in ("en" or "zh"); the agent's reply language when empty
+    lang: str = Field("", max_length=10)
+
+
+class FirstRunPickBody(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+
+
 class BrowserControlBody(BaseModel):
     """The user drives the agent's browser. ``x``/``y`` are fractions of the frame."""
 
@@ -365,12 +405,20 @@ class AvatarSessionBody(BaseModel):
     index: int | None = None
 
 
+class CloudModelsBody(BaseModel):
+    """``POST /api/cloud/models``: the account's models as a source, on or off."""
+
+    on: bool = True
+
+
 class CloudContributeBody(BaseModel):
     on: bool = False
 
 
 class SyncStateBody(BaseModel):
-    enabled: bool = True
+    enabled: bool | None = None
+    # C9: this device's side chats too (per device, default off)
+    side_chats: bool | None = None
 
 
 class CloudLoginBody(BaseModel):
@@ -515,7 +563,9 @@ def create_app(settings: Settings, service: MuseService | None = None) -> FastAP
     # ------------------------------------------------------------------ threads & chat
     @app.get("/api/threads", dependencies=dep)
     async def list_threads() -> list[dict[str, Any]]:
-        return [t.meta() for t in svc.threads.values()]
+        """The current account's conversations and the ones no account has (contract C10);
+        every local one when signed out."""
+        return [t.meta() for t in svc.visible_threads()]
 
     @app.post("/api/threads", dependencies=dep)
     async def create_thread(body: ThreadBody) -> dict[str, Any]:
@@ -564,7 +614,7 @@ def create_app(settings: Settings, service: MuseService | None = None) -> FastAP
     async def send_message(thread_id: str, body: SendBody) -> dict[str, Any]:
         thread = _thread_or_404(thread_id)
         try:
-            event = svc.send(thread.id, body.text, files=body.files)
+            event = svc.send(thread.id, body.text, files=body.files, language=body.language)
         except (ValueError, PermissionError) as exc:
             raise HTTPException(400, str(exc)) from exc
         return {"event": event, "thread": thread.meta()}
@@ -795,10 +845,18 @@ def create_app(settings: Settings, service: MuseService | None = None) -> FastAP
         wrong id or key is a 404 either way. The body (up to 64 KB, JSON or text) is what
         the agent gets as context."""
         key = request.query_params.get("key") or request.headers.get("x-hook-key") or ""
-        raw = await request.body()
-        if len(raw) > 64 * 1024:
+        limit = 64 * 1024
+        declared = request.headers.get("content-length", "")
+        if declared.isdigit() and int(declared) > limit:
             raise HTTPException(413, "body too large (64 KB max)")
-        body = raw.decode("utf-8", errors="replace")
+        chunks: list[bytes] = []
+        total = 0
+        async for chunk in request.stream():
+            total += len(chunk)
+            if total > limit:
+                raise HTTPException(413, "body too large (64 KB max)")
+            chunks.append(chunk)
+        body = b"".join(chunks).decode("utf-8", errors="replace")
         try:
             item = svc.deliver_hook(trigger_id, key, body, request.headers.get("content-type", ""))
         except KeyError as exc:
@@ -906,6 +964,52 @@ def create_app(settings: Settings, service: MuseService | None = None) -> FastAP
         """The models an endpoint offers (its /models, else the preset's catalogue); saves nothing."""
         return await conn.llm_models(body.model_dump())
 
+    # ------------------------------------------------------------------ providers (contract C11)
+    @app.get("/api/providers", dependencies=dep)
+    async def providers(
+        lang: str = Query("", max_length=10), region: str = Query("", max_length=10)
+    ) -> dict[str, Any]:
+        """The catalogue with what each slot uses, the union of what that covers, and one
+        sentence per capability nothing covers (``lang``: en|zh; ``region``: cn|global)."""
+        return svc.providers.view(lang=lang.strip().lower(), region=region.strip().lower())
+
+    # ------------------------------------------------------------------ the ChatGPT sign-in
+    def _chatgpt_http(exc: ChatGPTError) -> HTTPException:
+        status = {"state_mismatch": 400, "bad_callback": 400, "no_login": 409}.get(exc.code, 502)
+        return HTTPException(status, f"{exc.message} ({exc.code})")
+
+    @app.post("/api/chatgpt/login", dependencies=dep)
+    async def chatgpt_login() -> dict[str, Any]:
+        """Start the Codex sign-in (the flow of ``nanomuse chatgpt login``) in the background:
+        the page to open, where the callback is expected; the one under way when there is."""
+        return await svc.chatgpt.login()
+
+    @app.get("/api/chatgpt/status", dependencies=dep)
+    async def chatgpt_status() -> dict[str, Any]:
+        """The token store without the tokens; ``pending`` and ``url`` while a sign-in waits;
+        ``error`` after one failed, until the next login."""
+        return svc.chatgpt.status()
+
+    @app.get("/api/chatgpt/usage", dependencies=dep)
+    async def chatgpt_usage() -> dict[str, Any]:
+        """What is left of the plan's usage windows, as OpenAI reports it (one request to
+        chatgpt.com at most once a minute; ``limits`` null when it reports nothing)."""
+        return await svc.chatgpt.usage()
+
+    @app.post("/api/chatgpt/callback", dependencies=dep)
+    async def chatgpt_callback(body: ChatGptCallbackBody) -> dict[str, Any]:
+        """The callback address pasted from the browser's address bar, for a runtime the
+        browser cannot reach on port 1455; a ``state`` that is not the pending login's is 400."""
+        try:
+            return svc.chatgpt.callback(body.url)
+        except ChatGPTError as exc:
+            raise _chatgpt_http(exc) from exc
+
+    @app.post("/api/chatgpt/logout", dependencies=dep)
+    async def chatgpt_logout() -> dict[str, Any]:
+        """Forget the sign-in (and stop one under way); nothing is revoked upstream."""
+        return await svc.chatgpt.logout()
+
     @app.put("/api/connections/embeddings", dependencies=dep)
     async def put_embeddings(body: EmbeddingsBody) -> dict[str, Any]:
         try:
@@ -950,6 +1054,28 @@ def create_app(settings: Settings, service: MuseService | None = None) -> FastAP
     @app.post("/api/connections/gui/test", dependencies=dep)
     async def test_gui() -> dict[str, Any]:
         return await svc.connections.test_gui()
+
+    @app.get("/api/connections/image", dependencies=dep)
+    async def get_image() -> dict[str, Any]:
+        return conn.media_view("image")
+
+    @app.put("/api/connections/image", dependencies=dep)
+    async def put_image(body: MediaBody) -> dict[str, Any]:
+        try:
+            return conn.set_media("image", body.model_dump())
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.get("/api/connections/video", dependencies=dep)
+    async def get_video() -> dict[str, Any]:
+        return conn.media_view("video")
+
+    @app.put("/api/connections/video", dependencies=dep)
+    async def put_video(body: MediaBody) -> dict[str, Any]:
+        try:
+            return conn.set_media("video", body.model_dump())
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
 
     @app.get("/api/hands", dependencies=dep)
     async def hands_status() -> dict[str, Any]:
@@ -1170,6 +1296,16 @@ def create_app(settings: Settings, service: MuseService | None = None) -> FastAP
         except CloudError as exc:
             raise _cloud_http(exc) from exc
 
+    @app.post("/api/cloud/models", dependencies=dep)
+    async def cloud_models(body: CloudModelsBody) -> dict[str, Any]:
+        """*Use nanoMuse Cloud models*: off, the account's models leave the automatic order
+        of the hands, pictures and clips and the providers' listing; the sign-in stays.
+        ``409 chat_on_cloud`` while the chat model is the account's."""
+        try:
+            return svc.hub.set_models(body.on)
+        except CloudError as exc:
+            raise _cloud_http(exc) from exc
+
     @app.post("/api/cloud/contribute", dependencies=dep)
     async def cloud_contribute(body: CloudContributeBody) -> dict[str, Any]:
         """Data controls: turn "Help improve nanoMuse's AI models" on or off for the account
@@ -1198,10 +1334,17 @@ def create_app(settings: Settings, service: MuseService | None = None) -> FastAP
 
     @app.put("/api/sync/state", dependencies=dep)
     async def sync_set_state(body: SyncStateBody) -> dict[str, Any]:
-        """Off tells the relay, which deletes everything stored for the account; on re-pushes
-        this device's chats and pulls the others'."""
+        """``{enabled}``: off tells the relay, which deletes everything stored for the account;
+        on re-pushes this device's chats and pulls the others'. ``{side_chats}`` (C9, per
+        device): on sends this device's side chats too and pulls the other devices' once
+        from the start; off stops both and leaves what was synced where it is."""
+        if body.enabled is None and body.side_chats is None:
+            raise HTTPException(400, "say enabled or side_chats")
         try:
-            await svc.sync.set_enabled(body.enabled)
+            if body.enabled is not None:
+                await svc.sync.set_enabled(body.enabled)
+            if body.side_chats is not None:
+                svc.sync.set_side_chats(body.side_chats)
         except CloudError as exc:
             raise _cloud_http(exc) from exc
         return await _sync_view()
@@ -1600,6 +1743,37 @@ def create_app(settings: Settings, service: MuseService | None = None) -> FastAP
         started = svc.first_feed_day() if body.done else False
         return {"onboarded": body.done, "feed_started": started}
 
+    # ------------------------------------------------------------------ the first conversation (C4)
+    @app.get("/api/firstrun", dependencies=dep)
+    async def firstrun_state(lang: str = Query("", max_length=10)) -> dict[str, Any]:
+        """Where the first conversation stands, the chips for the chooser, and the three
+        lines the app speaks first in ``lang`` (``en`` or ``zh``; the opening's own language
+        when empty)."""
+        return svc.firstrun_view(lang, intro=True)
+
+    @app.post("/api/firstrun/start", dependencies=dep)
+    async def firstrun_start(body: FirstRunStartBody) -> dict[str, Any]:
+        """Start was pressed: the main chat is bound as the first conversation and the
+        setup counts as finished (as ``POST /api/onboarded`` does)."""
+        return svc.start_first_conversation(body.lang)
+
+    @app.post("/api/firstrun/pick", dependencies=dep)
+    async def firstrun_pick(body: FirstRunPickBody) -> dict[str, Any]:
+        """A chip was picked: the name is saved now; the web sends it as the person's
+        message next, and the model's reply is its first as itself."""
+        name = " ".join(body.name.split())[:MAX_NAME].strip()
+        if not name:
+            raise HTTPException(400, "name is required")
+        try:
+            return svc.pick_first_name(name)
+        except LookupError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+    @app.post("/api/firstrun/dismiss", dependencies=dep)
+    async def firstrun_dismiss() -> dict[str, Any]:
+        """The person moved on: the chooser goes, the first conversation counts as over."""
+        return svc.dismiss_first_chooser()
+
     # ------------------------------------------------------------------ browser view
     @app.get("/api/browser/{thread_id}/frames/{frame_id}.jpg", dependencies=dep_or_signed)
     async def browser_frame(thread_id: str, frame_id: str) -> Response:
@@ -1769,13 +1943,15 @@ def create_app(settings: Settings, service: MuseService | None = None) -> FastAP
                 if target.suffix.lower() != ".json"
                 else "application/json"
             )
-        headers = (
-            {"Content-Disposition": f'attachment; filename="{target.name}"'} if download else {}
-        )
+        headers: dict[str, str] = {}
         if media.startswith("text/html") or media == "image/svg+xml":
             # Files the agent wrote never run with the app's origin: no token, no API.
             headers["Content-Security-Policy"] = "sandbox allow-scripts allow-popups"
-        return FileResponse(target, media_type=media, headers=headers)
+        # ``filename=`` lets Starlette write the Content-Disposition header itself, which
+        # encodes a name that is not ASCII (报告.txt) instead of failing on it.
+        return FileResponse(
+            target, media_type=media, headers=headers, filename=target.name if download else None
+        )
 
     # ------------------------------------------------------------------ websocket
     @app.websocket("/ws")
@@ -1894,11 +2070,12 @@ async def _handle_ws_message(
     send: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
 ) -> None:
     kind = data.get("kind") or data.get("type")
+    reply = send or ws.send_json  # one writer per socket when the pump shares it
     try:
         if kind == "device":
             # a phone announcing itself: from now on the server may ask it for its screen
-            svc.phone.attach(conn_id, data, send or ws.send_json)
-            await ws.send_json({"kind": "device_ack", "phone": svc.phone_view()})
+            svc.phone.attach(conn_id, data, reply)
+            await reply({"kind": "device_ack", "phone": svc.phone_view()})
         elif kind == "device_result":
             if not svc.phone.resolve(data):
                 logger.debug("device result for no pending request: {}", data.get("id"))
@@ -1906,8 +2083,9 @@ async def _handle_ws_message(
             files = data.get("files")
             svc.send(
                 str(data.get("thread") or MAIN_THREAD),
-                str(data.get("text", "")),
+                str(data.get("text", ""))[:20_000],
                 files=[str(f) for f in files][:10] if isinstance(files, list) else None,
+                language=str(data.get("language") or "")[:20],
             )
         elif kind == "approval":
             approval_id = str(data.get("id", ""))
@@ -1915,9 +2093,7 @@ async def _handle_ws_message(
                 # nanoMuse: a card raised by another device's run — the answer goes back over the hub
                 ok = await svc.hub.decide_remote(approval_id, bool(data.get("approved")))
                 if not ok:
-                    await ws.send_json(
-                        {"kind": "error", "error": "the device did not take the answer"}
-                    )
+                    await reply({"kind": "error", "error": "the device did not take the answer"})
                 return
             ok = svc.decide(
                 approval_id,
@@ -1926,15 +2102,15 @@ async def _handle_ws_message(
                 str(data.get("reason", "")),
             )
             if not ok:
-                await ws.send_json({"kind": "error", "error": "no pending approval with that id"})
+                await reply({"kind": "error", "error": "no pending approval with that id"})
         elif kind == "ping":
-            await ws.send_json({"kind": "pong", "status": svc.ui.overall_status()})
+            await reply({"kind": "pong", "status": svc.ui.overall_status()})
         elif kind == "auth":
             pass  # a client that sends its token first even though the runtime has none
         else:
-            await ws.send_json({"kind": "error", "error": f"unknown message kind: {kind}"})
+            await reply({"kind": "error", "error": f"unknown message kind: {kind}"})
     except (ValueError, PermissionError) as exc:
-        await ws.send_json({"kind": "error", "error": str(exc)})
+        await reply({"kind": "error", "error": str(exc)})
 
 
 __all__ = ["STATIC_DIR", "create_app"]

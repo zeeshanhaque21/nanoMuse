@@ -7,6 +7,7 @@ gateway that speaks ``/chat/completions`` (extra headers/body supported).
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import openai
@@ -24,6 +25,7 @@ from nanomuse.llm.base import (
     DeltaCallback,
     ThinkStreamFilter,
     ToolsUnsupported,
+    proxied_http,
     says_no_tools,
     split_think,
 )
@@ -31,11 +33,20 @@ from nanomuse.llm.vision import content_parts, has_images, model_takes_images, w
 from nanomuse.logger import logger
 from nanomuse.schema import Function, LLMResponse, Message, ToolCall, new_id
 
+
+class EmptyCompletion(RuntimeError):
+    """A 200 with no `choices`: the endpoint had nothing to say (a filter, an overload).
+    The ``code`` lets the server word it as a provider failure, not a crash."""
+
+    code = "upstream_empty"
+
+
 _RETRYABLE = (
     openai.APIConnectionError,
     openai.APITimeoutError,
     openai.RateLimitError,
     openai.InternalServerError,
+    EmptyCompletion,
 )
 
 
@@ -51,6 +62,8 @@ class OpenAIChatLLM(BaseLLM):
             timeout=settings.timeout,
             max_retries=0,  # we retry ourselves so streaming failures are covered too
             default_headers=settings.extra_headers or None,
+            # `[llm] proxy`: this slot's requests through one proxy, the environment's ignored
+            http_client=proxied_http(settings.proxy, settings.timeout),
         )
         # what the id says about pictures, so a text-only model is never sent one (and never
         # has to refuse a request first); "on" and "off" are the user's word and stand
@@ -81,6 +94,14 @@ class OpenAIChatLLM(BaseLLM):
             params["tool_choice"] = tool_choice
         if self.settings.extra_body:
             params["extra_body"] = self.settings.extra_body
+        # the body's size, so the next 413 from a relay is diagnosable from the log (the
+        # pictures are in it as base64); measured only when debug logging is on
+        logger.opt(lazy=True).debug(
+            "chat request: {} bytes, {} messages, {} with images",
+            lambda: len(json.dumps(params, ensure_ascii=False, default=str)),
+            lambda: len(params["messages"]),
+            lambda: sum(1 for m in params["messages"] if isinstance(m.get("content"), list)),
+        )
         try:
             resp = await self._send(params, on_delta)
         except openai.BadRequestError as e:
@@ -91,7 +112,7 @@ class OpenAIChatLLM(BaseLLM):
                 # with the text only, and no pictures for the rest of this run
                 logger.warning(
                     "the endpoint rejected a message with images ({}); sending text only "
-                    'from now on — set llm.vision = "off" to skip the attempt',
+                    'from now on; set llm.vision = "off" to skip the attempt',
                     str(e).splitlines()[0][:200],
                 )
                 self.vision_available = False
@@ -137,6 +158,9 @@ class OpenAIChatLLM(BaseLLM):
     # ------------------------------------------------------------------ internals
     async def _ask_once(self, params: dict[str, Any]) -> LLMResponse:
         completion = await self.client.chat.completions.create(**params, stream=False)
+        if not completion.choices:
+            # some gateways answer a content filter or an overload with a 200 and no choices
+            raise EmptyCompletion("the endpoint answered with no choices")
         choice = completion.choices[0]
         msg = choice.message
         content, think_reasoning = split_think(msg.content)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import shutil
 import tomllib
 from datetime import datetime
@@ -18,11 +19,12 @@ from rich.table import Table
 
 from nanomuse import __version__
 from nanomuse.channels.cli import channels_app
+from nanomuse.chatgpt_cli import chatgpt_app
 from nanomuse.config import DEFAULT_DATA_DIR, Settings, find_config_file, load_settings
 
 app = typer.Typer(
     name="nanomuse",
-    help="nanoMuse — an open-source personal AI agent with a Sentinel gatekeeper.",
+    help="nanoMuse: an open-source personal AI agent with a Sentinel gatekeeper.",
     no_args_is_help=True,
     rich_markup_mode="rich",
     pretty_exceptions_show_locals=False,
@@ -59,6 +61,7 @@ app.add_typer(vault_app, name="vault")
 app.add_typer(config_app, name="config")
 app.add_typer(phone_app, name="phone")
 app.add_typer(channels_app, name="channels")
+app.add_typer(chatgpt_app, name="chatgpt")
 
 console = Console()
 
@@ -80,7 +83,7 @@ def _root(
         is_eager=True,
     ),
 ) -> None:
-    """nanoMuse — an open-source personal AI agent with a Sentinel gatekeeper."""
+    """nanoMuse: an open-source personal AI agent with a Sentinel gatekeeper."""
     from nanomuse import loopback
 
     loopback.install()  # Windows: a self-pipe that fails with a reason instead of hanging
@@ -113,10 +116,15 @@ def _settings(config: Path | None, auto: bool = False) -> Settings:
         raise typer.Exit(1) from exc
     if auto:
         settings.sentinel.mode = "auto"
-    if not settings.llm.api_key and "localhost" not in (settings.llm.base_url or ""):
+    from nanomuse.llm.factory import llm_ready
+    from nanomuse.vault import CredentialVault
+
+    vault = CredentialVault(settings.vault_file, settings.vault_key_file)
+    if not llm_ready(settings.llm, vault, settings.data_dir):
         console.print(
-            "[yellow]No API key configured.[/yellow] Set [bold]llm.api_key[/bold] in config.toml "
-            "(run `nanomuse config init`) or export DEEPSEEK_API_KEY / OPENAI_API_KEY."
+            "[yellow]No model yet.[/yellow] Sign in to nanoMuse Cloud in the app, set "
+            "[bold]llm.api_key[/bold] in config.toml (run `nanomuse config init`), "
+            "or export DEEPSEEK_API_KEY / OPENAI_API_KEY."
         )
     try:
         settings.ensure_dirs()  # the store commands open SQLite files under data_dir directly
@@ -254,9 +262,11 @@ async def _slash(cmd: str, muse) -> bool:  # noqa: ANN001
         if not grants:
             console.print("[dim]no standing permissions[/dim]")
         for g in grants:
-            until = {"task": "this task", "session": "until restart", "always": "always"}.get(
-                g.scope, f"until {_local_time(g.to_dict()['expires_at'] or '')}"
-            )
+            until = {
+                "conversation": "this conversation",
+                "session": "until restart",
+                "always": "always",
+            }.get(g.scope, f"until {_local_time(g.to_dict()['expires_at'] or '')}")
             console.print(f"  [cyan]{g.key}[/cyan]  {until}")
     elif name == "revoke":
         if muse.sentinel.revoke(arg.strip()):
@@ -310,7 +320,7 @@ def daemon(
         from nanomuse.app import NanoMuseApp
         from nanomuse.console import ConsoleUI
 
-        ui = ConsoleUI(console, quiet=True)
+        ui = ConsoleUI(console, quiet=True, unattended=True)
         _banner(settings)
         while True:
             async with NanoMuseApp(settings, ui) as muse:
@@ -513,7 +523,7 @@ def calendar_agenda(
 
     s, feeds = _calendar(config)
     if not feeds.configured:
-        console.print("[yellow]no calendar feeds — `nanomuse calendar add NAME URL`[/yellow]")
+        console.print("[yellow]no calendar feeds; `nanomuse calendar add NAME URL`[/yellow]")
         raise typer.Exit(1)
     _run_async(feeds.refresh(force=refresh))
     today = datetime.now(feeds.tz).date()
@@ -539,7 +549,7 @@ def calendar_free(
 
     s, feeds = _calendar(config)
     if not feeds.configured:
-        console.print("[yellow]no calendar feeds — `nanomuse calendar add NAME URL`[/yellow]")
+        console.print("[yellow]no calendar feeds; `nanomuse calendar add NAME URL`[/yellow]")
         raise typer.Exit(1)
     _run_async(feeds.refresh())
     today = datetime.now(feeds.tz).date()
@@ -1067,7 +1077,7 @@ def memory_tidy(
         for line in lines:
             console.print(f" - {line}")
         for why in report.skipped:
-            console.print(f"[dim] · not applied — {why}[/dim]")
+            console.print(f"[dim] · not applied: {why}[/dim]")
         if report.more:
             console.print("[dim]more was proposed; the next pass continues.[/dim]")
         if not dry_run and report.changed:
@@ -1094,7 +1104,7 @@ def memory_changes(config: ConfigOpt = None, limit: int = 20) -> None:
     table.add_column("change")
     for c in changes:
         before = " + ".join(m.content for m in c.before)
-        after = c.after.content if c.after else "—"
+        after = c.after.content if c.after else "(none)"
         state = " [dim](restored)[/dim]" if c.restored else ""
         table.add_row(c.id, c.at[:16].replace("T", " "), f"{c.action}: {before} → {after}{state}")
     console.print(table)
@@ -1217,7 +1227,7 @@ def skills_new(name: str, config: ConfigOpt = None) -> None:
     (folder / "SKILL.md").write_text(
         render_skill(
             name,
-            "What this does, and when to use it — the model picks the skill from this line.",
+            "What this does, and when to use it; the model picks the skill from this line.",
             "# " + name.replace("-", " ").capitalize() + "\n\n"
             "## Gather\n\n- What to read first, with which tools.\n\n"
             "## Do\n\n1. The steps, in order.\n2. What to produce (a file in the workspace?).\n\n"
@@ -1226,7 +1236,7 @@ def skills_new(name: str, config: ConfigOpt = None) -> None:
         "utf-8",
     )
     console.print(
-        f"[green]{folder / 'SKILL.md'}[/green] — edit it; the agent sees it on its next turn"
+        f"[green]{folder / 'SKILL.md'}[/green]: edit it; the agent sees it on its next turn"
     )
 
 
@@ -1387,12 +1397,34 @@ def config_init(
 def config_show(config: ConfigOpt = None) -> None:
     """Print the effective configuration (secrets masked)."""
     s = _settings(config)
-    data = s.model_dump(mode="json")
-    for section in ("llm", "gui"):
-        key = (data.get(section) or {}).get("api_key")
-        if key:
-            data[section]["api_key"] = key[:4] + "…" + key[-2:] if len(key) > 8 else "***"
-    console.print_json(json.dumps(data, ensure_ascii=False, default=str))
+    console.print_json(
+        json.dumps(mask_secrets(s.model_dump(mode="json")), ensure_ascii=False, default=str)
+    )
+
+
+_SECRET_KEY_RE = re.compile(r"(api_key|password|secret|token|app_key|passwd)$", re.IGNORECASE)
+
+
+def mask_secrets(data: Any) -> Any:
+    """The same structure with every value under a key that names a credential
+    (``api_key``, ``password``, ``secret``, ``token`` and the like) shortened to its first
+    and last characters, in every section: the image and video slots, the mail account,
+    the search connector and the chat channels hold keys too, not only ``[llm]``."""
+    if isinstance(data, dict):
+        out: dict[str, Any] = {}
+        for k, v in data.items():
+            if isinstance(v, str) and v and _SECRET_KEY_RE.search(str(k)):
+                out[k] = v if v.startswith("{{vault:") else _masked(v)
+            else:
+                out[k] = mask_secrets(v)
+        return out
+    if isinstance(data, list):
+        return [mask_secrets(v) for v in data]
+    return data
+
+
+def _masked(value: str) -> str:
+    return value[:4] + "…" + value[-2:] if len(value) > 8 else "***"
 
 
 @config_app.command("path")
@@ -1482,7 +1514,7 @@ def phone_trace(
         elif kind == "end":
             console.print(
                 f"[bold]{rec.get('status')}[/bold] after {rec.get('steps')} steps, "
-                f"{rec.get('seconds')} s — {rec.get('message', '')}"
+                f"{rec.get('seconds')} s: {rec.get('message', '')}"
             )
 
 
@@ -1494,10 +1526,12 @@ def version() -> None:
 
 @app.command()
 def mcp(config: ConfigOpt = None) -> None:
-    """Serve this computer's screen and hands over MCP on stdio (for another host, e.g.
-    nanoMuse on DeepSeek Harness; see docs/harness.md), plus the connectors config.toml
-    turns on (mailbox, calendar, contacts). Nothing is printed on stdout but the protocol;
-    the config is read for [hands], [gui] and [connectors] when it exists."""
+    """Serve this computer's screen and hands over MCP on stdio (for the desktop app).
+
+    Another host, such as nanoMuse on DeepSeek Harness (docs/harness.md), connects here. The
+    connectors config.toml turns on (mailbox, calendar, contacts) are served too. Nothing is
+    printed on stdout but the protocol; the hands, gui and connectors sections of the config
+    are read when it exists."""
     import sys
 
     from nanomuse.bridge.mcp_server import connector_tools, hands_tools, serve
@@ -1579,9 +1613,10 @@ async def _doctor(settings: Settings, check_model: bool) -> None:
             )
         else:
             key_state = "key set"
-    local = "localhost" in (llm.base_url or "") or "127.0.0.1" in (llm.base_url or "")
+    from nanomuse.llm.factory import llm_ready
+
     line(
-        ("MISSING" not in key_state) and (bool(key) or local),
+        llm_ready(llm, app_.vault if app_ is not None else None, settings.data_dir),
         f"model: {llm.model} · {llm.provider} · {llm.base_url or 'provider default'} · "
         f"tools {llm.tool_mode} · {key_state}",
         "no usable API key (set llm.api_key, or enter it under Connections in the app)",
@@ -1627,7 +1662,7 @@ async def _doctor(settings: Settings, check_model: bool) -> None:
             (
                 "sandbox.mode = bwrap, but bubblewrap does not work here"
                 if settings.sandbox.mode == "bwrap"
-                else "commands run unboxed — on Linux, `apt install bubblewrap` gives each one its own namespace"
+                else "commands run unboxed; on Linux, `apt install bubblewrap` gives each one its own namespace"
             ),
         )
 

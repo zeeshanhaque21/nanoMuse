@@ -7,6 +7,7 @@
  * agent's own and go to the host's rooms store (the prompt reads them);
  * MEMORY.md writes back as memory lines; a Library file writes to disk.
  */
+import { failureText } from './api.ts'
 import { createElement as h, useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import type { Translate } from './api.ts'
 import { IconClose, IconCode, IconCopy, IconDownload, IconLayout, IconRefresh, IconTrash } from './icons.tsx'
@@ -73,7 +74,7 @@ function Editor({ t, toggleSidebar, doc }: DocEditorProps & { doc: OpenDoc }): R
       else await roomsCall('library/write', { id: doc.id, text: value })
       setSaved('saved')
     } catch (err: unknown) {
-      setError(t('failed', { message: (err as Error).message }))
+      setError(failureText(t, err))
       setSaved('dirty')
     }
   }, [doc, t])
@@ -132,7 +133,7 @@ function Editor({ t, toggleSidebar, doc }: DocEditorProps & { doc: OpenDoc }): R
     { id: 'pdf', label: t('edPdf'), icon: h(IconDownload, { size: 16 }), onSelect: () => { document.documentElement.setAttribute('data-nm-print', 'doc'); window.setTimeout(() => { window.print(); document.documentElement.removeAttribute('data-nm-print') }, 50) } },
     'sep',
     doc.kind === 'own'
-      ? { id: 'reset', label: t('edReset'), icon: h(IconRefresh, { size: 16 }), danger: true, onSelect: () => { if (doc.doc !== 'memory') { latest.current = ''; void persist('').then(() => roomsCall<Record<DocName, DocText>>('docs')).then((docs) => { if (docs) { latest.current = docs[doc.doc].text; setText(docs[doc.doc].text); if (body.current) body.current.innerHTML = mdToHtml(latest.current) } }) } } }
+      ? { id: 'reset', label: t('edReset'), icon: h(IconRefresh, { size: 16 }), danger: true, onSelect: () => { if (doc.doc !== 'memory' && window.confirm(t('edResetConfirm', { name }))) { latest.current = ''; void persist('').then(() => roomsCall<Record<DocName, DocText>>('docs')).then((docs) => { if (docs) { latest.current = docs[doc.doc].text; setText(docs[doc.doc].text); if (body.current) body.current.innerHTML = mdToHtml(latest.current) } }) } } }
       : { id: 'delete', label: t('edDelete'), icon: h(IconTrash, { size: 16 }), danger: true, onSelect: () => { void roomsCall('library/delete', { id: doc.id }).then(close) } },
   ]
 

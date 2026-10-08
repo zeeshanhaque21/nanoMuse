@@ -25,7 +25,11 @@ import SwiftUI
 // MARK: - Store
 
 enum NanoMuseMediaModels {
-    static let defaultVideoModel = "wan2.2-i2v-flash"
+    /// The video model a Model Studio key starts on: the catalogue's `defaults.video` for
+    /// Bailian (`providers.json`), the known Wan 2.2 Flash only if the catalogue is missing.
+    static var defaultVideoModel: String {
+        NanoMuseCatalogue.bundled.first { $0.id == NanoMuseCatalogue.bailian }?.defaults["video"] ?? NanoMuseVideoGen.knownDashScopeModels[0]
+    }
     /// Posted after a save here, so the face view and the studio re-read what is set.
     static let changed = Notification.Name("nanoMuse.mediaModelsChanged")
 
@@ -47,7 +51,7 @@ enum NanoMuseMediaModels {
     /// Studio itself, and nanoMuse Cloud, which relays those same paths under the account's token.
     @MainActor
     static func eligibleVideoInstances() -> [ProviderInstance] {
-        let cloudId = NanoMuseCloud.isSignedIn ? NanoMuseCloud.instance?.id : nil
+        let cloudId = NanoMuseCloud.modelsOn ? NanoMuseCloud.instance?.id : nil
         return ProviderConfigStore.shared.instances.filter { inst in
             guard inst.isEnabled, inst.credentialType == .apiKey else { return false }
             guard inst.id == cloudId || NanoMuseVideoGen.speaksDashScope(inst.customBaseURL ?? "") else { return false }
@@ -55,33 +59,59 @@ enum NanoMuseMediaModels {
         }
     }
 
-    /// The instance the video model is on, or nil: the saved one, else the image model's
-    /// provider when that one speaks the video API (one key covers all three).
-    @MainActor
-    static func videoInstance() -> ProviderInstance? {
-        let eligible = eligibleVideoInstances()
-        if let saved = UserDefaults.standard.string(forKey: Keys.videoInstance) {
-            if saved == videoOff { return nil }
-            return eligible.first { $0.id == saved }
-        }
-        switch NanoMuseImageGen.route() {
-        case .ownKey(let k): return eligible.first { $0.id == k.instanceId }
-        case .relay: return eligible.first { $0.id == NanoMuseCloud.instance?.id }
-        }
+    /// What the person set for clips: nothing yet, switched off, or a provider and a model.
+    enum VideoChoice: Equatable {
+        case unset
+        case off
+        case chosen(NanoMuseSlotChoice)
     }
 
-    /// The saved model name, or the recommended one.
+    static func videoChoice() -> VideoChoice {
+        guard let saved = UserDefaults.standard.string(forKey: Keys.videoInstance) else { return .unset }
+        if saved == videoOff { return .off }
+        let model = UserDefaults.standard.string(forKey: Keys.videoModel)?.trimmingCharacters(in: .whitespaces) ?? ""
+        return .chosen(NanoMuseSlotChoice(providerId: saved, model: model))
+    }
+
+    /// The instance the video model is on, or nil (0.1.41, the contract's section 3): the
+    /// saved one; without a choice, the chat provider's when it is a Model Studio key of the
+    /// person's own, else nanoMuse Cloud when signed in, else the first key that can.
+    @MainActor
+    static func videoInstance() -> ProviderInstance? {
+        guard let value = NanoMuseModelSlots.videoValue() else { return nil }
+        return eligibleVideoInstances().first { $0.id == value.providerId }
+    }
+
+    /// The video model in use: the one chosen or the provider's default; the recommended one when nothing is set.
+    @MainActor
     static var videoModel: String {
+        if let value = NanoMuseModelSlots.videoValue(), !value.model.isEmpty { return value.model }
         let saved = UserDefaults.standard.string(forKey: Keys.videoModel)?.trimmingCharacters(in: .whitespaces) ?? ""
         return saved.isEmpty ? defaultVideoModel : saved
+    }
+
+    /// The video models a Model Studio key may have before it was asked: the catalogue's
+    /// default for the vendor first, then the known Wan and MiniMax ids, then anything on the
+    /// key's own list that is named like a video model.
+    @MainActor
+    static func candidateVideoModels(for inst: ProviderInstance) -> [String] {
+        let listed = ProviderConfigStore.shared.entries(for: inst.id)
+            .filter { !$0.isHidden && NanoMuseVideoGen.looksLikeVideoModel($0.model.id) }
+            .map(\.model.id)
+        var out: [String] = []
+        let first = NanoMuseCatalogue.vendor(for: inst)?.defaults["video"] ?? defaultVideoModel
+        for id in [first] + NanoMuseVideoGen.knownDashScopeModels + listed where !id.isEmpty && !out.contains(id) { out.append(id) }
+        return out
     }
 
     /// The video model, or nil when there is none.
     @MainActor
     static func videoEndpoint() -> NanoMuseVideoGen.Endpoint? {
-        guard let inst = videoInstance(),
+        guard let value = NanoMuseModelSlots.videoValue(),
+              let inst = eligibleVideoInstances().first(where: { $0.id == value.providerId }),
               let key = ProviderKeychainHelper.loadAPIKey(instanceId: inst.id), !key.isEmpty else { return nil }
-        return NanoMuseVideoGen.Endpoint(instanceId: inst.id, label: inst.label, host: host(of: inst), apiKey: key, model: videoModel)
+        let model = value.model.isEmpty ? defaultVideoModel : value.model
+        return NanoMuseVideoGen.Endpoint(instanceId: inst.id, label: inst.label, host: host(of: inst), apiKey: key, model: model)
     }
 
     /// The Cloud instance's base is the relay's; a Bailian instance's is the compatible-mode URL.
@@ -96,6 +126,15 @@ enum NanoMuseMediaModels {
     static func saveVideo(instanceId: String?, model: String) {
         UserDefaults.standard.set(instanceId ?? videoOff, forKey: Keys.videoInstance)
         UserDefaults.standard.set(model.trimmingCharacters(in: .whitespaces), forKey: Keys.videoModel)
+        NotificationCenter.default.post(name: changed, object: nil)
+    }
+
+    /// Back to the automatic order for clips (the *Automatic* entry of the picker): the
+    /// stored choice, on or off, is forgotten, nothing else changes.
+    @MainActor
+    static func clearVideoChoice() {
+        UserDefaults.standard.removeObject(forKey: Keys.videoInstance)
+        UserDefaults.standard.removeObject(forKey: Keys.videoModel)
         NotificationCenter.default.post(name: changed, object: nil)
     }
 
@@ -167,7 +206,7 @@ enum NanoMuseMediaModels {
     static func imageLine() -> String {
         switch NanoMuseImageGen.route() {
         case .ownKey(let k): return "\(k.model) · \(k.label)"
-        case .relay: return NanoMuseCloud.isSignedIn ? NanoMuseCloud.label : AppLocalized("Not set")
+        case .relay: return NanoMuseCloud.modelsOn ? NanoMuseCloud.label : AppLocalized("Not set")
         }
     }
 
@@ -258,18 +297,18 @@ struct NanoMuseMediaModelsView: View {
     @ViewBuilder
     private var imageSection: some View {
         Section {
-            let ready = imageInstance != nil || NanoMuseCloud.isSignedIn
+            let ready = imageInstance != nil || NanoMuseCloud.modelsOn
             statusRow(
                 icon: "photo",
                 ready: ready,
-                line: imageInstance != nil ? "\(imageModel) · \(imageInstance?.label ?? "")" : (NanoMuseCloud.isSignedIn ? NanoMuseCloud.label : AppLocalized("Not set")),
+                line: imageInstance != nil ? "\(imageModel) · \(imageInstance?.label ?? "")" : (NanoMuseCloud.modelsOn ? NanoMuseCloud.label : AppLocalized("Not set")),
                 offLine: AppLocalized("Until one is set, the avatar cannot be changed and no pictures can be drawn. The agent will say so if you ask.")
             )
-            if NanoMuseCloud.isSignedIn {
+            if NanoMuseCloud.modelsOn {
                 choiceRow(title: NanoMuseCloud.label, selected: imageInstanceId == nil) {
                     imageInstanceId = nil
                     imageModel = ""
-                    NanoMuseImageGen.preferRelay = true
+                    NanoMuseImageGen.useRelay()
                     NotificationCenter.default.post(name: NanoMuseMediaModels.changed, object: nil)
                 }
             }
@@ -297,15 +336,15 @@ struct NanoMuseMediaModelsView: View {
                     .autocorrectionDisabled()
                     .onSubmit { NanoMuseImageGen.save(instanceId: inst.id, model: imageModel) }
             }
-            if imageInstances.isEmpty && !NanoMuseCloud.isSignedIn {
+            if imageInstances.isEmpty && !NanoMuseCloud.modelsOn {
                 NavigationLink(AppLocalized("Add a provider")) { ProviderInstancesView() }
             }
         } header: {
             Text(AppLocalized("Image model"))
         } footer: {
-            Text(imageInstances.isEmpty && !NanoMuseCloud.isSignedIn
+            Text(imageInstances.isEmpty && !NanoMuseCloud.modelsOn
                  ? AppLocalized("None of your providers can draw. Sign in to nanoMuse Cloud, or add an Alibaba Cloud Bailian provider with an API key; the avatar is drawn with one of the two.")
-                 : AppLocalized("Avatar changes — the four candidates and the poses. Alibaba Cloud Model Studio: qwen-image-3.0 (draws and poses; ¥0.18 a picture) or the Pro tier, drawn with your own key. nanoMuse Cloud draws from the account's allowance."))
+                 : AppLocalized("Avatar changes: the four candidates and the poses. Alibaba Cloud Model Studio: qwen-image-3.0 (draws and poses; ¥0.18 a picture) or the Pro tier, drawn with your own key. nanoMuse Cloud draws from the account's allowance."))
         }
     }
 
@@ -375,8 +414,8 @@ struct NanoMuseMediaModelsView: View {
             Text(AppLocalized("Video model"))
         } footer: {
             Text(videoInstances.isEmpty
-                 ? AppLocalized("No provider that can make video yet — nanoMuse speaks Alibaba Cloud Model Studio's video API, which nanoMuse Cloud relays too. Sign in to nanoMuse Cloud, or add a Model Studio key (it can be the same one as the image model uses), and the avatar starts moving; until then it stays as still pictures.")
-                 : AppLocalized("Makes the avatar move — a short looping clip for each state. Alibaba Cloud Model Studio: wan2.2-i2v-flash (recommended, ¥0.10 a second at 480P), another Wan model or MiniMax/MiniMax-H3; the list shows the ones this key can use, each activated once on the model's card in the Model Studio console. Billed per second of video; an avatar takes four clips of a few seconds."))
+                 ? AppLocalized("No provider that can make video yet. nanoMuse speaks Alibaba Cloud Model Studio's video API, which nanoMuse Cloud relays too. Sign in to nanoMuse Cloud, or add a Model Studio key (it can be the same one as the image model uses), and the avatar starts moving; until then it stays as still pictures.")
+                 : AppLocalized("Makes the avatar move: a short looping clip for each state. Alibaba Cloud Model Studio: wan2.2-i2v-flash (recommended, ¥0.10 a second at 480P), another Wan model or MiniMax/MiniMax-H3; the list shows the ones this key can use, each activated once on the model's card in the Model Studio console. Billed per second of video; an avatar takes four clips of a few seconds."))
         }
     }
 
@@ -411,7 +450,7 @@ struct NanoMuseMediaModelsView: View {
             NanoMuseFaceView(mood: mood, size: 28, showsRing: false)
             Text(Self.moodWord(mood))
             Spacer()
-            Text(motion.clips[mood].flatMap(Self.fileSize) ?? "—")
+            Text(motion.clips[mood].flatMap(Self.fileSize) ?? "…")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }

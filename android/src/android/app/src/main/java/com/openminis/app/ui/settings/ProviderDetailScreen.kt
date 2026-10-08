@@ -88,6 +88,7 @@ fun ProviderDetailScreen(
     onModelEntryClick: (String) -> Unit = {},
     onAddCustomModel: () -> Unit = {},
     onVoiceServiceClick: (String) -> Unit = {},
+    onKeyAdded: (String) -> Unit = {}, // nanoMuse: a key where there was none → the "Use it for" card
 ) {
     val config by providerRepository.config.collectAsState()
     val instance = config.instances.find { it.id == instanceId }
@@ -208,6 +209,7 @@ fun ProviderDetailScreen(
                             keyVisible = false
                         },
                         onSave = {
+                            val nmFirstKey = storedKey.isBlank() && editKeyValue.isNotBlank() // nanoMuse
                             providerRepository.saveApiKey(instanceId, editKeyValue)
                             // [T-android-provider-apikey-save-stale] Reflect the
                             // just-saved value in UI state immediately rather than
@@ -217,6 +219,7 @@ fun ProviderDetailScreen(
                             isEditingKey = false
                             editKeyValue = ""
                             keyVisible = false
+                            if (nmFirstKey) onKeyAdded(instanceId) // nanoMuse
                         },
                     )
                 }
@@ -242,7 +245,7 @@ fun ProviderDetailScreen(
         // ─── Custom Base URL ────────────────────────────────────────
         if (instance.providerType != ProviderType.openRouter) {
             // nanoMuse: plain http:// only for addresses on the local network (io.github.nanomuse.net.LanOnly)
-            val baseUrlProblem = io.github.nanomuse.net.LanOnly.problem(customBaseURL)
+            val baseUrlProblem = io.github.nanomuse.net.LanOnly.refusedHost(customBaseURL)?.let { stringResource(R.string.nm_lan_only_https, it) }
             SettingsSection(header = stringResource(R.string.provider_detail_custom_api_base), footer = baseUrlProblem) {
                 // URL input row — tighter vertical padding to match T226's
                 // SectionTextField height shrink (~-20%).
@@ -322,7 +325,7 @@ fun ProviderDetailScreen(
                 // Save action — TextButton presentation so it reads as a list
                 // row rather than a floating filled button inside the card.
                 MinisSmallTextButton(
-                    enabled = baseUrlProblem == null,
+                    enabled = baseUrlProblem == null, // nanoMuse: LanOnly
                     onClick = {
                         providerRepository.updateInstance(
                             instance.copy(
@@ -722,6 +725,17 @@ fun ProviderDetailScreen(
             Text(stringResource(R.string.provider_detail_add_custom_model))
         }
 
+        // nanoMuse: the Cloud instance is the account itself (io.github.nanomuse.cloud.NanoMuseCloud);
+        // deleting it here signed the phone out. It is switched off above instead, and signed out
+        // under Settings › nanoMuse Cloud.
+        if (io.github.nanomuse.cloud.NanoMuseCloud.instance(exportContext)?.id == instanceId) {
+            Text(
+                text = stringResource(R.string.nm_cloud_provider_no_delete),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 20.dp),
+            )
+        } else
         // [T-android-delete-provider-button-height] The "Delete provider" button
         // uses the same default 48dp MinisButtonHeight as "Add custom model"
         // above it for visual consistency (no explicit .height override). The

@@ -9,14 +9,17 @@ import {
   type ReactNode,
 } from "react";
 import { api, AuthError, connectWs, getToken } from "./api";
-import { t } from "./i18n";
+import { getLocale, t } from "./i18n";
+import { liveWorking } from "./presence";
 import { registerWorker, setAppBadge } from "./push";
 import { useTheme } from "./theme";
+import { readStorage, writeStorage } from "./util";
 import type {
   ApprovalEvent,
   AttachmentInfo,
   CodingEvent,
   CodingRun,
+  FirstRunView,
   Goal,
   HandsLive,
   HandsStatus,
@@ -29,6 +32,7 @@ import type {
   Status,
   ThreadMeta,
   TimelineEvent,
+  WorkingPresence,
   WsMessage,
 } from "./types";
 
@@ -69,6 +73,8 @@ export interface CodingLive {
 }
 
 const FEED_SEEN_KEY = "nanomuse_feed_seen";
+/** The browser stepped past the sign-in door for a key of its own. */
+const SIGN_IN_SKIPPED_KEY = "nanomuse_sign_in_skipped";
 
 export interface Stream {
   id: string;
@@ -116,6 +122,8 @@ export interface AppState {
   skillsVersion: number;
   /** First-run setup dismissed for this session (the server remembers a finished one). */
   onboardingDismissed: boolean;
+  /** The sign-in door stepped past for a key of one's own (kept in storage): the sign-in stays an invitation under Connections. */
+  signInSkipped: boolean;
   tab: Tab;
   toast: string | null;
   /** The chats drawer (the phone's hamburger) is open. */
@@ -128,9 +136,6 @@ export interface AppState {
   hub: HubView | null;
   /** Coding runs followed live, newest last (kept for this page only). */
   codingLive: Record<string, CodingLive>;
-  /** A call in progress, as the runtime reports it (null when none). */
-  call: { state: string; turns: number; cost_cny: number; video: boolean; source: string } | null;
-  /** Open the call screen (set by the chat header; cleared when the call screen closes). */
   /** This computer's own screen and hands. */
   hands: HandsStatus | null;
   /** The holds that are on (contract C1): the person has the browser, the screen or the phone. */
@@ -139,6 +144,18 @@ export interface AppState {
   handsLive: HandsLive | null;
   /** The avatar studio's session as the runtime last reported it (null until one runs). */
   studio: StudioSession | null;
+  /**
+   * The other devices' turns under way on synced chats (contract C9), by thread: the line
+   * "Pixel 8 is working…" under a message written there. Set by the `working` frames, cleared
+   * when the reply arrives, when that device says done, or ten minutes after `at`.
+   */
+  working: Record<string, WorkingPresence | undefined>;
+  /**
+   * The first conversation (contract C4) as the runtime holds it: which thread it is bound
+   * to, its phase, the chooser's names. From the hello snapshot and the `firstrun` frames;
+   * null on an older runtime, and the chat then shows its plain greeting.
+   */
+  firstrun: FirstRunView | null;
   /**
    * `?ui=lite`: the app as it is shown inside the simulated phone of the showcase
    * (demo/mobilegym) — the phone layout with its tabs at any width, no sidebar, no first-run
@@ -167,6 +184,7 @@ type Action =
   | { type: "draft"; text: string | null }
   | { type: "draftFiles"; files: AttachmentInfo[] | null }
   | { type: "onboardingDismissed" }
+  | { type: "signInSkipped" }
   | { type: "toast"; toast: string | null };
 
 const LITE_KEY = "nanomuse.ui.lite";
@@ -211,13 +229,14 @@ const initial: AppState = {
   calendarVersion: 0,
   pendingApprovals: [],
   feedVersion: 0,
-  feedSeenAt: localStorage.getItem(FEED_SEEN_KEY) ?? "",
+  feedSeenAt: readStorage(FEED_SEEN_KEY) ?? "",
   viewer: null,
   draft: null,
   draftFiles: null,
   connectionsVersion: 0,
   skillsVersion: 0,
   onboardingDismissed: false,
+  signInSkipped: readStorage(SIGN_IN_SKIPPED_KEY) === "1",
   tab: "chat",
   toast: null,
   drawer: false,
@@ -226,11 +245,12 @@ const initial: AppState = {
   hub: null,
   codingLive: {},
   lite: liteFromUrl(),
-  call: null,
   hands: null,
   holds: [],
   handsLive: null,
   studio: null,
+  working: {},
+  firstrun: null,
 };
 
 function upsertApproval(list: ApprovalEvent[], ev: TimelineEvent): ApprovalEvent[] {
@@ -314,6 +334,8 @@ function reducer(state: AppState, action: Action): AppState {
         hub: s.hub ?? state.hub,
         hands: s.hands ?? state.hands,
         holds: (s.holds ?? []).map(normalizeEvent),
+        working: liveWorking(s.working),
+        firstrun: s.firstrun ?? state.firstrun,
       };
     }
     case "connection":
@@ -352,7 +374,7 @@ function reducer(state: AppState, action: Action): AppState {
     case "drawer":
       return { ...state, drawer: action.open };
     case "feedSeen":
-      localStorage.setItem(FEED_SEEN_KEY, action.at);
+      writeStorage(FEED_SEEN_KEY, action.at);
       return { ...state, feedSeenAt: action.at };
     case "viewer":
       return { ...state, viewer: action.path };
@@ -362,6 +384,8 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, draftFiles: action.files };
     case "onboardingDismissed":
       return { ...state, onboardingDismissed: true };
+    case "signInSkipped":
+      return { ...state, signInSkipped: true };
     case "toast":
       return { ...state, toast: action.toast };
     case "ws":
@@ -388,10 +412,17 @@ function applyWs(state: AppState, msg: WsMessage): AppState {
       // fetched when opened. The approvals queue and the Feed follow every thread.
       const loaded = state.events[ev.thread] !== undefined;
       const mishap = (ev.type === "tool" && (ev.status === "error" || ev.status === "blocked")) || (ev.type === "notice" && ev.level === "error");
+      // the reply from the device that was working arrived: its line goes (C9)
+      let working = state.working;
+      const line = working[ev.thread];
+      if (line && ev.type === "assistant" && ev.synced && ev.via_device === line.device) {
+        working = { ...working, [ev.thread]: undefined };
+      }
       return {
         ...state,
         streams,
         threads,
+        working,
         events: loaded ? { ...state.events, [ev.thread]: upsertEvent(state.events[ev.thread], ev) } : state.events,
         holds: ev.type === "hold" ? upsertHold(state.holds, ev) : state.holds,
         pendingApprovals: upsertApproval(state.pendingApprovals, ev),
@@ -455,6 +486,19 @@ function applyWs(state: AppState, msg: WsMessage): AppState {
       if (!list) return state;
       return { ...state, events: { ...state.events, [msg.thread]: list.filter((e) => e.id !== msg.id) } };
     }
+    case "firstrun":
+      // the first conversation moved on (contract C4): the chat redraws its chooser
+      return { ...state, firstrun: msg.firstrun };
+    case "working": {
+      // another device started or finished a turn on a synced chat (C9); a `false` from a
+      // device other than the one shown changes nothing
+      const { kind: _kind, working: on, ...who } = msg;
+      void _kind;
+      const current = state.working[who.thread];
+      if (on) return { ...state, working: { ...state.working, [who.thread]: who } };
+      if (!current || current.device !== who.device) return state;
+      return { ...state, working: { ...state.working, [who.thread]: undefined } };
+    }
     case "goals":
       return { ...state, goalsVersion: state.goalsVersion + 1 };
     case "memory":
@@ -493,19 +537,6 @@ function applyWs(state: AppState, msg: WsMessage): AppState {
       const ids = Object.keys(live);
       if (ids.length > 20) for (const old of ids.sort((a, b) => live[a].run.started_at - live[b].run.started_at).slice(0, ids.length - 20)) delete live[old];
       return { ...state, codingLive: live };
-    }
-    case "call": {
-      if (msg.state === "ended") return { ...state, call: null };
-      return {
-        ...state,
-        call: {
-          state: msg.state,
-          turns: msg.turns ?? state.call?.turns ?? 0,
-          cost_cny: msg.cost_cny ?? state.call?.cost_cny ?? 0,
-          video: msg.video ?? state.call?.video ?? false,
-          source: msg.source ?? state.call?.source ?? "",
-        },
-      };
     }
     case "hands_state":
       return { ...state, hands: msg.hands };
@@ -557,7 +588,9 @@ interface StoreValue {
   draft: (text: string | null) => void;
   draftFiles: (files: AttachmentInfo[] | null) => void;
   dismissOnboarding: () => void;
-  /** open (voice / video) or close the call screen */
+  /** Past the sign-in door with a key of one's own; remembered by this browser. */
+  skipSignIn: () => void;
+  /** A short message at the bottom of the page. */
   toast: (text: string) => void;
 }
 
@@ -569,8 +602,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     getToken();
+    // Frames that arrive together are applied together: a first pull brings 300 rows as 300
+    // `event` frames in a burst (C9 tail), and one render for the burst is smooth where one
+    // per frame is not. Deltas of a streaming reply wait a few milliseconds at most.
+    const queue: WsMessage[] = [];
+    let flush = 0;
+    const drain = () => {
+      flush = 0;
+      const batch = queue.splice(0);
+      for (const m of batch) dispatch({ type: "ws", msg: m });
+    };
     const ws = connectWs({
-      onMessage: (msg) => dispatch({ type: "ws", msg }),
+      onMessage: (msg) => {
+        queue.push(msg);
+        if (!flush) flush = window.setTimeout(drain, 0);
+      },
       onOpen: () => dispatch({ type: "connection", connected: true }),
       onClose: () => dispatch({ type: "connection", connected: false }),
       onAuthError: () => dispatch({ type: "authError" }),
@@ -583,7 +629,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (e instanceof AuthError) dispatch({ type: "authError" });
         else dispatch({ type: "error", error: String(e.message ?? e) });
       });
-    return () => ws.close();
+    return () => {
+      if (flush) window.clearTimeout(flush);
+      ws.close();
+    };
   }, []);
 
   const loadGeneration = useRef<Record<string, number>>({});
@@ -726,10 +775,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       dispatch,
       send: async (thread, text, files = []) => {
         if (!text.trim() && files.length === 0) return;
+        // the locale of these screens rides along: the agent answers in it rather than
+        // guessing from the script of one message
+        const language = getLocale();
         try {
           // attachments go over REST so a failure (a path gone, a full disk) comes back as an error
-          if (files.length > 0 || !wsRef.current?.send({ kind: "send", thread, text })) {
-            await api.send(thread, text, files);
+          if (files.length > 0 || !wsRef.current?.send({ kind: "send", thread, text, language })) {
+            await api.send(thread, text, files, language);
           }
         } catch (e) {
           if (e instanceof AuthError) dispatch({ type: "authError" });
@@ -761,6 +813,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (text !== null) dispatch({ type: "tab", tab: "chat" });
       },
       dismissOnboarding: () => dispatch({ type: "onboardingDismissed" }),
+      skipSignIn: () => {
+        writeStorage(SIGN_IN_SKIPPED_KEY, "1");
+        dispatch({ type: "signInSkipped" });
+      },
       toast: (text) => dispatch({ type: "toast", toast: t(text) }),
     }),
     [state, loadEvents, refreshGoals, refreshSettings, refreshHub],

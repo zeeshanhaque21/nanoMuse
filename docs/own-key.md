@@ -1,166 +1,262 @@
-# Bring your own key · 换成自己的 key
+# Bring your own key
 
-[中文](#中文) · [English](#english)
 
 nanoMuse is free and non-profit. The model behind it costs money, and the
-developer pays for a starting allowance — ¥10 per account at the time of
-writing, plus ¥5 for you and ¥5 for them each time a friend signs up with your
-code (the app shows the relay's current figures). When it is gone, the quickest
-way on is a key of your own.
+developer pays for a starting allowance per account (the app shows the relay's
+current figures). When it is gone, there are two ways on that need nothing
+from nanoMuse: a key of your own at a model provider, or a plan you already
+pay for — ChatGPT, Claude, Kimi — signed in from the app.
 
-Which provider depends on where you are:
-
-| | Provider | Chat model | Hands model | Base URL |
-|---|---|---|---|---|
-| Mainland China | **Alibaba Cloud Bailian (阿里云百炼)** | `deepseek-v4.1-flash` | `qwen3.8-27b` | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
-| Everywhere else | **OpenRouter** | `deepseek/deepseek-v4.1-flash` | `qwen/qwen3.8-27b` | `https://openrouter.ai/api/v1` |
-
-Bailian only signs up accounts with a mainland Chinese identity, and its
-international edition (dashscope-intl) does not carry these two models. Outside
-mainland China, OpenRouter is the easy way: one account, one key, international
-cards, pay as you go. The other provider stays as a second option on every
-client, and any OpenAI-compatible endpoint works too.
+Every client reads the same list of providers, with what each one covers:
+**chat**, **the hands** (a model that sees screenshots), **pictures** (the
+avatar studio) and **clips** (the avatar's short videos). A feature no
+configured provider covers is simply not offered, with one sentence saying
+which providers would — nothing breaks.
 
 Your sign-in, your invite code and your devices are not affected: the account
 stays, only the model provider changes. Nothing you say passes through nanoMuse
-Cloud once your own key is in use.
+Cloud once your own key or plan is in use.
 
----
+## Where you are decides who comes first
 
-## 中文
+| | First | What one key there covers |
+|---|---|---|
+| Mainland China | **Alibaba Cloud Bailian** | chat, the hands, pictures and clips — all four under one key |
+| Everywhere else | **OpenRouter**, then **OpenAI** | chat, the hands and pictures; clips are Bailian only for now |
 
-### 先看你在哪
+Bailian only signs up accounts with a mainland Chinese identity; outside, one
+OpenRouter account puts hundreds of models behind one key, pay as you go.
+Beyond the first pick, every provider below works on its own or beside another
+— DeepSeek for the chat and Zhipu for pictures, say.
 
-| | 服务商 | 对话模型 | 手的模型 | 地址 |
-|---|---|---|---|---|
-| 中国大陆 | **阿里云百炼** | `deepseek-v4.1-flash` | `qwen3.8-27b` | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
-| 海外 | **OpenRouter** | `deepseek/deepseek-v4.1-flash` | `qwen/qwen3.8-27b` | `https://openrouter.ai/api/v1` |
+Four jobs, four settings, one page: **Settings › Models** on Android, the
+iPhone and the desktop, the *Connections* page in the web console. The rows are
+*Chat*, *Operating the screen*, *Making pictures* and *Making clips*; each shows
+`provider · model` and opens a picker that lists only the models that can do
+that job (the screen needs a model that sees images). On the iPhone the screen
+row is disabled (*Not on iPhone*): a phone cannot operate its own screen, and
+your computer uses its own setting. [Which model does what](#which-model-does-what)
+below has the details.
 
-百炼只给中国大陆身份注册，国际版（dashscope-intl）也没有这两个模型。海外用户用不了百炼，推荐 OpenRouter：一个账号一把 key，国际信用卡，按量付费。两家在每个客户端里都是预设，另一家始终是第二选择。
+## What each provider covers
 
-对话模型和手的模型是两个设置：对话模型在模型选择里，手的模型在「手的模型」一行（手机：设置 → Hands；网页版 / 桌面版：连接）。额度没用完时它们默认分别是 `deepseek-v4.1-flash` 和 `qwen3.8-27b`，换成自己的 key 之后也照这两个选。
+Chat = the conversation; hands = reading screenshots to operate the phone or
+the computer; pictures = the avatar studio's images; clips = the avatar's
+short videos.
 
-### 阿里云百炼（中国大陆）
+| Provider | Chat | Hands | Pictures | Clips | Region | Make a key |
+|---|:-:|:-:|:-:|:-:|---|---|
+| Alibaba Cloud Bailian | ● | ● | ● | ● | mainland China | [bailian.console.aliyun.com](https://bailian.console.aliyun.com/?apiKey=1) |
+| DeepSeek | ● | ● | | | both | [platform.deepseek.com](https://platform.deepseek.com/api_keys) |
+| Kimi (Moonshot AI) | ● | ● | | | both (a mainland and a global edition) | [platform.moonshot.cn](https://platform.moonshot.cn/console/api-keys) · [platform.kimi.ai](https://platform.kimi.ai/console) |
+| Zhipu GLM | ● | ● | ● | | mainland China | [open.bigmodel.cn](https://open.bigmodel.cn/usercenter/apikeys) |
+| SiliconFlow | ● | ● | ● | | mainland China | [cloud.siliconflow.cn](https://cloud.siliconflow.cn/account/ak) |
+| Volcengine Ark (Doubao) | ● | ● | ● | | mainland China | [console.volcengine.com](https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey) |
+| MiniMax | ● | ● | | | both (a mainland and a global edition) | [platform.minimaxi.com](https://platform.minimaxi.com/user-center/basic-information/interface-key) |
+| OpenRouter | ● | ● | ● | | outside mainland China | [openrouter.ai/keys](https://openrouter.ai/keys) |
+| OpenAI | ● | ● | ● | | outside mainland China | [platform.openai.com](https://platform.openai.com/api-keys) |
+| Anthropic Claude | ● | ● | | | outside mainland China | [platform.claude.com](https://platform.claude.com/settings/keys) |
+| Google Gemini | ● | ● | ● | | outside mainland China | [aistudio.google.com](https://aistudio.google.com/apikey) |
+| xAI Grok | ● | ● | ● | | outside mainland China | [console.x.ai](https://console.x.ai) |
+| Groq | ● | ● | | | outside mainland China | [console.groq.com](https://console.groq.com/keys) |
+| Mistral AI | ● | ● | | | outside mainland China | [console.mistral.ai](https://console.mistral.ai/api-keys) |
+| Ollama / LM Studio / vLLM (on your machine) | ● | | | | both | no key |
 
-- 新账号有一段时间的免费 token；对话、画图（qwen-image）、视频（Wan）都在同一把 key 下，形象生成也能直接用。
-- 国内直连，接口 OpenAI 兼容，nanoMuse 里已经预置好地址，只要贴 key。
-- 注册需要阿里云账号和实名认证，海外身份注册不了。
+Only Bailian has a dot under *Clips* because nanoMuse's clip generation speaks
+Bailian's video API; the other vendors' video models sit behind their own task
+APIs, not wired this round. Under *Pictures*, OpenRouter goes through its
+Image API with models such as `openai/gpt-image-2`; Gemini uses
+`gemini-2.5-flash-image`.
 
-**五步，约 2 分钟：**
+The table is the repository's catalogue,
+[`nanomuse/llm/providers.json`](../nanomuse/llm/providers.json) — every client
+and the relay read it; endpoints, default models and what each covers are in
+there, checked against each vendor's documentation in October 2026.
 
-1. **开通百炼。** 打开 [bailian.console.aliyun.com](https://bailian.console.aliyun.com/)，用阿里云账号登录（没有就注册一个，要实名认证）。第一次进入会提示「开通百炼服务」，点开通，不收费。
-2. **创建 API key。** 进入 [API-KEY 管理页](https://bailian.console.aliyun.com/?apiKey=1)（右上角头像 → API-KEY），点「创建我的 API-KEY」，归属选默认业务空间，确定。
-3. **复制 key。** 新建的 key 以 `sk-` 开头。点「查看」再「复制」。**这串字符只给 nanoMuse 用，不要发给任何人、不要贴到聊天里。**
-4. **贴到 nanoMuse 里。**
-   - 手机：额度用完时卡片上的「去设置」会打开预填好的「阿里云百炼」表单；或者 设置 → 服务商 → 添加 → OpenAI 类型，地址填 `https://dashscope.aliyuncs.com/compatible-mode`（勾上 `/v1`）。贴 key，保存。
-   - 网页版 / 桌面版：额度卡片上的「去设置」会打开「连接」页并选好「阿里云百炼」；或者 连接 → 模型 → 「阿里云百炼」。贴 key，保存。
-5. **选模型，试一句。** 保存后 nanoMuse 列出这把 key 能用的模型：对话选 `deepseek-v4.1-flash`（能看图，便宜），手的模型选 `qwen3.8-27b`；想更省，对话也可以选 `qwen3.8-flash`。回到聊天说一句，能回答就成了。想换形象，再到 连接 → 图像与视频模型 里选 `qwen-image-3.0` 和 `wan2.2-i2v-flash`。
+## Making a key
 
-**之后怎么算钱。** 免费额度用完后按百炼标价计费（北京地域）：`deepseek-v4.1-flash` 每百万 token 输入 ¥2 / 输出 ¥8（忙时；闲时 ¥1 / ¥4），`qwen3.8-27b` ¥3 / ¥12，`qwen3.8-flash` ¥0.8 / ¥2.7，`qwen-image-3.0` 每张 ¥0.18，`wan2.2-i2v-flash` 每秒 ¥0.10。正常聊一天几分钱。建议在百炼控制台设一个**用量告警**。nanoMuse 自己不收任何费用。
+The same three steps everywhere: sign up → create an API key in the console →
+paste it into nanoMuse. **The key is for nanoMuse only; never send it to anyone
+or paste it into a chat.**
 
-### OpenRouter（海外）
+- **Alibaba Cloud Bailian.** Sign in to [bailian.console.aliyun.com](https://bailian.console.aliyun.com/) with an Alibaba Cloud account (identity verification is required), accept *Enable Model Studio* on first entry, then create a key on the [API-KEY page](https://bailian.console.aliyun.com/?apiKey=1); it starts with `sk-`. A new account comes with free tokens for a while. Set a usage alert in the console.
+- **DeepSeek.** Sign up, add credit and create a key at [platform.deepseek.com](https://platform.deepseek.com/); base URL `https://api.deepseek.com/v1`.
+- **Kimi.** The mainland edition is [platform.moonshot.cn](https://platform.moonshot.cn/console/api-keys), base URL `https://api.moonshot.cn/v1`; the global one is [platform.kimi.ai](https://platform.kimi.ai/console), base URL `https://api.moonshot.ai/v1`. Accounts and keys are not shared between the two.
+- **Zhipu GLM.** [open.bigmodel.cn](https://open.bigmodel.cn/usercenter/apikeys), base URL `https://open.bigmodel.cn/api/paas/v4`.
+- **SiliconFlow.** [cloud.siliconflow.cn](https://cloud.siliconflow.cn/account/ak), base URL `https://api.siliconflow.cn/v1`; model ids carry the vendor prefix, e.g. `deepseek-ai/DeepSeek-V4-Flash`.
+- **Volcengine Ark.** [console.volcengine.com](https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey) — enable the models you want in Ark, then create a key; base URL `https://ark.cn-beijing.volces.com/api/v3`.
+- **MiniMax.** Mainland edition at [platform.minimaxi.com](https://platform.minimaxi.com/user-center/basic-information/interface-key), base URL `https://api.minimaxi.com/v1`; the global base URL is `https://api.minimax.io/v1`.
+- **OpenRouter.** Sign in at [openrouter.ai](https://openrouter.ai/) with Google, GitHub or an e-mail address, add credit under *Credits*, create a key under *Keys*; it starts with `sk-or-v1-`. *Settings → Limits* puts a monthly cap on a key.
+- **OpenAI.** [platform.openai.com](https://platform.openai.com/api-keys), base URL `https://api.openai.com/v1`.
+- **Anthropic.** [platform.claude.com](https://platform.claude.com/settings/keys). nanoMuse speaks Anthropic's own API; no compatibility layer is needed.
+- **Google Gemini.** [aistudio.google.com/apikey](https://aistudio.google.com/apikey), base URL `https://generativelanguage.googleapis.com/v1beta/openai`.
+- **xAI, Groq, Mistral.** A key from each console; base URLs `https://api.x.ai/v1`, `https://api.groq.com/openai/v1`, `https://api.mistral.ai/v1`.
 
-- 一个账号、一把 key，几百个模型都在后面；国际信用卡付费，按量扣。
-- 不用代理，不用国内身份。
-- 手机 App（Android、iPhone）可以一键登录 OpenRouter，不用手抄 key。
+**Paste it into nanoMuse.**
 
-**四步：**
+- Phone: *Set it up* on the allowance card opens the provider form pre-filled; or *Settings → Providers → Add*, pick the provider, paste the key, save.
+- Desktop: *Set it up* on the allowance card opens *Settings → nanoMuse Cloud* at the provider's row; or paste the key on that provider's row under *Ways on* there. The address is already filled in.
+- Web console: *Set it up* on the allowance card opens *Connections* with the provider chosen; or *Connections → Chat model*, click the provider, paste the key, save.
+- A runtime of your own: `[llm] provider = "bailian"` (any id from the table) and `api_key` in `config.toml`; the address and the default model fill in from the catalogue. Pictures or clips from another provider are an `[image]` / `[video]` block ([configuration.md](configuration.md#image-and-video)).
 
-1. **注册。** 打开 [openrouter.ai](https://openrouter.ai/)，用 Google、GitHub 或邮箱登录。
-2. **充值。** 右上角头像 → *Credits* → *Add Credits*，国际信用卡；先充 5 美元足够用很久。
-3. **拿 key。** 头像 → *Keys* → *Create Key*，起个名（比如 nanoMuse），复制以 `sk-or-v1-` 开头的那串。**只给 nanoMuse 用，别发给任何人。**
-4. **贴到 nanoMuse 里。**
-   - 手机：设置 → 服务商 → 添加 → OpenRouter → 「登录」，浏览器里批准一下，key 自动回到 App，不用复制；或者把 key 贴进 OpenRouter 表单。
-   - 网页版 / 桌面版：连接 → 模型 → 「OpenRouter」，贴 key，保存。地址已经填好：`https://openrouter.ai/api/v1`。
+**Use it for.** Once the key is saved, a card asks what this key should handle:
+one switch per job the provider can do (chat, operating the screen, making
+pictures, making clips), all on. *Use it* moves those rows to this provider, on
+the catalogue's default model for each job (or the first model of its list that
+fits); *Not now* changes nothing, and so does a switch you turned off. Signed
+in, the card says nanoMuse Cloud keeps the rest. Every row can be changed later
+under *Settings › Models* (web console: *Connections*).
 
-**选模型。** 对话选 `deepseek/deepseek-v4.1-flash`，手的模型选 `qwen/qwen3.8-27b`。每个模型的单价在 OpenRouter 的模型页上写着；*Settings → Limits* 可以给 key 设每月上限。
+## Which model does what
 
-### DeepSeek 官方接口
+*Settings › Models* (Android: the card at the top of Settings; iPhone: the
+first card of Settings; desktop: right after General; web console: the *Chat
+model*, *Hands model*, *Making pictures* and *Making clips* cards on
+*Connections*) has one row per job:
 
-只想要 DeepSeek 的话，可以直接用它家的接口：[platform.deepseek.com](https://platform.deepseek.com/) 注册、充值、创建 key，地址 `https://api.deepseek.com/v1`，模型选 `deepseek-v4.1-flash`。它没有图像和视频模型，形象生成要另配一家。
+| Row | What it does | Who is listed |
+|---|---|---|
+| Chat | The model that talks with you. | nanoMuse Cloud's chat models while signed in and switched on, then every provider of yours with chat models |
+| Operating the screen | Looks at the screen and acts for you. Needs a model that can see images. | nanoMuse Cloud's hands model, then your providers' models that see images; disabled on the iPhone (*Not on iPhone*) |
+| Making pictures | Portraits of your Muse and the pictures you ask for. | nanoMuse Cloud, then your providers with image models |
+| Making clips | Short clips of your Muse. | nanoMuse Cloud, then your providers with video models (Bailian) |
 
-### 其他 OpenAI 兼容服务商
+Each row shows `provider · model` and opens a picker: the *nanoMuse Cloud*
+group first while signed in, its recommended model marked, then one group per
+provider of yours holding only the models that fit. A provider without the
+capability does not appear in that row at all. A row nothing covers shows the
+one sentence naming who could, and *Add a provider*. A chat pick is the default
+for new chats and moves the main chat (*Applies to the main chat and to new
+chats; a side chat keeps its model.*): the main chat is the one conversation the
+Chat tab always shows and is never new, so it would otherwise stay on the
+provider it started with; a side chat already open keeps its model. The same
+on the phones and the desktop.
 
-任何 OpenAI 兼容接口都能填：智谱、月之暗面、OpenAI 本身，或你自己跑的 vLLM / Ollama。通用填法：
+**Automatic.** The screen, pictures and clips rows open with an *Automatic*
+entry that says what it gives right now (*Currently nanoMuse Cloud ·
+qwen3.8-27b*, say). Pick it and the row forgets any choice made there and
+follows one order: the chat model's provider when it is one of yours and can do
+the job (its catalogue default), else nanoMuse Cloud while signed in and switched on, else the
+first provider of yours that can. A choice you made always wins; nanoMuse Cloud
+never steps in front of a provider you chose. Each device keeps its own choice,
+because keys never leave the device where they were entered.
 
-| 字段 | 填什么 |
-|---|---|
-| 类型 | OpenAI（兼容） |
-| 地址（Base URL） | 服务商给的地址，通常以 `/v1` 结尾，例如 `https://api.deepseek.com/v1` |
-| API key | 服务商控制台里创建的 key |
-| 模型 | 保存后从列表里选；列不出来就手填服务商文档里的模型 id |
+**No silent fallback.** When a model of your own fails under a turn, nothing
+switches by itself: the error card offers *Use nanoMuse Cloud this time*
+(signed in only), which runs that one turn on the account's model and changes
+no row. The desktop shows the same button after a failed studio round and a
+failed set of clips.
 
-网页版和桌面版的「连接」页里有常见服务商的预设，选中即填好地址，只差 key。手的模型要能看图：DeepSeek 的模型里只有 id 带 `v4.1`（或更新）、`vision`、`ocr` 的才看得见截图。
+**Switching nanoMuse Cloud off.** While signed in, the Models page has one
+switch, *Use nanoMuse Cloud models*. Off, the Cloud leaves the pickers and the
+automatic order, no side call (a chat's title, memory, a portrait, the hands)
+runs on it, and the only thing that spends your allowance is the *Use nanoMuse
+Cloud this time* button, each time you tap it. You stay signed in: sync, your
+devices and the account page keep working. The Cloud provider cannot be deleted
+the way one of yours can (deleting it was the same as signing out); signing out
+is under *Settings › nanoMuse Cloud*.
 
----
+**Without an account.** With a key of your own the app works signed out: chat,
+the hands, pictures and clips run on your providers, and the first screen
+offers *Use your own API key instead* next to the sign-in. The sign-in is
+needed only for nanoMuse Cloud's models, conversation sync and your devices
+reaching each other.
 
-## English
+**Known limits.** On the iPhone the pictures and clips rows list, besides
+nanoMuse Cloud, only your providers on a DashScope host (Alibaba Cloud Bailian);
+a key the catalogue says can draw (OpenRouter, OpenAI, Gemini, a custom
+endpoint) is named in one sentence under the picker, *Not offered here: …*,
+with where it does work, so you know the phone has not lost it.
+On the desktop the hands speak OpenAI's shape, so an Anthropic or native Gemini
+key is named under the screen row and not listed; a hands change takes effect
+at the hands' next step, no restart. Pictures through a Gemini key go through
+Google's OpenAI-compatible layer: `images/generations` accepts
+`gemini-2.5-flash-image`, but Google's page does not document `images/edits`
+there, so the pose pictures of the avatar studio may not work with a Gemini key.
 
-### Where you are decides the provider
+## Sign in with a plan you already pay for
 
-| | Provider | Chat model | Hands model | Base URL |
-|---|---|---|---|---|
-| Mainland China | **Alibaba Cloud Bailian (阿里云百炼)** | `deepseek-v4.1-flash` | `qwen3.8-27b` | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
-| Everywhere else | **OpenRouter** | `deepseek/deepseek-v4.1-flash` | `qwen/qwen3.8-27b` | `https://openrouter.ai/api/v1` |
+Some plans sign in directly, with no key to make:
 
-Alibaba Cloud Bailian only signs up accounts from mainland China, and its
-international edition (dashscope-intl) does not carry these two models.
-Outside, OpenRouter is the easy way: one account, one key, pay as you go. Both
-are presets on every client; the other one stays as the second option.
+| Plan | Covers | Where the sign-in is |
+|---|---|---|
+| **ChatGPT** (Plus / Pro / Team) | chat, the hands | Android, iPhone, desktop, web |
+| **Claude** (Pro / Max) | chat, the hands | Android, iPhone |
+| **Kimi** | chat, the hands | Android, iPhone (device code) |
+| **OpenRouter** | chat, the hands, pictures | Android, iPhone (one tap; the key comes back to the app) |
 
-The chat model and the hands model are two settings: the chat model in the
-model picker, the hands model on the *Hands model* row (phone: *Settings →
-Hands*; web and desktop: *Connections*). On the free allowance they default to
-`deepseek-v4.1-flash` and `qwen3.8-27b`; pick the same two under your own key.
+The ChatGPT sign-in uses the authorisation flow of OpenAI's own Codex (web
+console: *Connections → Or sign in with a ChatGPT plan*; desktop: the ChatGPT
+row under *Settings → nanoMuse Cloud*; phone: *Settings → Providers → OpenAI →
+Sign in*). Signed in, it covers chat and the hands only: the Codex backend has
+no image or video endpoints, so pictures and clips still want a key.
 
-### Alibaba Cloud Bailian (mainland China)
+From a terminal it is the same flow: `nanomuse chatgpt login` opens the page
+and waits for the browser to come back, `nanomuse chatgpt status` says who is
+signed in and until when, `nanomuse chatgpt logout` forgets it; then
+`[llm] provider = "chatgpt"` in `config.toml` (no `base_url`, no `api_key`; an
+empty `model` is `gpt-5.6-sol`). The browser has to reach port 1455 on the
+machine the runtime runs on; when the runtime is elsewhere, copy the whole
+address the browser ends on and give it to the CLI's prompt or to
+`POST /api/chatgpt/callback {"url": …}`
+([configuration.md](configuration.md#a-chatgpt-plan-instead-of-a-key)).
 
-- A new account comes with free tokens for a while; chat, pictures (qwen-image) and video (Wan) sit under one key, so the avatar studio works too.
-- Direct from China, OpenAI-compatible; nanoMuse already knows the endpoint, you only paste the key.
-- Sign-up needs an Alibaba Cloud account with mainland identity verification; it does not accept overseas accounts.
+**One honest line.** OpenAI's terms cover using a ChatGPT plan inside OpenAI's
+own Codex; other apps have had this access cut off before (OpenCode, January
+2026). If it stops working, an API key does.
 
-**Five steps, about two minutes:**
+## When the provider cannot be reached
 
-1. **Open Bailian.** Go to [bailian.console.aliyun.com](https://bailian.console.aliyun.com/) and sign in with an Alibaba Cloud account (create one if needed; identity verification is required). On first entry accept *Enable Model Studio* — it is free.
-2. **Create an API key.** Open the [API-KEY page](https://bailian.console.aliyun.com/?apiKey=1) (avatar, top right → API-KEY), click *Create my API-KEY*, keep the default workspace, confirm.
-3. **Copy it.** The key starts with `sk-`. Click *View*, then *Copy*. **It is for nanoMuse only — never send it to anyone or paste it into a chat.**
-4. **Paste it into nanoMuse.**
-   - Phone: *Set it up* on the allowance card opens the provider form pre-filled for Bailian; or *Settings → Providers → Add → OpenAI*, base URL `https://dashscope.aliyuncs.com/compatible-mode` with `/v1` on. Paste the key, save.
-   - Web / desktop: *Set it up* on the allowance card opens *Connections* with *Alibaba Cloud Bailian* chosen; or *Connections → Model → Alibaba Cloud Bailian*. Paste the key, save.
-5. **Pick the models, say something.** After saving, nanoMuse lists the models the key can use: `deepseek-v4.1-flash` for chat (sees images, cheap), `qwen3.8-27b` as the hands model; `qwen3.8-flash` is the cheaper chat option. Back in the chat, one sentence answered means it works. For the avatar, choose `qwen-image-3.0` and `wan2.2-i2v-flash` under *Connections → Image & video models*.
+Some networks do not get to `chatgpt.com` at all (the name does not resolve,
+the connection times out, TLS fails, an HTML interception page comes back
+where JSON was due), and in some regions OpenAI refuses outright (HTTP 403
+`unsupported_country_region_territory`). The chat on the phone then shows a
+card, not the socket's words: what happened (*chatgpt.com cannot be reached
+from this network* or *OpenAI does not serve this region*), what helps (a VPN
+on this phone; the app's own proxy under *Settings → Network*; another
+provider with a key of your own), a *Try again* button, and the raw line
+behind *Details* for a bug report. An expired sign-in (401) reads *The ChatGPT
+sign-in is no longer valid* with *Sign in again*; a plan whose window is spent
+(a 429 that names a usage limit) reads *The ChatGPT plan has nothing left for
+now* with OpenAI's own sentence and when it resets; any other 429 is *Too many
+requests at once*. A key of your own that meets the same network trouble gets
+the same card with that provider's host in it.
 
-**What it costs afterwards.** Past the free quota, Bailian bills at list price (Beijing region): `deepseek-v4.1-flash` ¥2 in / ¥8 out per million tokens in busy hours (¥1 / ¥4 off-peak), `qwen3.8-27b` ¥3 / ¥12, `qwen3.8-flash` ¥0.8 / ¥2.7, `qwen-image-3.0` ¥0.18 a picture, `wan2.2-i2v-flash` ¥0.10 a second. An ordinary day of chatting is a few fen. Set a **usage alert** in the Bailian console. nanoMuse itself charges nothing.
+**Settings → Network → HTTP proxy for own providers** (Android and iPhone):
+host, port, an optional user name and password; off by default, kept on this
+phone only. Only the requests to the providers you added with your own key and
+to the ChatGPT plan go through it; nanoMuse Cloud, your computers and the local
+network never do. A *Test* row fetches `https://chatgpt.com/` through the proxy
+as entered and says whether it got through and in how many milliseconds. The
+same setting lives where each app keeps its keys: the phones have it in the
+provider form; the desktop under **Settings → nanoMuse Cloud → Network**, one
+address (`http://host:port` or `socks5://host:port`) that the app applies to its
+host process at the next start — *Restart now* is under the row — so every own
+key, the ChatGPT sign-in, the hands' runtime and whatever else the app sends out go
+through it, and nanoMuse Cloud never does ([desktop.md](desktop.md)); the web app has the *Proxy* field in the
+own-key form; the runtime has `[llm] proxy` in `config.toml`
+([configuration.md](configuration.md#llm)).
 
-### OpenRouter (everywhere else)
+## Local models
 
-- One account and one key in front of hundreds of models; international cards; pay as you go.
-- No proxy, no mainland identity.
-- The phone apps (Android, iPhone) sign in to OpenRouter with one tap — no key to copy.
+Ollama, LM Studio and vLLM on your own computer work too: pick the preset
+(web console: *Connections*; desktop: *Settings → nanoMuse Cloud*; phone:
+*Settings → Providers*); the address defaults to the local port
+(`http://127.0.0.1:11434/v1`, `:1234`, `:8000`) and no key is needed. They
+count as *chat*; the hands need a model that sees, so run a multimodal one
+locally (Ollama's `qwen3-vl`, say) and pick it under *Operating the screen*
+(web console: type its id on the *Hands model* row). Pictures and clips need
+one of the providers in the table.
 
-**Four steps:**
+## Any other OpenAI-compatible endpoint
 
-1. **Sign up.** Go to [openrouter.ai](https://openrouter.ai/) and sign in with Google, GitHub or an e-mail address.
-2. **Add credit.** Avatar, top right → *Credits* → *Add Credits*, with an international card; $5 lasts a long time.
-3. **Make a key.** Avatar → *Keys* → *Create Key*, give it a name (nanoMuse, say), copy the string starting `sk-or-v1-`. **For nanoMuse only; never send it to anyone.**
-4. **Paste it into nanoMuse.**
-   - Phone: *Settings → Providers → Add → OpenRouter → Sign in* — the browser opens OpenRouter, you approve, and the key comes back to the app on its own; or paste the key into the OpenRouter form.
-   - Web / desktop: *Connections → Model → OpenRouter*, paste the key, save. The address is already filled in: `https://openrouter.ai/api/v1`.
-
-**Pick the models.** `deepseek/deepseek-v4.1-flash` for chat, `qwen/qwen3.8-27b` as the hands model. Each model's price is on its OpenRouter page; *Settings → Limits* puts a monthly cap on a key.
-
-### DeepSeek direct
-
-If DeepSeek is all you want, its own endpoint works: sign up, add credit and create a key at [platform.deepseek.com](https://platform.deepseek.com/), base URL `https://api.deepseek.com/v1`, model `deepseek-v4.1-flash`. DeepSeek has no image or video models, so the avatar studio needs a second provider.
-
-### Any other OpenAI-compatible provider
-
-Anything that speaks the OpenAI API works: Zhipu, Moonshot, OpenAI itself, or your own vLLM / Ollama. The generic fill-in:
+Anything that speaks the OpenAI API works — choose *Custom*:
 
 | Field | Value |
 |---|---|
-| Type | OpenAI (compatible) |
-| Base URL | the provider's address, usually ending in `/v1`, e.g. `https://api.deepseek.com/v1` |
-| API key | the key made in the provider's console |
+| Base URL | the provider's address, usually ending in `/v1` |
+| API key | the key made in the provider's console (a local server may leave it empty) |
 | Model | pick from the list after saving; if none appears, type the model id from the provider's docs |
 
-The web and desktop *Connections* page has presets for the common providers: choose one and the address is filled in — only the key is missing. The hands model has to see pictures: of DeepSeek's models, only ids containing `v4.1` (or later), `vision` or `ocr` can read a screenshot.
+What a custom endpoint covers is yours to say: nanoMuse takes it for chat, and
+the hands, picture and clip models count once their ids are filled in.

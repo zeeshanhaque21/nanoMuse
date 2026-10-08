@@ -12,7 +12,7 @@ leads to.
 
 The page (`site/page/`) is plain HTML and a little script, with MobileGym in a frame on the
 same origin as `/phone.html`; it talks to the nanoMuse app on the phone through
-`window.__NANOMUSE__` on that frame (open, draft, reset, state, subscribe — see
+`window.__NANOMUSE__` on that frame (open, draft, start, reset, state, subscribe; see
 `demo/mobilegym/README.md`) and the app passes drafts on to the web app over `postMessage`.
 On a hosted session the web app runs lite (`?ui=lite`): the phone layout at any width, drawn
 the way the Android app draws it — the face on its disc with the name tag under it, the round
@@ -37,6 +37,37 @@ State Builder tab, so their script leaves it alone (`page.js` handles it, readin
 *Start over* — sits beside the phone; below 1280px their chrome folds under the phone and the
 column follows.
 
+**The phone turns itself on, and the Muse starts when a person is looking.** On this page and
+in the frame alike the phone boots as soon as the page is there and nanoMuse comes to the
+front, so the first thing a visitor sees is the welcome page. Pressing *Start* is another
+matter: it starts a container on the server and takes a share of the day's model budget, so
+the page does not press it for every load. It presses it (`window.__NANOMUSE__.start()`, what
+the pill does) once the stage has been in view for six seconds with the tab in front, or at
+the first sign of a hand: a pointer moving over the page, a key, a touch, the wheel. It never
+presses it for a browser that says it is driven by a script (`navigator.webdriver`), nor past
+a sign-in the showcase asks for (the visitor signs in and the phone's *Start* is theirs), nor
+with a visitor's own key, nor after a try that failed (the phone shows why, with *Try again*).
+A line tapped in the column before the Muse exists presses *Start* too and waits in the chat.
+The thirty minutes and the budget are as before; what changes is who presses the pill. The
+phone's language (MobileGym's Settings, Chinese by default) follows the page's switch, and so
+does the Muse's: the page sets the hosted runtime's reply language (`PUT /api/settings`, what
+*Settings › Reply language* does) to the page's, so a chat read on a Chinese screen is
+reported in English on the English page and the capsule's sentences follow. The chat model
+still slips into Chinese now and then after Chinese screen text; the setting makes it the
+exception rather than the rule.
+
+**The frame on the project site.** [nanomuse.cn](https://nanomuse.cn/) opens on this page in an
+`<iframe>` of `https://demo.nanomuse.dev/?embed=1`. In that mode the page has no header of its
+own (the site's bar is above it). The site passes its language and theme on the first load
+(`&lang=zh`, `&theme=dark`) and afterwards over `postMessage` (`{type: "nanomuse:lang", lang}`,
+`{type: "nanomuse:theme", theme}`; only from the project site's origins), and links out of the
+page open in the top window, not inside the frame. A wheel turned over a part of this page that
+has nothing to scroll under the pointer (the stage, the keys, the column at its end) is handed
+up to the site as `{type: "nanomuse:wheel", deltaX, deltaY}` (pixels), so the homepage scrolls
+with the pointer over the frame; over the phone's screen the phone keeps it. Dark is the page's
+own surfaces in the site's dark tokens, the stage and MobileGym's guide and dock cards going
+dark with them.
+
 Nothing about the phone runs on the server. MobileGym is a React app: the whole simulated
 phone lives in the visitor's tab (~400 MB of *their* memory). The server runs three things:
 
@@ -58,7 +89,11 @@ visitor's browser ──HTTPS──▶ Caddy ── demo.nanomuse.dev ──▶ 
 A session is one hostname (`<id>.s.nanomuse.dev`) because the nanoMuse web app and the
 MobileGym module both take a server *origin*, and because the browser then keeps each session's
 token in its own `localStorage`. The wildcard certificate that needs is why Caddy is built with
-the Cloudflare DNS module.
+the Cloudflare DNS module. The token itself travels as the socket's first frame and in the
+fragment of the phone page's address, never in a query string; a page still on the older
+`?token=` form is served, but no log line of the gateway (its own, uvicorn's request lines,
+httpx's) carries the value: it is rewritten to `token=[redacted]` before it is written
+(`gateway/showcase_gateway/logs.py`). Caddy keeps no access log for these two names.
 
 ## What the gateway enforces
 
@@ -107,14 +142,17 @@ the Cloudflare DNS module.
   `qwen3.8-27b` on 阿里云百炼 — and on any other provider the one model does both lanes (a
   text-only model there, DeepSeek's own API say, leaves the hands with nothing to look with).
 
-Two lanes, two models — the same two every nanoMuse client defaults to: `main` (the model that
-talks to the visitor) is 阿里云百炼's `deepseek-v4.1-flash`, which reads pictures as well;
-`gui` (the one that reads screens and taps; many small calls with a screenshot each) is
-`qwen3.8-27b` — one key, one host. `GUI_MODEL` is a fixed default, not derived from the chat
-model; set `GUI_*` to change it or to split the lanes across keys or providers. A chat model
-that takes no images (DeepSeek before V4.1: `deepseek-v4-pro`, `deepseek-v4-flash`) is kept
-away from screenshots (`NANOMUSE_LLM_VISION=off`); the operator lane still looks.
-`GET /api/demo/info` names both (`demo_model`, `gui_model`).
+Two lanes, two models, both set by the operator in the gateway's `.env` (`.env.example` lists
+the names; `docker-compose.yml` pins none): `main` (the model that talks to the visitor) is
+whatever `MAIN_MODEL` names on `MAIN_BASE_URL` with `MAIN_API_KEY`, and empty means the
+gateway's own default, the chat model every nanoMuse client starts with (`deepseek-v4.1-flash`
+on 阿里云百炼 at the time of writing); `gui` (the one that reads screens and taps; many small
+calls with a screenshot each) is `GUI_MODEL`, and empty means `qwen3.8-27b` on the main lane's
+host and key — a fixed default, not derived from the chat model; set `GUI_*` to change it or to
+split the lanes across keys or providers. A chat model that takes no images (DeepSeek before
+V4.1: `deepseek-v4-pro`, `deepseek-v4-flash`) is kept away from screenshots
+(`NANOMUSE_LLM_VISION=off`); the operator lane still looks. What a running showcase actually
+uses is what `GET /api/demo/info` says (`demo_model`, `gui_model`), not this page.
 
 **The capsule decides.** While the hands work on the simulated phone, an approval the run
 raises (a tap on *Pay*, *Send*, *Delete*…) is shown on the capsule over the operated app with
@@ -178,7 +216,7 @@ container: `nmw-<slug>` with three named volumes (`/data`, `/workspace`, `/home/
 `nanomuse-web` network (a way out, and the relay next to it), signed in from the environment
 (`NANOMUSE_CLOUD_KEY`, `NANOMUSE_CLOUD_BASE_URL=http://nanomuse-relay:8787`,
 `NANOMUSE_HUB_NAME=Web`, `NANOMUSE_ONBOARDED=1`; `nanomuse/hub/service.py`,
-`_seed_from_env`). The browser is sent to `https://<slug>.<SESSION_DOMAIN>/?token=…`, the same
+`_seed_from_env`). The browser is sent to `https://<slug>.<SESSION_DOMAIN>/#token=…`, the same
 door the phone's QR code opens, and the runtime there makes the Cloud its model on first
 start and takes its place on the hub as one of the account's devices — so the phone can ask
 it for things and it can ask the phone.

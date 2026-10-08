@@ -22,6 +22,7 @@ from collections.abc import Coroutine
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from nanomuse.background import keep_task
 from nanomuse.channels.base import Channel, ChannelBus, ChannelStatus, InboundMessage
 from nanomuse.channels.dingtalk import DingTalkChannel
 from nanomuse.channels.feishu import FeishuChannel
@@ -29,7 +30,7 @@ from nanomuse.channels.store import ChannelSettingsStore, PairingStore
 from nanomuse.channels.telegram import TelegramChannel
 from nanomuse.channels.wecom import WeComChannel
 from nanomuse.logger import logger
-from nanomuse.server.events import keep_task, new_id
+from nanomuse.server.events import new_id
 
 if TYPE_CHECKING:
     from nanomuse.server.service import MuseService
@@ -722,7 +723,7 @@ class ChannelManager(ChannelBus):
             entry["channel"],
             str(entry.get("chat_id") or entry["sender_id"]),
             self.say(
-                f"Paired. This chat is now {self.muse_name} — say what you need.",
+                f"Paired. This chat is now {self.muse_name}. Say what you need.",
                 f"已配对。这里现在就是 {self.muse_name}，有事直接说。",
             ),
         )
@@ -753,7 +754,7 @@ class ChannelManager(ChannelBus):
         if channel is None:
             status = self.status.get(name) or ChannelStatus()
             raise ValueError(
-                status.detail or f"{self.types[name].label} is not running — switch it on first."
+                status.detail or f"{self.types[name].label} is not running; switch it on first."
             )
         if not chat_id:
             paired = self.pairing.approved(name)

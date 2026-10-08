@@ -19,7 +19,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -34,7 +33,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.openminis.app.MinisApp
 import com.openminis.app.R
-import com.openminis.app.ui.settings.SettingsChoiceRow
 import com.openminis.app.ui.settings.SettingsRow
 import com.openminis.app.ui.settings.SettingsScaffold
 import com.openminis.app.ui.settings.SettingsSection
@@ -47,16 +45,16 @@ const val ROUTE_HANDS = "nanomuse/hands"
 /**
  * Settings → Hands. The switch (off by default), the three things the hands need — the
  * accessibility service, drawing over other apps, a model that sees pictures — each with
- * the button that fixes it, the screen model, and the plain words on what the hands will and
- * will not do.
+ * the button that fixes it, the screen model (a row that opens the picker of Settings →
+ * Models), and the plain words on what the hands will and will not do.
  */
 @Composable
-fun HandsScreen(onBack: () -> Unit, onOpenProviders: () -> Unit) {
+fun HandsScreen(onBack: () -> Unit, onOpenProviders: () -> Unit, onOpenHandsModel: () -> Unit = onOpenProviders) {
     val context = LocalContext.current
     val repo = (context.applicationContext as? MinisApp)?.providerRepositoryOrNull
     val config = repo?.config?.collectAsState()?.value
-    var enabled by remember { mutableStateOf(Hands.enabled(context)) }
-    var chosen by remember { mutableStateOf(Hands.modelEntryId(context)) }
+    // Follows the preference itself, so a change made elsewhere while this page is open shows here.
+    val enabled by remember(context) { Hands.enabledFlow(context) }.collectAsState(initial = Hands.enabled(context))
     var tick by remember { mutableIntStateOf(0) }
     val active by Hands.active.collectAsState()
 
@@ -67,7 +65,7 @@ fun HandsScreen(onBack: () -> Unit, onOpenProviders: () -> Unit) {
         owner.lifecycle.addObserver(obs)
         onDispose { owner.lifecycle.removeObserver(obs) }
     }
-    val readiness = remember(tick, config, chosen) { Hands.readiness(context) }
+    val readiness = remember(tick, config) { Hands.readiness(context) }
     val visionEntries = remember(config) { Hands.visionEntries(context) }
 
     SettingsScaffold(title = stringResource(R.string.nm_hands_title), onBack = onBack) {
@@ -89,7 +87,7 @@ fun HandsScreen(onBack: () -> Unit, onOpenProviders: () -> Unit) {
                     else -> stringResource(R.string.nm_hands_status_off)
                 },
                 checked = enabled,
-                onCheckedChange = { enabled = it; Hands.setEnabled(context, it) },
+                onCheckedChange = { Hands.setEnabled(context, it) },
                 icon = Icons.Outlined.PhoneAndroid,
                 iconColor = if (enabled) MuseTones.action else MaterialTheme.colorScheme.onSurfaceVariant,
                 showDivider = active,
@@ -106,7 +104,11 @@ fun HandsScreen(onBack: () -> Unit, onOpenProviders: () -> Unit) {
         }
 
         // ── what it needs ──
-        SettingsSection(header = stringResource(R.string.nm_hands_section_needs), footer = stringResource(R.string.nm_hands_needs_footer)) {
+        // C11: with no provider that has a model that sees, the footer is the one sentence that says which would
+        SettingsSection(
+            header = stringResource(R.string.nm_hands_section_needs),
+            footer = if (visionEntries.isEmpty()) stringResource(R.string.nm_cap_hands_unavailable) else stringResource(R.string.nm_hands_needs_footer),
+        ) {
             NeedRow(
                 icon = Icons.Outlined.Accessibility,
                 title = stringResource(R.string.nm_hands_need_a11y),
@@ -142,22 +144,16 @@ fun HandsScreen(onBack: () -> Unit, onOpenProviders: () -> Unit) {
             }
         }
 
-        // ── the screen model ──
+        // ── the screen model ── one row; the choice itself is the picker of Settings → Models
+        // (0.1.41), so the hands' model has one place, not two.
         if (visionEntries.isNotEmpty()) {
             SettingsSection(header = stringResource(R.string.nm_hands_section_model), footer = stringResource(R.string.nm_hands_model_footer)) {
-                SettingsChoiceRow(
-                    title = stringResource(R.string.nm_hands_model_auto),
-                    selected = chosen == null,
-                    onSelect = { chosen = null; Hands.setModelEntryId(context, null) },
+                SettingsRow(
+                    title = stringResource(R.string.nm_models_hands_title),
+                    subtitle = readiness.model?.let { m -> m.label + " · " + stringResource(whyText(m.why)) },
+                    onClick = onOpenHandsModel,
+                    showDivider = false,
                 )
-                visionEntries.forEachIndexed { i, (inst, entry) ->
-                    SettingsChoiceRow(
-                        title = entry.model.displayName.ifBlank { entry.model.id } + " · " + inst.label,
-                        selected = chosen == entry.id,
-                        onSelect = { chosen = entry.id; Hands.setModelEntryId(context, entry.id) },
-                        showDivider = i < visionEntries.lastIndex,
-                    )
-                }
             }
         }
 
@@ -219,6 +215,7 @@ private fun openAccessibilitySettings(context: Context) {
 /** The sentence for how the screen model was arrived at ([Hands.screenModel]). */
 private fun whyText(why: Hands.Why): Int = when (why) {
     Hands.Why.CHOSEN -> R.string.nm_hands_why_chosen
+    Hands.Why.CHAT_PROVIDER -> R.string.nm_hands_why_chat_provider
     Hands.Why.DEFAULT -> R.string.nm_hands_why_default
     Hands.Why.CHAT -> R.string.nm_hands_why_chat
     Hands.Why.GROUP -> R.string.nm_hands_why_group

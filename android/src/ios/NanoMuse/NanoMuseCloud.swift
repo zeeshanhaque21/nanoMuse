@@ -3,8 +3,8 @@ import UIKit
 
 /// nanoMuse Cloud: the "start now" path. A phone number or an e-mail address, a code, and the
 /// app has a provider with a starter allowance — no key of one's own needed. The server is the
-/// relay in `cloud/` of the repository; anyone can run one, and a debug build can be pointed at
-/// a different one.
+/// relay in `cloud/` of the repository; anyone can run one, and the app can be pointed at it
+/// ("Use a different server" on the sign-in page, `NanoMuseRelayPicker`).
 ///
 /// To the rest of the app the relay is an ordinary OpenAI-compatible provider: an API-key
 /// `ProviderInstance` on the relay's base URL, whose key is the `nm_…` token the relay issued.
@@ -27,6 +27,9 @@ struct NanoMuseCloudAccount: Codable, Equatable, Sendable {
     var checkedAt: Date
     /// The relay runs without a ceiling: usage is shown, nothing is refused for lack of tokens.
     var unlimited: Bool = false
+    /// C10: the relay's opaque id of the account (`account.id` of `/v1/me`) — what the local
+    /// conversations are keyed to, never the identifier. Empty from a relay that sends none.
+    var id: String = ""
 
     var remaining: Int64 { max(granted - used, 0) }
     /// 0..1 of the grant still unspent.
@@ -35,7 +38,7 @@ struct NanoMuseCloudAccount: Codable, Equatable, Sendable {
         return min(max(Double(remaining) / Double(granted), 0), 1)
     }
 
-    init(channel: String, hint: String, granted: Int64, used: Int64, usedToday: Int64, dailyCap: Int64, checkedAt: Date, unlimited: Bool = false) {
+    init(channel: String, hint: String, granted: Int64, used: Int64, usedToday: Int64, dailyCap: Int64, checkedAt: Date, unlimited: Bool = false, id: String = "") {
         self.channel = channel
         self.hint = hint
         self.granted = granted
@@ -44,9 +47,10 @@ struct NanoMuseCloudAccount: Codable, Equatable, Sendable {
         self.dailyCap = dailyCap
         self.checkedAt = checkedAt
         self.unlimited = unlimited
+        self.id = id
     }
 
-    // `unlimited` came later; an account cached by an earlier build decodes without it.
+    // `unlimited` and `id` came later; an account cached by an earlier build decodes without them.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         channel = try c.decode(String.self, forKey: .channel)
@@ -57,6 +61,7 @@ struct NanoMuseCloudAccount: Codable, Equatable, Sendable {
         dailyCap = try c.decode(Int64.self, forKey: .dailyCap)
         checkedAt = try c.decode(Date.self, forKey: .checkedAt)
         unlimited = try c.decodeIfPresent(Bool.self, forKey: .unlimited) ?? false
+        id = try c.decodeIfPresent(String.self, forKey: .id) ?? ""
     }
 }
 
@@ -65,6 +70,10 @@ struct NanoMuseCloudError: LocalizedError, Sendable {
     let code: String
     let message: String
     let status: Int
+    /// `retry_after` in seconds, when the relay said when to come back (`provider_busy`).
+    var retryAfterS: Int? = nil
+    /// Relay 0.22: the refusal is one of the operator's switches, not use (`paused: true` beside `allowance_exhausted`).
+    var paused: Bool = false
 
     var errorDescription: String? { NanoMuseCloud.describe(self) }
 }
@@ -79,10 +88,16 @@ enum NanoMuseCloud {
         static let instance = "nanomuse.cloud.instance_id"
         static let account = "nanomuse.cloud.account"
         static let fresh = "nanomuse.cloud.fresh_account"
+        /// The relay refused the key and the account's data was kept aside (C12); the sign-in page says so until the next sign-in.
+        static let ended = "nanomuse.cloud.sign_in_ended"
     }
 
     /// True after a sign-in that created the account, until the first run's password page was answered.
     static var freshAccount: Bool { UserDefaults.standard.bool(forKey: Keys.fresh) }
+
+    /// True after the relay refused the phone's key and the account's data was put aside (C12)
+    /// — the sign-in page tells the person so — until the next sign-in.
+    static var signInEnded: Bool { UserDefaults.standard.bool(forKey: Keys.ended) }
     static func clearFreshAccount() { UserDefaults.standard.removeObject(forKey: Keys.fresh) }
 
     typealias Account = NanoMuseCloudAccount
@@ -90,8 +105,8 @@ enum NanoMuseCloud {
 
     // MARK: - State
 
-    /// No default relay: the person points the app at their own relay.
-    /// Empty means not configured (callers must ask for it).
+    /// Any build may talk to another relay (0.1.38: "Use a different server" on the sign-in
+    /// sheet, NanoMuseRelayPicker). The address must pass `relayProblem` first.
     static var canOverrideBase: Bool { true }
 
     /// The relay this build talks to (empty when not configured).
@@ -106,6 +121,12 @@ enum NanoMuseCloud {
     /// True when a relay server is configured.
     static var isConfigured: Bool { !baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
+    /// Whether the relay is one of the person's own rather than the default.
+    static var usesOwnRelay: Bool { baseURL != defaultBase }
+
+    /// The host of the relay in use, for "Server: …" rows.
+    static var relayHost: String { URL(string: baseURL)?.host ?? baseURL }
+
     static func setBaseURL(_ url: String?) {
         let trimmed = url?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if trimmed.isEmpty {
@@ -113,6 +134,82 @@ enum NanoMuseCloud {
         } else {
             UserDefaults.standard.set(trimSlash(trimmed), forKey: Keys.base)
         }
+    }
+
+    // MARK: - Own relay
+
+    /// What a person typed, as the base URL it means: a scheme added when none was given
+    /// (https), trailing slashes gone. Nil when it is not a URL with a host.
+    nonisolated static func normalizedRelay(_ raw: String) -> String? {
+        var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return nil }
+        if !text.contains("://") { text = "https://" + text }
+        guard let url = URL(string: text), let host = url.host, !host.isEmpty, url.scheme != nil else { return nil }
+        var out = text
+        while out.hasSuffix("/") { out.removeLast() }
+        return out
+    }
+
+    /// A host on one's own network, where plain http is allowed. The rule is
+    /// `NanoMuseProxy.isLocal`, the one the proxy's bypass applies too (and Android's `LanOnly`):
+    /// parsed addresses rather than string prefixes, the private, carrier-grade, loopback,
+    /// link-local and ULA ranges, `localhost`, a name without a dot, and the local suffixes
+    /// with Tailscale's `.ts.net` among them.
+    nonisolated static func isPrivateHost(_ host: String) -> Bool {
+        NanoMuseProxy.isLocal(host)
+    }
+
+    /// Why an address cannot be used as the relay, as a sentence; nil when it can.
+    nonisolated static func relayProblem(_ raw: String) -> String? {
+        guard let base = normalizedRelay(raw), let url = URL(string: base), let host = url.host else {
+            return AppLocalized("Enter the server's address, for example https://relay.example.org.")
+        }
+        let scheme = url.scheme?.lowercased() ?? ""
+        if scheme == "https" { return nil }
+        if scheme == "http" {
+            return isPrivateHost(host) ? nil : AppLocalized("Use https unless the server is on your own network.")
+        }
+        return AppLocalized("Enter the server's address, for example https://relay.example.org.")
+    }
+
+    /// Whether `base` answers as a relay: `GET /healthz` with a 2xx. Throws the cloud error otherwise.
+    static func checkRelay(_ base: String) async throws {
+        guard let url = URL(string: base + "/healthz") else {
+            throw CloudError(code: "bad_base", message: "Bad relay address", status: 0)
+        }
+        var request = URLRequest(url: url)
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        request.timeoutInterval = 10
+        let response: URLResponse
+        do {
+            (_, response) = try await session.data(for: request)
+        } catch {
+            throw CloudError(code: "unreachable", message: error.localizedDescription, status: 0)
+        }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(status) else {
+            throw CloudError(code: "http_\(status)", message: "HTTP \(status)", status: status)
+        }
+    }
+
+    // MARK: - Phone numbers
+
+    /// Whether a phone number cannot get a text-message code before the relay is asked: a
+    /// number with a country code other than China's (+86). Bare digits are left to the relay
+    /// (its `phone_region` says the same sentence); an e-mail address never qualifies.
+    nonisolated static func needsEmailInstead(identifier raw: String) -> Bool {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.isEmpty || text.contains("@") { return false }
+        let compact = text.filter { !" -()".contains($0) }
+        guard compact.allSatisfy({ $0.isNumber || $0 == "+" }) else { return false }
+        if compact.hasPrefix("+") { return !compact.hasPrefix("+86") }
+        if compact.hasPrefix("00") { return !compact.hasPrefix("0086") }
+        return false
+    }
+
+    /// The sentence for a number that cannot get a code (also `describe("phone_region")`).
+    nonisolated static var phoneRegionSentence: String {
+        AppLocalized("Text-message codes reach mainland-China numbers only. Use an e-mail address instead.")
     }
 
     /// The provider instance the relay is signed in as, if it still exists.
@@ -124,6 +221,24 @@ enum NanoMuseCloud {
     static var isSignedIn: Bool {
         guard let inst = instance else { return false }
         return !(ProviderKeychainHelper.loadAPIKey(instanceId: inst.id) ?? "").isEmpty
+    }
+
+    /// *Use nanoMuse Cloud models*: the account's models as a source. Signed in and the Cloud
+    /// instance switched on. Off, the account leaves the pickers and the automatic order of
+    /// every slot while the sign-in stays for sync and the hub; the one thing that may still run
+    /// on it is the explicit *Use nanoMuse Cloud this time* (NanoMuseCloudOnce). The one decision
+    /// point: every slot, picker and side call asks this, not `isSignedIn`.
+    static var modelsOn: Bool {
+        guard let inst = instance, inst.isEnabled else { return false }
+        return isSignedIn
+    }
+
+    /// Flip the switch. Upstream's `isEnabled` on the Cloud instance is the stored bit, so a
+    /// chat pinned to a Cloud entry stops at it the same way as for any disabled provider.
+    static func setModelsOn(_ on: Bool) {
+        guard var inst = instance, inst.isEnabled != on else { return }
+        inst.isEnabled = on
+        ProviderConfigStore.shared.updateInstance(inst)
     }
 
     static var account: Account? {
@@ -193,6 +308,10 @@ enum NanoMuseCloud {
         // its public address (`base_url`) is informational.
         let base = baseURL
         let store = ProviderConfigStore.shared
+        // C12: who was here before the key is written — the phone's own set (signed out), or
+        // an account a sign-in reached without a sign-out (nothing of it is deleted without
+        // the sheet's question: it is put aside, as *Keep* would)
+        let before = NanoMuseAccountData.shared.current
 
         // One instance per relay: signing in again on the same phone refreshes the key and
         // keeps the entries and groups that already point at it.
@@ -218,6 +337,7 @@ enum NanoMuseCloud {
             inst = fresh
         }
         UserDefaults.standard.set(inst.id, forKey: Keys.instance)
+        UserDefaults.standard.removeObject(forKey: Keys.ended) // a sign-in answers the sentence (C12)
         // A sign-in that created the account owes the first run a password page (NanoMuseFirstRun).
         if (reply["created"] as? Bool) == true { UserDefaults.standard.set(true, forKey: Keys.fresh) }
         if let region = reply["region"] as? String, !region.isEmpty { UserDefaults.standard.set(region, forKey: "nanomuse.relay.region") }
@@ -225,12 +345,23 @@ enum NanoMuseCloud {
         // The models the relay serves — the same `/v1/models` call every provider gets; the
         // relay includes modalities so a picture model is recognised as one.
         await store.refreshModels(for: inst)
-        provisionDefaults(store: store, instance: inst, models: reply["models"] as? [[String: Any]] ?? [])
+        let menu = reply["models"] as? [[String: Any]] ?? []
+        NanoMuseRelayMenu.store(menu) // the pickers' Cloud group (Settings › Models) reads it without a round trip
+        provisionDefaults(store: store, instance: inst, models: menu)
 
         let parsed = parseAccount(reply)
         account = parsed
+        // C12: the relay's key is this phone's alone — never in iCloud Keychain
+        NanoMuseAccountData.saveRelayKey(apiKey, instanceId: inst.id)
         NanoMuseNudges.shared.absorb(me: reply) // nanoMuse: contract C1 — the star policy rides along
+        // C12: whoever was here is put aside, and this account's own set comes back (or starts empty)
+        let after = NanoMuseAccountData.shared.current
+        if after != before {
+            await NanoMuseAccountData.shared.leave(account: before, keep: true)
+            await NanoMuseAccountData.shared.enter(account: after)
+        }
         await MainActor.run { NanoMuseHub.shared.restart() } // the new key joins the hub
+        NanoMuseSync.shared.accountChanged() // C10: another account's conversations are not this one's to show or push
         return parsed
     }
 
@@ -244,26 +375,44 @@ enum NanoMuseCloud {
             let parsed = parseAccount(me)
             account = parsed
             NanoMuseNudges.shared.absorb(me: me) // nanoMuse: contract C1
+            NanoMuseAllowance.shared.absorb(me: me) // the 80 % heads-up, the region's guidance (contract C11)
             return parsed
         } catch let error as CloudError where error.status == 401 {
             // Revoked elsewhere, or the relay was reset: the provider cannot answer any more.
-            ProviderConfigStore.shared.removeInstance(inst.id)
-            clear()
+            // Nobody on this phone asked, so the account's data is put aside as *Keep* would
+            // and comes back with the next sign-in as the same account (C12). Only
+            // `account_deleted` — the account itself is gone at the relay — leaves nothing to
+            // come back to, and the data goes.
+            let keep = NanoMuseAccountData.keepOnRefusedKey(code: error.code)
+            await forgetLocally(keep: keep)
+            if keep { UserDefaults.standard.set(true, forKey: Keys.ended) }
             return nil
         }
     }
 
-    /// Revoke this phone's key at the relay and take the provider out of the app.
-    static func signOut() async {
-        await MainActor.run { NanoMuseHub.shared.stop() }
-        let store = ProviderConfigStore.shared
-        if let inst = instance {
-            if let key = ProviderKeychainHelper.loadAPIKey(instanceId: inst.id), !key.isEmpty {
-                _ = try? await call("POST", "/v1/auth/sign-out", body: nil, token: key)
-            }
-            store.removeInstance(inst.id)
+    /// Revoke this phone's key at the relay and take the provider out of the app. The account's
+    /// chats, memory, feed, goals and face stay on the phone — put aside for its return — only
+    /// with `keep` (the sign-out sheet's switch, off by default; contract C12).
+    static func signOut(keep: Bool = false) async {
+        NanoMuseHub.shared.stop()
+        if let inst = instance, let key = ProviderKeychainHelper.loadAPIKey(instanceId: inst.id), !key.isEmpty {
+            _ = try? await call("POST", "/v1/auth/sign-out", body: nil, token: key)
         }
+        await forgetLocally(keep: keep)
+    }
+
+    /// The phone forgets the account: the account's data leaves the fixed paths (C12,
+    /// `NanoMuseAccountData.leave` — put aside with `keep`, deleted without), the provider and
+    /// the key go, and the phone's own set comes back. The account's data moves while the
+    /// account is still the signed-in key; the phone's set returns only once the key is gone,
+    /// so nothing made in the gap is filed under the account that left.
+    static func forgetLocally(keep: Bool) async {
+        NanoMuseHub.shared.stop()
+        let account = NanoMuseAccountData.shared.current
+        if !account.isEmpty { await NanoMuseAccountData.shared.leave(account: account, keep: keep) }
+        if let inst = instance { ProviderConfigStore.shared.removeInstance(inst.id) }
         clear()
+        if !account.isEmpty { await NanoMuseAccountData.shared.enter(account: NanoMuseAccountData.local) }
     }
 
     /// A sentence for the person, from the relay's stable error codes.
@@ -277,6 +426,8 @@ enum NanoMuseCloud {
         switch cloud.code {
         case "bad_identifier":
             return AppLocalized("Enter a phone number or an e-mail address.")
+        case "phone_region":
+            return phoneRegionSentence
         case "code_wrong":
             return AppLocalized("That code is not right.")
         case "code_expired":
@@ -287,12 +438,40 @@ enum NanoMuseCloud {
             return AppLocalized("The code could not be sent. Try again in a minute.")
         case "account_disabled":
             return AppLocalized("This account has been disabled.")
+        case "not_invited":
+            return AppLocalized("This relay is private; that address is not on its list.")
         case "bad_key":
             return AppLocalized("This sign-in is no longer valid. Sign in again.")
+        case "account_deleted":
+            return AppLocalized("This account was deleted. Sign in again to start a new one.")
         case "out_of_tokens":
             return AppLocalized("The starter allowance is used up. Add a provider of your own to keep going.")
+        case "allowance_exhausted" where cloud.paused:
+            // relay 0.22: the operator's switch, not use — the same card, another lead
+            return AppLocalized("The free allowance is paused on this relay for now. It is not used up. Add a key of your own or sign in with a plan you already pay for, under Settings → nanoMuse Cloud. Your sign-in, your devices and what is left stay as they are.")
         case "allowance_exhausted":
-            return AppLocalized("The free allowance is used up. Use a key of your own, or invite a friend — both under nanoMuse Cloud in Settings.")
+            return AppLocalized("The free allowance is used up. Use a key of your own, or invite a friend; both are under nanoMuse Cloud in Settings.")
+        case "too_large":
+            return AppLocalized("That message is too large for the model. Shorten it, leave out some attachments, or start a new chat.")
+        case "too_many_in_flight":
+            return AppLocalized("Too many requests at once. Try again shortly.")
+        case "provider_busy":
+            if let s = cloud.retryAfterS, s > 0 {
+                return String(format: AppLocalized("The model provider is busy right now. Try again in %@."), NanoMuseProviderReach.duration(s))
+            }
+            return AppLocalized("The model provider is busy right now. Try again in a moment.")
+        case "locked":
+            return AppLocalized("Too many requests at once. Try again shortly.")
+        case "model_not_offered":
+            return AppLocalized("nanoMuse Cloud no longer offers that model. Pick another under Settings → nanoMuse Cloud.")
+        case "service_paused":
+            return AppLocalized("nanoMuse Cloud is paused by its operator for now; your sign-in and your data are kept. Try again later.")
+        case "sync_paused":
+            return AppLocalized("Conversation sync is paused on this relay for now; what is stored is kept, and your devices keep working on their own.")
+        case "hub_paused":
+            return AppLocalized("The device hub is paused on this relay for now; each device keeps working on its own.")
+        case "upstream":
+            return AppLocalized("nanoMuse Cloud did not answer. Try again in a moment.")
         case "password_wrong":
             return AppLocalized("That password is not right.")
         case "password_required", "no_password":
@@ -302,7 +481,7 @@ enum NanoMuseCloud {
         case "invite_bad":
             return AppLocalized("That invite code is not one we know. Check it, or leave it empty.")
         case "signup_closed":
-            return AppLocalized("Sign-up is paused right now. Try again later, or use a key of your own.")
+            return AppLocalized("Sign-ups are paused on this relay for now. An account that already exists can still sign in.")
         case "daily_cap":
             return AppLocalized("Today's allowance is used up. It resets tomorrow.")
         case "rate_limited":
@@ -310,7 +489,15 @@ enum NanoMuseCloud {
         case "unreachable":
             return AppLocalized("Could not reach nanoMuse Cloud. Check the connection and try again.")
         default:
-            return cloud.message.isEmpty ? AppLocalized("nanoMuse Cloud could not complete the request.") : cloud.message
+            // a code we do not know: the status says what kind of thing it was
+            switch cloud.status {
+            case 413: return AppLocalized("That message is too large for the model. Shorten it, leave out some attachments, or start a new chat.")
+            case 401: return AppLocalized("This sign-in is no longer valid. Sign in again.")
+            case 500...: return AppLocalized("nanoMuse Cloud did not answer. Try again in a moment.")
+            default: break
+            }
+            let bare = cloud.message.isEmpty || cloud.message.hasPrefix("HTTP ")
+            return bare ? AppLocalized("nanoMuse Cloud could not complete the request.") : cloud.message
         }
     }
 
@@ -370,7 +557,8 @@ enum NanoMuseCloud {
             usedToday: int64(tokens["used_today"]),
             dailyCap: int64(tokens["daily_cap"]),
             checkedAt: Date(),
-            unlimited: (tokens["unlimited"] as? Bool) ?? ((tokens["unlimited"] as? NSNumber)?.boolValue ?? false)
+            unlimited: (tokens["unlimited"] as? Bool) ?? ((tokens["unlimited"] as? NSNumber)?.boolValue ?? false),
+            id: account["id"] as? String ?? ""
         )
     }
 
@@ -378,8 +566,11 @@ enum NanoMuseCloud {
         UserDefaults.standard.removeObject(forKey: Keys.instance)
         UserDefaults.standard.removeObject(forKey: Keys.account)
         UserDefaults.standard.removeObject(forKey: Keys.fresh)
+        NanoMuseRelayMenu.forget()
+        NanoMuseAllowance.shared.forget() // the pinned card, the heads-up and the guidance were this account's
         // another account's devices and their connections are not ours to list
         NanoMuseProfileSync.shared.forget()
+        NanoMuseSync.shared.accountChanged() // C10: signed out — the presence of the account that left goes too
     }
 
     private static func trimmed(_ s: String) -> String {
@@ -437,6 +628,8 @@ enum NanoMuseCloud {
         let err = object?["error"] as? [String: Any]
         let code = (err?["code"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "http_\(status)"
         let message = (err?["message"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "HTTP \(status)"
-        throw CloudError(code: code, message: message, status: status)
+        let retry = (err?["retry_after"] as? NSNumber).map { $0.doubleValue }.flatMap { $0 > 0 ? Int(ceil($0)) : nil }
+        let paused = (err?["paused"] as? Bool) ?? ((err?["paused"] as? NSNumber)?.boolValue ?? false)
+        throw CloudError(code: code, message: message, status: status, retryAfterS: retry, paused: paused)
     }
 }

@@ -41,26 +41,29 @@ struct NanoMuseSettingsHomeView: View {
 
     // MARK: Card 1 — the model
 
-    private var defaultGroup: ModelGroup? {
-        guard let id = store.defaultPrimaryGroupId else { return nil }
-        return store.group(for: id)
+    /// The chat slot's line, `<provider> · <model>`, under the card's title.
+    private var chatLine: String? {
+        _ = store.modelGroups
+        _ = store.instances
+        return NanoMuseModelSlots.line(.chat)
     }
 
     private var modelCard: some View {
         NanoMuseCard {
             NavigationLink {
-                ModelGroupsView()
+                NanoMuseModelsView()
             } label: {
                 HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(defaultGroup?.name ?? AppLocalized("No model yet"))
+                        Text(AppLocalized("Models"))
                             .font(.headline)
                             .foregroundStyle(.primary)
                             .lineLimit(1)
-                        Text(defaultGroup == nil ? AppLocalized("Add a provider and pick its models") : AppLocalized("Model Groups"))
+                        Text(chatLine ?? AppLocalized("Add a provider and pick its models"))
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
+                            .truncationMode(.middle)
                     }
                     Spacer(minLength: 8)
                     Text(AppLocalized("Change"))
@@ -164,6 +167,8 @@ struct NanoMuseSettingsHomeView: View {
             NanoMuseRowDivider()
             NanoMuseLinkRow(title: AppLocalized("Data controls")) { NanoMuseDataControlsView() }
             NanoMuseRowDivider()
+            NanoMuseLinkRow(title: AppLocalized("Network")) { NanoMuseNetworkView() }
+            NanoMuseRowDivider()
             NanoMuseLinkRow(title: AppLocalized("Logs")) { LogManagementView() }
         }
     }
@@ -214,29 +219,27 @@ struct NanoMuseSettingsHomeView: View {
 
 /// The project's public pages.
 enum NanoMuseLinks {
-    /// The privacy policy: this fork's own tracked doc, which is the source of truth.
-    /// Fork: never upstream's hosted page. Kept non-optional because `NanoMuseActionRow`
-    /// takes a non-optional URL and force-unwrapping `URL(string: "")` would trap at launch.
-    static let privacy = URL(string: "https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/privacy.md")!
+      /// The policy on the site (docs/privacy.md is its source), as Android's PRIVACY_URL.
+      static let privacy = URL(string: "https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/privacy.md")!
+      /// The own-key guide when the relay sent no address of its own. Empty: no guide link.
+      static let ownKeyDocs = ""
 
-    /// A new GitHub issue with the build and the device filled in (no personal data).
+    /// A new GitHub issue with the build and the device filled in (no personal data): the
+    /// issue form's fields by id (.github/ISSUE_TEMPLATE/bug_report.yml); a bare `body`
+    /// would be dropped on the way to the form.
     static func newIssue() -> URL {
         let info = Bundle.main.infoDictionary
         let version = info?["CFBundleShortVersionString"] as? String ?? "?"
         let build = info?["CFBundleVersion"] as? String ?? "?"
-        let body = """
-        ## What happened
-
-
-        ## Steps
-
-
-        ## Device
-        - nanoMuse \(version) (\(build)), iOS \(UIDevice.current.systemVersion), \(UIDevice.current.model)
-        """
-        var components = URLComponents(string: "https://github.com/nano-muse/nanoMuse/issues/new")!
-        components.queryItems = [URLQueryItem(name: "body", value: body)]
-        return components.url ?? URL(string: "https://github.com/nano-muse/nanoMuse/issues")!
+        var components = URLComponents(string: "https://github.com/zeeshanhaque21/nanoMuse/issues/new")!
+        components.queryItems = [
+            URLQueryItem(name: "template", value: "bug_report.yml"),
+            URLQueryItem(name: "labels", value: "bug,ios"),
+            URLQueryItem(name: "surface", value: "iPhone app"),
+            URLQueryItem(name: "version", value: "\(version) (\(build))"),
+            URLQueryItem(name: "os", value: "iOS \(UIDevice.current.systemVersion), \(UIDevice.current.model)"),
+        ]
+        return components.url ?? URL(string: "https://github.com/zeeshanhaque21/nanoMuse/issues")!
     }
 }
 

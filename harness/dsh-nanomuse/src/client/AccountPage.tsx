@@ -8,19 +8,21 @@
  */
 import { Button, Input } from '@deepseek-ai/dsh-client-ui-primitives'
 import { createElement as h, Fragment, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import { call, errorStyle, muted, row, type CloudStatus, type Translate } from './api.ts'
+import { allowanceInfo, AllowanceWays, type Guidance } from './AllowanceWays.tsx'
+import { call, errorStyle, muted, row, type CloudStatus, type Translate, failureText } from './api.ts'
 import { openLink } from './bridge.ts'
 import { settingsBus } from './bus.ts'
-import { IconCopy, IconGift, IconHeart, IconKey } from './icons.tsx'
+import { IconCopy, IconHeart } from './icons.tsx'
 import { REPO_URL } from './panels.ts'
 import { peekRooms, roomsCall, type NudgeAsk } from './rooms.ts'
+import { starText } from '../nudges.ts'
 
 /** `GET /v1/me`, the parts this page reads (every field optional: an older relay sends fewer). */
 export interface AccountSheet {
   account?: { id?: string; channel?: string; hint?: string; member?: boolean; has_password?: boolean; sessions?: number; signed_in_via?: string; created_at?: number; region?: string }
   /** Where the account is, as the relay sees it (0.1.34): `cn` or `intl`. */
   region?: string
-  spend?: { total?: number; grant?: number; left?: number | null; unlimited?: boolean; warn?: boolean; usd_cny?: number; invite_bonus_cny?: number; invitee_bonus_cny?: number; own_key_docs?: string }
+  spend?: { total?: number; grant?: number; left?: number | null; unlimited?: boolean; warn?: boolean; usd_cny?: number; invite_bonus_cny?: number; invitee_bonus_cny?: number; own_key_docs?: string; guidance?: Guidance }
   usage?: { today?: { by_kind?: UsageRow[] }; total?: { by_kind?: UsageRow[]; by_model?: UsageRow[] } }
   invite?: { code?: string; url?: string; invites?: number; bonus_cny?: number; invitee_bonus_cny?: number; earned_cny?: number }
 }
@@ -45,11 +47,6 @@ export function useCloudConfig(): CloudConfig {
   return config
 }
 
-/** Where the guide for one's own key is when the relay did not say. */
-// The relay tells us its own guide URL; with none configured the button is hidden rather
-// than sending people to a backend this fork does not talk to.
-const OWN_KEY_DOCS = ''
-
 const yuan = (n: number | undefined | null): string => (n === undefined || n === null ? '—' : `¥${n.toFixed(n % 1 === 0 ? 0 : 2)}`)
 const when = (ts: number | null | undefined, locale: string): string => (ts ? new Date(ts * 1000).toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' }) : '—')
 
@@ -64,8 +61,8 @@ const when = (ts: number | null | undefined, locale: string): string => (ts ? ne
  * thank-you, never a bill.
  */
 export type StarMoment = 'signed_in' | 'new_look' | 'exhausted' | 'goal_done'
-/** The words for an ask the host granted. */
-export function nudgeText(t: Translate, ask: NudgeAsk): string {
+/** The app's own words for an ask the host granted, by its moment. */
+function momentText(t: Translate, ask: NudgeAsk): string {
   switch (ask.moment) {
     case 'signed_in': return t('starSignedIn')
     case 'new_look': return t('starNewLook')
@@ -74,6 +71,14 @@ export function nudgeText(t: Translate, ask: NudgeAsk): string {
     case 'tasks': return ask.n === 1 ? t('ndTasksOne') : t('ndTasks', { n: ask.n ?? 0 })
     case 'days_used': return ask.n === 7 ? t('ndWeek') : ask.n === 30 ? t('ndMonth') : t('ndDays', { n: ask.n ?? 0 })
   }
+}
+/**
+ * The card's body sentence: the relay's, when its policy carries one (`star.text_zh` for a
+ * Chinese UI, else `star.text`), else the app's own for the moment. The title and the buttons
+ * are always the app's.
+ */
+export function nudgeText(t: Translate, ask: NudgeAsk): string {
+  return starText(peekRooms().nudges.policy, t('langTag') === 'zh', momentText(t, ask))
 }
 /** Off to GitHub (the policy's page), and no more asking anywhere. */
 export function openStar(url?: string): void {
@@ -112,7 +117,8 @@ export function StarNudgeOnce({ t, moment, text, due = true }: { t: Translate; m
     return () => { alive = false }
   }, [due, moment])
   if (!ask) return null
-  return h(StarNudge, { t, text: text ?? nudgeText(t, ask), onDone: () => setAsk(null) })
+  // the relay's sentence first, then the caller's, then the moment's own
+  return h(StarNudge, { t, text: starText(peekRooms().nudges.policy, t('langTag') === 'zh', text ?? momentText(t, ask)), onDone: () => setAsk(null) })
 }
 
 // ---- the page ------------------------------------------------------------------------------
@@ -145,7 +151,7 @@ export function AccountPage({ t, status, locale, onEnded }: AccountPageProps): R
       setSheet(me)
       setSessions(s.sessions ?? [])
       setEvents(e.events ?? [])
-    }).catch((err: unknown) => { if (alive) setError(t('failed', { message: (err as Error).message })) })
+    }).catch((err: unknown) => { if (alive) setError(failureText(t, err)) })
     return () => { alive = false }
   }, [tick, status.account?.id, t])
 
@@ -191,7 +197,6 @@ function Allowance({ t, sheet, member }: { t: Translate; sheet: AccountSheet; me
     low ? h(WaysOn, { t, exhausted, sheet }) : null)
 }
 
-/** When the pool is low or spent: your own key, an invitation, and — once — a star. */
 /** Mainland China when the UI is Chinese, the account signed in with a phone, or the relay says `cn` (C5). */
 export function mainland(t: Translate, sheet: AccountSheet): boolean {
   const region = sheet.region ?? sheet.account?.region
@@ -200,66 +205,9 @@ export function mainland(t: Translate, sheet: AccountSheet): boolean {
   return t('langTag') === 'zh' || sheet.account?.channel === 'phone'
 }
 
-const BAILIAN_URL = 'https://bailian.console.aliyun.com/'
-const OPENROUTER_URL = 'https://openrouter.ai/keys'
-
+/** When the pool is low or spent: the ways on, from what the relay sends (C11), under the pool bar. */
 function WaysOn({ t, exhausted, sheet }: { t: Translate; exhausted: boolean; sheet: AccountSheet }): ReactNode {
-  const bonus = sheet.spend?.invite_bonus_cny ?? sheet.invite?.bonus_cny ?? 5
-  // the allowance used up: the host decides whether the star row is due (C1 `exhausted`)
-  const [star, setStar] = useState(false)
-  const asked = useRef(false)
-  useEffect(() => {
-    if (!exhausted || asked.current) return
-    asked.current = true
-    let alive = true
-    roomsCall<{ ask: NudgeAsk | null }>('nudges/ask', { moment: 'exhausted' })
-      .then((r) => { if (alive && r.ask) setStar(true) })
-      .catch(() => undefined)
-    return () => { alive = false }
-  }, [exhausted])
-  const cn = mainland(t, sheet)
-  // The relay's own guide URL; empty when the operator configured none.
-  const ownKeyDocs = sheet.spend?.own_key_docs || OWN_KEY_DOCS
-  // the provider that suits where the person is comes first; the other stays one line below
-  const bailian = h('div', { className: 'nm-way', key: 'bailian' },
-    h('span', { className: 'nm-way-icon' }, h(IconKey, { size: 15 })),
-    h('div', { className: 'nm-way-main' },
-      h('div', { className: 'nm-way-title' }, t('acWayBailian')),
-      h('div', { className: 'nm-way-sub' }, cn ? t('acWayBailianSub') : t('acWayBailianAbroad')),
-      h('div', { style: row },
-        h('button', { type: 'button', className: `nm-pill nm-pill-sm${cn ? '' : ' nm-pill-ghost'}`, onClick: () => { settingsBus.openSection?.('models') } }, t('acWayKeyGo')),
-        h('button', { type: 'button', className: 'nm-pill nm-pill-ghost nm-pill-sm', onClick: () => openLink(BAILIAN_URL) }, t('acWayGetKey')))))
-  const openrouter = h('div', { className: 'nm-way', key: 'openrouter' },
-    h('span', { className: 'nm-way-icon' }, h(IconKey, { size: 15 })),
-    h('div', { className: 'nm-way-main' },
-      h('div', { className: 'nm-way-title' }, t('acWayOpenRouter')),
-      h('div', { className: 'nm-way-sub' }, cn ? t('acWayOpenRouterCn') : t('acWayOpenRouterSub')),
-      h('div', { style: row },
-        h('button', { type: 'button', className: `nm-pill nm-pill-sm${cn ? ' nm-pill-ghost' : ''}`, onClick: () => { settingsBus.openSection?.('models') } }, t('acWayKeyGo')),
-        h('button', { type: 'button', className: 'nm-pill nm-pill-ghost nm-pill-sm', onClick: () => openLink(OPENROUTER_URL) }, t('acWayGetKey')))))
-  return h('div', { className: 'nm-ways' },
-    h('div', { className: 'nm-ways-lead' }, exhausted ? t('acExhausted') : t('acNearlyOut')),
-    cn ? bailian : openrouter,
-    cn ? openrouter : bailian,
-    h('div', { className: 'nm-way' },
-      h('span', { className: 'nm-way-icon' }, h(IconKey, { size: 15 })),
-      h('div', { className: 'nm-way-main' },
-        h('div', { className: 'nm-way-title' }, t('acWayKey')),
-        h('div', { className: 'nm-way-sub' }, t('acWayKeySub')),
-        h('div', { style: row },
-          ownKeyDocs ? h('button', { type: 'button', className: 'nm-pill nm-pill-ghost nm-pill-sm', onClick: () => openLink(ownKeyDocs) }, t('acWayKeyGuide')) : null))),
-    h('div', { className: 'nm-way' },
-      h('span', { className: 'nm-way-icon' }, h(IconGift, { size: 15 })),
-      h('div', { className: 'nm-way-main' },
-        h('div', { className: 'nm-way-title' }, t('acWayInvite', { bonus: bonus.toFixed(0) })),
-        h('div', { className: 'nm-way-sub' }, t('acWayInviteSub')))),
-    exhausted && star
-      ? h('div', { className: 'nm-way' },
-          h('span', { className: 'nm-way-icon' }, h(IconHeart, { size: 15 })),
-          h('div', { className: 'nm-way-main' },
-            h('div', { className: 'nm-way-title' }, t('acWayStar')),
-            h('div', { style: row }, h('button', { type: 'button', className: 'nm-pill nm-pill-ghost nm-pill-sm', onClick: () => { openStar(); setStar(false) } }, t('starAction')))))
-      : null)
+  return h(AllowanceWays, { t, info: allowanceInfo(sheet), sheet, exhausted, inSettings: true })
 }
 
 // ---- the invite ----------------------------------------------------------------------------
@@ -326,7 +274,7 @@ function Password({ t, has, onChanged }: { t: Translate; has: boolean; onChanged
     setError(undefined)
     void call('password', { password: next, ...(has ? { current } : {}) })
       .then(() => { setOpen(false); setCurrent(''); setNext(''); setDone(next ? t('acPasswordSaved') : t('acPasswordRemoved')); onChanged() })
-      .catch((err: unknown) => setError(t('failed', { message: (err as Error).message })))
+      .catch((err: unknown) => setError(failureText(t, err)))
       .finally(() => setBusy(false))
   }
   if (!open) {
@@ -398,7 +346,7 @@ function Danger({ t, onEnded }: { t: Translate; onEnded(status: CloudStatus): vo
     if (!window.confirm(t('acDeleteConfirm2'))) return
     setBusy(true)
     setError(undefined)
-    void call<CloudStatus>('delete-account', {}).then(onEnded).catch((err: unknown) => setError(t('failed', { message: (err as Error).message }))).finally(() => setBusy(false))
+    void call<CloudStatus>('delete-account', {}).then(onEnded).catch((err: unknown) => setError(failureText(t, err))).finally(() => setBusy(false))
   }
   return h('div', { className: 'nm-card' },
     h('div', { className: 'nm-row' },

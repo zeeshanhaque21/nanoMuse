@@ -26,13 +26,39 @@ addressed to another device (``Thread.device``) and chats another device opened 
 (``Thread.remote_from``) are not synced — the other device has the same conversation as
 its own.
 
+**Main first** (C9, relay 0.20). By default only the main conversation syncs: pushes send
+``kind: main`` alone and pulls ask for ``scope=main``. *Settings → Data controls → Also sync
+side chats* (``side_chats`` here, default from ``[sync] side_chats``) turns the side chats
+on for this device: they are pushed too, pulls ask for ``scope=all``, and the moment it is
+turned on one pull from ``since=0&scope=all&tail=300`` brings the other devices' side chats
+(idempotent by ``mid`` / ``cid``). Off again stops pushing and pulling them; what was synced
+stays where it is. A fresh device's first pull asks for the **tail** — the newest 300
+messages and their conversations — so the chat is on screen in seconds; older history stays
+on the devices that wrote it. **Presence**: a turn that starts on a synced conversation
+posts ``working: true`` to the relay right after the person's message went up, and
+``working: false`` after the assistant's text; the hub's ``working`` frames from the other
+devices land in a small map (:meth:`working_view`) the web app reads, and leave it when the
+reply arrives, when the device says done, or ten minutes after ``at``. Presence is best
+effort: never retried, never awaited on the turn's path, errors at debug.
+
+**Whose conversations** (C10). Every local conversation that was ever pushed to, or pulled
+from, an account carries that account's ``id`` (``GET /v1/me`` → ``account.id``) as its
+``owner`` in ``sync.json``; one created while signed out and never synced has none. Signed
+in as B, the list shows B's and the ownerless ones; A's stay on disk, hidden, and are never
+pushed into B's account — an ownerless one becomes B's on its first push. Signed out,
+everything local is shown. When the signed-in account changes, the account-scoped state
+starts over: the cursor goes to 0 (a fresh ``tail`` pull), the presence map and the hub's
+device list are cleared, and the main chat — one conversation per account on the relay — is
+re-homed: the old account's main chat is kept as a hidden thread (``main_of``) and the new
+account's own comes back when it has one, else a fresh one begins. Mappings are kept, so
+switching back shows everything again. Sign-out alone clears nothing but the key.
+
 Nothing here reaches the network when the account is signed out; ``sync_off`` from the
 relay flips the local switch, ``bad_key`` pauses until the next sign-in."""
 
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import time
 import uuid
@@ -52,6 +78,10 @@ PUSH_DELAY_S = 2.0
 PULL_EVERY_S = 60.0
 BATCH = 200
 PAGE = 500
+# the first pull of a fresh device: the newest messages of the scope, not the whole store (C9)
+TAIL = 300
+# a `working: true` without a `false` stands this long (the device may have lost its network)
+WORKING_TTL_S = 10 * 60
 # how many POSTs one push may make before it lets go (a brand-new device with a long history)
 MAX_ROUNDS = 50
 
@@ -85,8 +115,15 @@ class ConversationSync:
             "account_id": "",
             "cursor": 0,
             "enabled": bool(svc.settings.cloud.sync),
+            # C9: this device's side chats too (and the other devices'); off = main only
+            "side_chats": bool(svc.settings.sync.side_chats),
             "cids": {},  # thread id → cid
             "titles": {},  # thread id → the title last pushed
+            # C10: thread id → the account (`account.id`) it was synced with; absent = none
+            "owners": {},
+            # C10: account id → the thread that holds that account's main chat while another
+            # account is signed in (hidden; restored as `main` when the account comes back)
+            "mains": {},
         }
         self._load()
         self.client = SyncClient(svc.hub.cloud)
@@ -95,6 +132,13 @@ class ConversationSync:
         self._timer: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
         self._tasks: set[asyncio.Task[Any]] = set()
+        # set by stop(): nothing of this engine talks to the relay after that
+        self._stopped = False
+        # presence (C9): cid → {thread, device, device_name, at} for the other devices' turns
+        # under way; a frame says so, a reply or ten minutes clears it
+        self.working: dict[str, dict[str, Any]] = {}
+        # a one-off pull from zero waiting its turn (side chats just turned on)
+        self._pull_from_zero = False
         # a 401 from the relay: nothing more until the next sign-in
         self._paused = False
         self._applying = False
@@ -113,10 +157,10 @@ class ConversationSync:
         except (OSError, ValueError):
             return
         if isinstance(data, dict):
-            for key in ("account_id", "cursor", "enabled"):
+            for key in ("account_id", "cursor", "enabled", "side_chats"):
                 if key in data:
                     self.state[key] = data[key]
-            for key in ("cids", "titles"):
+            for key in ("cids", "titles", "owners", "mains"):
                 if isinstance(data.get(key), dict):
                     self.state[key] = {str(k): str(v) for k, v in data[key].items()}
 
@@ -129,6 +173,14 @@ class ConversationSync:
     @property
     def enabled(self) -> bool:
         return bool(self.state.get("enabled", True))
+
+    @property
+    def side_chats(self) -> bool:
+        return bool(self.state.get("side_chats", False))
+
+    @property
+    def scope(self) -> str:
+        return "all" if self.side_chats else "main"
 
     @property
     def cursor(self) -> int:
@@ -149,8 +201,47 @@ class ConversationSync:
                 return self.svc.threads.get(tid)
         return None
 
+    # ------------------------------------------------------------------ whose (C10)
+    @property
+    def account_id(self) -> str:
+        """The account the last sign-in named (``account.id``); "" before any."""
+        return str(self.state.get("account_id") or "")
+
+    def owner_of(self, thread_id: str) -> str:
+        """The account a conversation was synced with, "" when none (never synced)."""
+        return str(self.state["owners"].get(thread_id) or "")
+
+    def visible(self, thread: Thread) -> bool:
+        """Shown in the list (C10): signed in, the current account's and the ownerless ones;
+        signed out, everything. Another account's main chat (``main_of``) is that account's."""
+        if not self.svc.hub.signed_in or not self.account_id:
+            return True
+        if thread.main_of:
+            return thread.main_of == self.account_id
+        owner = self.owner_of(thread.id)
+        return not owner or owner == self.account_id
+
+    def _mine(self, thread: Thread) -> bool:
+        """May move for the signed-in account: its own, or not yet anyone's (C10 rule 3)."""
+        if thread.main_of and thread.main_of != self.account_id:
+            return False
+        owner = self.owner_of(thread.id)
+        return not owner or not self.account_id or owner == self.account_id
+
+    def _adopt(self, thread_id: str) -> None:
+        """The conversation is the signed-in account's from now on (first push or pull)."""
+        if self.account_id and self.state["owners"].get(thread_id) != self.account_id:
+            self.state["owners"][thread_id] = self.account_id
+            self._save()
+
     def _eligible(self, thread: Thread) -> bool:
-        return not thread.device and not thread.remote_from
+        """Synced from here: not a chat for or from another device, the signed-in account's
+        or nobody's yet (C10), and — with side chats off (C9) — the main chat only."""
+        if thread.device or thread.remote_from or thread.main_of:
+            return False
+        if not self._mine(thread):
+            return False
+        return self.side_chats or thread.id == MAIN_THREAD
 
     def _cid_for(self, thread: Thread) -> str:
         cid = self.cid_of(thread.id)
@@ -158,23 +249,35 @@ class ConversationSync:
             cid = new_cid()
             self.state["cids"][thread.id] = cid
             self._save()
+        self._adopt(thread.id)
         return cid
 
     def view(self) -> dict[str, Any]:
         """What the Data controls page shows: the switch, whether it can be used, the cursor."""
         return {
             "enabled": self.enabled,
+            "side_chats": self.side_chats,
             "available": self.svc.hub.signed_in,
             "paused": self._paused,
             "cursor": self.cursor,
             "last_pull_at": self.last_pull_at,
             "last_push_at": self.last_push_at,
             "error": self.last_error,
+            "working": self.working_view(),
         }
+
+    def working_view(self) -> list[dict[str, Any]]:
+        """The other devices' turns under way (C9): ``[{thread, cid, device, device_name,
+        at}]``, ``at`` in Unix seconds, entries older than ten minutes dropped."""
+        cutoff = int(time.time()) - WORKING_TTL_S
+        for cid in [c for c, w in self.working.items() if int(w.get("at") or 0) < cutoff]:
+            del self.working[cid]
+        return [dict(w) for w in self.working.values()]
 
     # ------------------------------------------------------------------ lifecycle
     def start(self) -> None:
         """After the hub is up: a first pull, a push of what is new, and the minute timer."""
+        self._stopped = False
         if self._timer is None or self._timer.done():
             self._timer = asyncio.create_task(self._tick(), name="sync-timer")
         if self.active:
@@ -182,11 +285,20 @@ class ConversationSync:
             self.push_soon(delay=PUSH_DELAY_S)
 
     async def stop(self) -> None:
-        for t in (self._timer, self._push_task, self._pull_task):
-            if t is not None and not t.done():
-                t.cancel()
-                with contextlib.suppress(asyncio.CancelledError, Exception):
-                    await t
+        """Cancel every task of the engine — the timer, the push and the pull, and the one-off
+        presence and delete requests — and wait until each has ended, so that no request to
+        the relay is still open (or about to open) when the cloud client closes after this.
+        A task created on the way out (a turn ending as the server stops) is refused."""
+        self._stopped = True
+        tasks = [
+            t
+            for t in (self._timer, self._push_task, self._pull_task, *self._tasks)
+            if t is not None and not t.done()
+        ]
+        for t in tasks:
+            t.cancel()
+        if tasks:
+            await asyncio.wait(tasks)
 
     async def _tick(self) -> None:
         while True:
@@ -195,16 +307,65 @@ class ConversationSync:
                 self.pull_soon()
 
     def account_changed(self, account_id: str) -> None:
-        """Signed in (again): a different account starts from cursor 0 with fresh cids."""
+        """Signed in (again). A different account (C10 rule 4) starts from cursor 0 — a fresh
+        tail pull — with the presence map and the hub's device list cleared and the main chat
+        re-homed; the mappings of the account that was here before are kept, so switching
+        back shows its conversations again."""
         self._paused = False
         self.last_error = ""
-        if account_id and account_id != str(self.state.get("account_id") or ""):
-            self.state.update(account_id=account_id, cursor=0, cids={}, titles={})
-            self._clear_marks()
+        previous = self.account_id
+        if account_id and account_id != previous:
+            self.state.update(account_id=account_id, cursor=0)
+            self.working.clear()
             self._save()
+            self._rehome_main(previous, account_id)
+            if previous:
+                logger.info("sync: a different account signed in; its conversations are shown")
         if self.active:
             self.pull_soon()
             self.push_soon()
+
+    def _rehome_main(self, previous: str, account_id: str) -> None:
+        """The main chat is one conversation per account (C8), so a new account cannot keep
+        the old one's: the old main chat becomes a hidden thread marked ``main_of`` and the
+        new account's own comes back when it has one, else a fresh one begins. A main chat
+        nobody has synced yet stays — it is nobody's and joins the account on its first push."""
+        main = self.svc.threads.get(MAIN_THREAD)
+        if main is None:
+            return
+        owner = self.owner_of(MAIN_THREAD)
+        restore = str(self.state["mains"].get(account_id) or "")
+        if restore not in self.svc.threads:
+            restore = ""
+        if not restore and (not owner or owner == account_id):
+            # the main chat is this account's, or nobody's yet (it joins on its first push)
+            return
+        if not owner:
+            # text written under the previous account and never synced: it stays with that
+            # account rather than landing in the new one's main chat
+            owner = previous
+        has_text = any(ev.get("type") in ("user", "assistant") for ev in main.timeline.events)
+        archived = self.svc.rehome_main(owner, restore or None, keep=bool(owner and has_text))
+        if archived is not None:
+            # the mappings follow the threads: the old main chat keeps its cid and owner
+            # under its new id, the restored one takes `main` back
+            for key in ("cids", "titles", "owners"):
+                value = self.state[key].pop(MAIN_THREAD, None)
+                if value is not None:
+                    self.state[key][archived.id] = value
+            self.state["owners"][archived.id] = owner
+            self.state["mains"][owner] = archived.id
+        else:
+            for key in ("cids", "titles", "owners"):
+                self.state[key].pop(MAIN_THREAD, None)
+        if restore:
+            self.state["mains"].pop(account_id, None)
+            for key in ("cids", "titles", "owners"):
+                value = self.state[key].pop(restore, None)
+                if value is not None:
+                    self.state[key][MAIN_THREAD] = value
+            self.state["owners"][MAIN_THREAD] = account_id
+        self._save()
 
     def signed_out(self) -> None:
         """The key is gone: nothing more until the next sign-in; what is local stays."""
@@ -215,9 +376,11 @@ class ConversationSync:
 
     def _clear_marks(self) -> None:
         """Every synced event is unsynced again: the next push sends it all (a new account, the
-        switch turned back on, the main chat re-homed)."""
+        switch turned back on, the main chat re-homed). Another account's rows are left as
+        they are (C10): they are not going anywhere from here."""
         for thread in self.svc.threads.values():
-            self._clear_thread_marks(thread)
+            if self._mine(thread):
+                self._clear_thread_marks(thread)
 
     @staticmethod
     def _clear_thread_marks(thread: Thread) -> None:
@@ -254,6 +417,21 @@ class ConversationSync:
                     t.cancel()
         return {**self.view(), "relay": relay}
 
+    def set_side_chats(self, on: bool) -> dict[str, Any]:
+        """Data controls → *Also sync side chats* (C9). On: this device's side chats go up
+        (oldest first, with the next push) and one pull from zero with ``scope=all&tail=300``
+        brings the other devices'. Off: they stop moving; what was synced stays."""
+        on = bool(on)
+        if on == self.side_chats:
+            return self.view()
+        self.state["side_chats"] = on
+        self._save()
+        if on and self.active:
+            self._pull_from_zero = True
+            self.pull_soon()
+            self.push_soon(delay=0.5)
+        return self.view()
+
     async def relay_state(self) -> dict[str, Any] | None:
         """The relay's own view (counts, limits), or None when it cannot be asked."""
         if not self.svc.hub.signed_in:
@@ -279,13 +457,46 @@ class ConversationSync:
     # ------------------------------------------------------------------ hooks from the service
     def message_sent(self, thread: Thread) -> None:
         """The person's message is on the timeline: it goes up now (C8, real time), not
-        when the turn ends."""
+        when the turn ends — and right after it, ``working: true`` (C9)."""
         if self.active and self._eligible(thread):
             self.push_soon(delay=0.0)
+            self._working_soon(thread, True)
 
     def turn_finished(self, thread: Thread) -> None:
         if self.active and self._eligible(thread):
             self.push_soon(delay=PUSH_DELAY_S)
+            self._working_soon(thread, False)
+
+    def _working_soon(self, thread: Thread, working: bool) -> None:
+        """Presence to the relay once the push it belongs to is through — so the
+        conversation exists there and carries the id it ended up with. Off the turn's path,
+        never retried, errors at debug."""
+        if self._stopped:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self._keep(loop.create_task(self._send_working(thread, working), name="sync-working"))
+
+    async def _send_working(self, thread: Thread, working: bool) -> None:
+        for _ in range(3):  # a push rescheduled under us: wait for the one that replaced it
+            push = self._push_task
+            if push is None or push.done():
+                break
+            # wait for the push without taking on its fate: a cancelled push (rescheduled, or
+            # stop() on the way) must not read as this task being cancelled — and when this
+            # task is the one cancelled, that ends it here rather than letting it go on to
+            # open a connection to the relay while the engine is stopping
+            await asyncio.wait({push})
+        cid = self.cid_of(thread.id)
+        if not cid or not self.active or self._stopped:
+            return
+        self.client.cloud.api_key = self.svc.hub._key()
+        try:
+            await self.client.working(cid, working, self.svc.hub.device_id)
+        except Exception as exc:  # noqa: BLE001 — presence is a hint, never worth a retry
+            logger.debug("sync: working={} not delivered: {}", working, exc)
 
     def thread_changed(self, thread: Thread) -> None:
         """Created or renamed: push now (a rename is one small request)."""
@@ -295,8 +506,20 @@ class ConversationSync:
     def thread_deleted(self, thread_id: str) -> None:
         cid = self.state["cids"].pop(thread_id, None)
         self.state["titles"].pop(thread_id, None)
+        owner = self.state["owners"].pop(thread_id, None)
+        if owner and self.state["mains"].get(owner) == thread_id:
+            del self.state["mains"][owner]
         self._save()
-        if cid and self.active and not self._applying:
+        for c in [c for c, w in self.working.items() if w.get("thread") == thread_id]:
+            del self.working[c]
+        # a side chat with side chats off: nothing of it moves any more, its copy elsewhere stays
+        if (
+            cid
+            and self.active
+            and not self._stopped
+            and not self._applying
+            and (self.side_chats or thread_id == MAIN_THREAD)
+        ):
             try:
                 loop = asyncio.get_running_loop()
             except RuntimeError:
@@ -304,11 +527,57 @@ class ConversationSync:
             self._keep(loop.create_task(self._delete_remote_conversation(cid), name="sync-delete"))
 
     def on_frame(self, frame: dict[str, Any]) -> None:
-        """The hub says another device pushed: pull when our cursor is behind."""
+        """The hub says another device pushed: pull when our cursor is behind. Or (C9) that
+        a turn started or ended there: the presence map and the web app hear it."""
         if str(frame.get("from") or "") == self.svc.hub.device_id:
+            return
+        if frame.get("type") == "working":
+            self._apply_working(frame)
             return
         if int(frame.get("cursor") or 0) > self.cursor and self.active:
             self.pull_soon()
+
+    def _apply_working(self, frame: dict[str, Any]) -> None:
+        cid = str(frame.get("cid") or "")
+        if not cid:
+            return
+        thread = self.thread_of(cid)
+        if thread is None or not self._eligible(thread):
+            return
+        device = str(frame.get("from") or "")
+        at = int(frame.get("at") or time.time())
+        if frame.get("working"):
+            self.working[cid] = {
+                "thread": thread.id,
+                "cid": cid,
+                "device": device,
+                "device_name": str(frame.get("device_name") or ""),
+                "at": at,
+            }
+        else:
+            current = self.working.get(cid)
+            # another device's `true` stands: the one that finished is not the one working
+            if current is None or (device and current.get("device") != device):
+                return
+            del self.working[cid]
+        self.svc.bus.publish(
+            {
+                "kind": "working",
+                "thread": thread.id,
+                "cid": cid,
+                "device": device,
+                "device_name": str(frame.get("device_name") or ""),
+                "working": bool(frame.get("working")),
+                "at": at,
+            }
+        )
+
+    def _clear_working(self, cid: str, device: str) -> None:
+        """The reply from that device arrived: its line goes."""
+        current = self.working.get(cid)
+        if current is None or current.get("device") != device:
+            return
+        self._apply_working({"cid": cid, "from": device, "working": False, "at": time.time()})
 
     def _keep(self, task: asyncio.Task[Any]) -> None:
         self._tasks.add(task)
@@ -323,8 +592,12 @@ class ConversationSync:
                 self._note_error(exc)
 
     # ------------------------------------------------------------------ scheduling
-    def push_soon(self, delay: float = PUSH_DELAY_S) -> None:
-        if not self.active:
+    def push_soon(self, delay: float | None = None) -> None:
+        """Schedule a push ``delay`` seconds from now (``PUSH_DELAY_S`` by default, read when
+        the push is scheduled so a test can shorten it)."""
+        if delay is None:
+            delay = PUSH_DELAY_S
+        if not self.active or self._stopped:
             return
         try:
             loop = asyncio.get_running_loop()
@@ -358,7 +631,7 @@ class ConversationSync:
             delay, self._push_again = self._push_again, None
 
     def pull_soon(self) -> None:
-        if not self.active:
+        if not self.active or self._stopped:
             return
         if self._pull_task is not None and not self._pull_task.done():
             return
@@ -546,8 +819,23 @@ class ConversationSync:
     async def _pull_locked(self) -> int:
         self.client.cloud.api_key = self.svc.hub._key()
         applied = 0
+        # C9: a fresh device (cursor 0) asks for the tail of its scope, not the whole store;
+        # side chats just turned on ask once more from zero, for everything, as a tail too
+        from_zero = self._pull_from_zero or self.cursor == 0
+        self._pull_from_zero = False
         for _page in range(MAX_ROUNDS):
-            out = await self.client.changes(self.cursor, PAGE)
+            if from_zero:
+                out = await self.client.changes(0, PAGE, scope=self.scope, tail=TAIL)
+                from_zero = False
+                skipped = int(out.get("skipped") or 0)
+                if skipped:
+                    logger.info(
+                        "sync: the newest {} messages pulled; {} older stay on the relay",
+                        TAIL,
+                        skipped,
+                    )
+            else:
+                out = await self.client.changes(self.cursor, PAGE, scope=self.scope)
             # The page's conversations first, then its messages, each in seq order: a rename
             # puts a conversation's seq above its messages, and the relay sends every
             # message's conversation along with the page so none of them is an orphan.
@@ -582,7 +870,14 @@ class ConversationSync:
         if not cid:
             return
         kind = str(row.get("kind") or "side")
+        if kind != "main" and not self.side_chats:
+            # C9: side chats stay where they were written; a row that still arrives (an
+            # older relay without `scope`) is left alone, as is a copy already here
+            return
         thread = self.thread_of(cid)
+        if thread is not None and not self._mine(thread):
+            # another account's conversation happens to carry this id: not ours to touch
+            return
         if row.get("deleted"):
             if thread is None:
                 return
@@ -610,6 +905,7 @@ class ConversationSync:
                 self.state["titles"][MAIN_THREAD] = main.title
                 self._clear_thread_marks(main)
                 self._save()
+                self._adopt(MAIN_THREAD)
             return
         if thread is not None:
             if title and title != thread.title:
@@ -628,6 +924,7 @@ class ConversationSync:
         self.state["cids"][created.id] = cid
         self.state["titles"][created.id] = created.title
         self._save()
+        self._adopt(created.id)
         self.svc._save_index()
         self.svc.bus.publish({"kind": "thread", "thread": created.meta()})
 
@@ -697,6 +994,9 @@ class ConversationSync:
         # local event with the same second stays in front — C8: ties, local first)
         thread.timeline.events.sort(key=lambda e: str(e.get("ts") or ""))
         thread.updated_at = max(thread.updated_at, ev["ts"])
+        if role == "assistant" and device:
+            # the reply is here: that device's "working…" line goes (C9)
+            self._clear_working(cid, device)
         if not thread.busy:
             # the agent reads it as history on its next turn here
             msg = Message.user(text) if role == "user" else Message.assistant(text)

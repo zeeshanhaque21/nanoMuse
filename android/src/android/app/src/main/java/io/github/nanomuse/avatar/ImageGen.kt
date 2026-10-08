@@ -62,7 +62,12 @@ object ImageGen {
             .build()
     }
 
-    /** API-key providers that speak the OpenAI images API (OpenAI itself, xAI, OpenRouter, any custom base). */
+    /**
+     * API-key providers that speak the OpenAI images API (OpenAI itself, xAI, OpenRouter, any
+     * custom base) — and, of the vendors the catalogue knows, only those with image models
+     * (contract C11, [io.github.nanomuse.cloud.Capabilities]): a DeepSeek or Groq key draws
+     * nothing, and a ChatGPT plan signed in through the Codex OAuth is chat and vision only.
+     */
     fun eligibleInstances(context: Context): List<ProviderInstance> {
         val app = context.applicationContext as? MinisApp ?: return emptyList()
         val repo = app.providerRepositoryOrNull ?: return emptyList()
@@ -71,9 +76,13 @@ object ImageGen {
                 ProviderType.openAI, ProviderType.openAIResponses, ProviderType.openRouter, ProviderType.xAI -> true
                 ProviderType.anthropic, ProviderType.gemini, ProviderType.kimiCode, ProviderType.antigravity, ProviderType.unsupported -> false
                 else -> inst.customBaseURL != null
-            }
+            } && io.github.nanomuse.cloud.Capabilities.allows(context, inst, io.github.nanomuse.cloud.ProviderCatalogue.IMAGE)
         }
     }
+
+    /** No configured provider can draw: the one sentence that says so (C11), or null when one can. */
+    fun unavailableLine(context: Context): String? =
+        if (eligibleInstances(context).isEmpty()) io.github.nanomuse.cloud.Capabilities.unavailableLine(context, io.github.nanomuse.cloud.ProviderCatalogue.IMAGE) else null
 
     /**
      * Model entries of [instance] that draw: the catalogue says so (`image` among the output
@@ -116,11 +125,19 @@ object ImageGen {
         val ids = imageEntries(context, instance).map { it.model.id }.distinct()
         val undated = ids.filterNot { DATED.containsMatchIn(it) }.toSet()
         val shown = ids.filter { id -> !DATED.containsMatchIn(id) || DATED.replace(id, "") !in undated }
-        val rec = recommendedModel(instance)
+        val rec = recommendedModel(context, instance)
         return if (rec in shown) listOf(rec) + shown.filterNot { it == rec } else shown
     }
 
     private val DATED = Regex("-\\d{4}-\\d{2}-\\d{2}$")
+
+    /**
+     * The model nanoMuse would pick for [instance]: the catalogue's `defaults.image` for its
+     * vendor (0.1.41), else the host's known default. Empty when neither knows the host.
+     */
+    fun recommendedModel(context: Context, instance: ProviderInstance): String =
+        io.github.nanomuse.models.ModelSlots.defaultOf(context, instance, io.github.nanomuse.models.ModelSlots.Slot.IMAGE)
+            ?: recommendedModel(instance)
 
     /** The model nanoMuse would pick on this host, list or no list. Empty when the host is unknown. */
     fun recommendedModel(instance: ProviderInstance): String {
@@ -142,7 +159,7 @@ object ImageGen {
      */
     fun suggestedModel(context: Context, instance: ProviderInstance): String {
         val available = availableModels(context, instance)
-        val rec = recommendedModel(instance)
+        val rec = recommendedModel(context, instance)
         return when {
             available.isEmpty() -> rec
             rec in available -> rec
@@ -159,13 +176,29 @@ object ImageGen {
             else -> "https://api.openai.com/v1"
         }
 
-    fun endpoint(context: Context): Endpoint? {
+    /**
+     * The image model: the one chosen (Settings → Models, or → Image & video models); with
+     * nothing chosen, in the Models page's order (0.1.41, [io.github.nanomuse.models.SlotOrder]):
+     * the chat provider's own image model when the chat provider is the person's own and
+     * draws, else nanoMuse Cloud's when signed in, else the first own provider that draws.
+     * [automatic] leaves the choice aside and answers what that order gives now (the picker's
+     * *Automatic* row says so).
+     */
+    fun endpoint(context: Context, automatic: Boolean = false): Endpoint? {
         val app = context.applicationContext as? MinisApp ?: return null
         val repo = app.providerRepositoryOrNull ?: return null
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val eligible = eligibleInstances(context)
-        val savedId = prefs.getString(KEY_INSTANCE, null)
-        val inst = eligible.firstOrNull { it.id == savedId } ?: eligible.firstOrNull() ?: return null
+        val savedId = if (automatic) null else prefs.getString(KEY_INSTANCE, null)
+        val cloudId = io.github.nanomuse.cloud.NanoMuseCloud.instance(context)?.id
+        val inst = eligible.firstOrNull { it.id == savedId }
+            ?: io.github.nanomuse.models.SlotOrder.resolve(
+                chosen = null,
+                chatProvider = io.github.nanomuse.models.ModelSlots.ownChatInstance(context)?.takeIf { own -> eligible.any { it.id == own.id } },
+                cloud = eligible.firstOrNull { it.id == cloudId },
+                firstOwn = eligible.firstOrNull { it.id != cloudId },
+            )?.value
+            ?: return null
         val model = prefs.getString(KEY_MODEL, null)?.takeIf { it.isNotBlank() && inst.id == savedId }
             ?: suggestedModel(context, inst)
         val key = repo.usableApiKey(inst) ?: return null
@@ -175,6 +208,15 @@ object ImageGen {
     fun save(context: Context, instanceId: String, model: String) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putString(KEY_INSTANCE, instanceId).putString(KEY_MODEL, model.trim()).apply()
+    }
+
+    /** True when the person chose an image model; false when the slot follows the automatic order. */
+    fun isChosen(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_INSTANCE, null) != null
+
+    /** Forgets the choice: the slot follows the automatic order again. Nothing else moves. */
+    fun clear(context: Context) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(KEY_INSTANCE).remove(KEY_MODEL).apply()
     }
 
     private fun provider(context: Context, ep: Endpoint, modelId: String): OpenAIProvider {
