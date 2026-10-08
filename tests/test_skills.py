@@ -85,6 +85,17 @@ def test_front_matter_variants():
     assert 'version: "1"' in out and 'ok: "yes"' in out and "n: Sam" in out
 
 
+def test_skill_files_are_listed_under_a_dot_directory(tmp_path: Path):
+    """A skill kept under a dot-named folder (``~/.nanomuse``, a checkout's ``.worktree``)
+    still lists its scripts: only hidden entries inside the skill count as hidden."""
+    folder = tmp_path / ".nanomuse" / "skills" / "expense-report"
+    (folder / "scripts").mkdir(parents=True)
+    (folder / "SKILL.md").write_text(APPLE_STYLE)
+    (folder / "scripts" / "total.py").write_text("print(1)")
+    (folder / "scripts" / ".hidden").write_text("")
+    assert load_skill(folder).files == [Path("scripts/total.py")]
+
+
 def test_load_skill_checks_the_folder(tmp_path: Path):
     folder = tmp_path / "expense-report"
     folder.mkdir()
