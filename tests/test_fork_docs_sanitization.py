@@ -26,6 +26,7 @@ ALLOWED = {
     "site/README.md",
 }
 HISTORY = ("docs/releases/",)
+SKIP_DIRS = {"node_modules", "dist", ".venv", ".venv-ci", ".venv-desktop"}
 SCANNED = [
     "README.md",
     "CONTRIBUTING.md",
@@ -51,6 +52,8 @@ def _active_files() -> list[Path]:
         rel = path.relative_to(ROOT).as_posix()
         if rel in ALLOWED or rel.startswith(HISTORY):
             continue
+        if SKIP_DIRS & set(path.relative_to(ROOT).parts):
+            continue
         keep.append(path)
     return sorted(keep)
 
@@ -67,4 +70,9 @@ def test_active_file_links_no_upstream_backend(path: Path) -> None:
 
 def test_the_scan_sees_the_active_docs() -> None:
     names = {p.relative_to(ROOT).as_posix() for p in _active_files()}
-    assert {"README.md", "docs/index.md", "website/.vitepress/config.mts", "site/legacy.html"} <= names
+    assert {
+        "README.md",
+        "docs/index.md",
+        "website/.vitepress/config.mts",
+        "site/legacy.html",
+    } <= names
