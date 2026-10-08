@@ -23,7 +23,7 @@ REDACTED = "[redacted]"
 # where a request line with its query is written: uvicorn's access log for HTTP, its error
 # logger for the WebSocket handshake ("WebSocket /ws" [accepted] / 403 / <code>), and httpx
 # (with httpcore underneath) for what the gateway itself asks of a container
-REQUEST_LOGGERS = ("uvicorn.access", "uvicorn.error", "httpx", "httpcore")
+REQUEST_LOGGERS = ("uvicorn.access", "uvicorn.error", "httpx", "httpcore", "httpx2", "httpcore2")
 
 
 def redact(text: str) -> str:
