@@ -661,7 +661,8 @@ class Database:
                 self._conn.execute("COMMIT")
 
     def close(self) -> None:
-        self._conn.close()
+        with self._lock:
+            self._conn.close()
 
     # -- codes -------------------------------------------------------------
 
@@ -772,8 +773,7 @@ class Database:
             ts = now()
             c.execute("DELETE FROM deleted_keys WHERE deleted_at < ?", (ts - DELETED_KEYS_TTL_S,))
             c.execute(
-                "INSERT OR REPLACE INTO deleted_keys(key_hash, deleted_at) "
-                "SELECT key_hash, ? FROM api_keys WHERE account_id=?",
+                "INSERT OR REPLACE INTO deleted_keys(key_hash, deleted_at) SELECT key_hash, ? FROM api_keys WHERE account_id=?",
                 (ts, account_id),
             )
             c.execute("DELETE FROM api_keys WHERE account_id=?", (account_id,))
@@ -1059,9 +1059,7 @@ class Database:
             for i in range(0, len(wanted), 500):
                 chunk = wanted[i : i + 500]
                 marks = ",".join("?" * len(chunk))
-                out.extend(
-                    self._conn.execute(f"SELECT id, hint, identifier_enc FROM accounts WHERE id IN ({marks})", chunk).fetchall()
-                )
+                out.extend(self._conn.execute(f"SELECT id, hint, identifier_enc FROM accounts WHERE id IN ({marks})", chunk).fetchall())
         return out
 
     def allowance_rows(self) -> list[sqlite3.Row]:

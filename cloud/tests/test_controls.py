@@ -316,6 +316,12 @@ def test_deferred_notices_are_queued_then_flushed_in_order():
             break
         time.sleep(0.02)
     assert [m["Subject"].endswith(f"3 accounts: rule #{i} fired") for i, m in enumerate(sent, 1)] == [True, True]
+    for _ in range(100):
+        notices = [entry for entry in db.audit_recent(10) if entry["action"] == "notify"]
+        if len(notices) == 2:
+            break
+        time.sleep(0.02)
+    assert len(notices) == 2, "both notice transactions must finish before shutdown"
     assert ctl.flush_notices() == 0 and ctl.flush_notices_later() is False
     db.close()
 
