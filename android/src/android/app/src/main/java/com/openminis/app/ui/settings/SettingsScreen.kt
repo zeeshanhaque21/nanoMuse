@@ -313,11 +313,14 @@ fun SettingsScreen(
             io.github.nanomuse.ui.muse.MuseCard {
                 io.github.nanomuse.ui.muse.MuseRow(title = stringResource(R.string.settings_about_minis), icon = Icons.Outlined.Info, onClick = onAboutClick)
                 io.github.nanomuse.ui.muse.MuseRowDivider()
+                // nanoMuse: the policy link is empty by default; the row stays inert until one is configured
+                val privacyLink = io.github.nanomuse.cloud.NanoMuseCloud.openablePrivacyUrl(io.github.nanomuse.cloud.NanoMuseCloud.PRIVACY_URL)
                 io.github.nanomuse.ui.muse.MuseRow(
                     title = stringResource(R.string.settings_privacy_policy),
                     icon = Icons.Outlined.FrontHand,
-                    // nanoMuse: the policy on the site (docs/privacy.md is its source)
-                    onClick = { openExternalUrl(context, io.github.nanomuse.cloud.NanoMuseCloud.PRIVACY_URL) },
+                    titleColor = if (privacyLink != null) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                    enabled = privacyLink != null,
+                    onClick = { privacyLink?.let { openExternalUrl(context, it) } },
                 )
                 io.github.nanomuse.ui.muse.MuseRowDivider()
                 io.github.nanomuse.ui.muse.MuseRow(

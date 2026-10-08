@@ -158,11 +158,12 @@ fun MuseRow(
     titleColor: Color = MaterialTheme.colorScheme.onSurface,
     chevron: Boolean = true,
     trailing: (@Composable () -> Unit)? = null,
+    enabled: Boolean = true,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .clickable(enabled = enabled, onClick = onClick)
             .heightIn(min = 54.dp)
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,

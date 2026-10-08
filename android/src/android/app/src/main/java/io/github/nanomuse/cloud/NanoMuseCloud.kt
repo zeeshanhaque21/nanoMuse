@@ -112,6 +112,9 @@ object NanoMuseCloud {
     /** Where the privacy policy is when the relay named one; empty means hide the link. */
     const val PRIVACY_URL = ""
 
+    /** The privacy link to open, or null when none is configured; the row that opens it stays inert. */
+    fun openablePrivacyUrl(url: String): String? = url.takeIf { it.isNotBlank() }
+
     /**
      * A refusal of the relay's: its stable [code], its own sentence, the HTTP [status]; relay
      * 0.22 adds [retryAfterS] (`provider_busy`, `too_many_in_flight`) and [paused] (the
@@ -259,10 +262,13 @@ object NanoMuseCloud {
     /** True when a relay server is configured. */
     fun isConfigured(context: Context): Boolean = baseUrl(context).isNotBlank()
 
-    /** Require a configured relay or throw with a useful message (no silent fallback). */
-    fun requireBaseUrl(context: Context): String =
-        baseUrl(context).takeIf { it.isNotBlank() }
-            ?: throw IllegalStateException("Relay server not configured: enter your relay server in Settings")
+    /** Require a configured relay, refused with the relay's own code before any request (no silent fallback). */
+    fun requireBaseUrl(context: Context): String = requireRelay(baseUrl(context))
+
+    /** The relay address, or the relay's `relay_unconfigured` refusal when none is set. */
+    fun requireRelay(base: String): String =
+        base.takeIf { it.isNotBlank() }
+            ?: throw CloudException("relay_unconfigured", "Relay server not configured: enter your relay server in Settings")
 
     fun setBaseUrl(context: Context, url: String?) {
         prefs(context).edit().apply {
