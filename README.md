@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/nano-muse/nanoMuse/main/assets/brand/nanomuse-cover.png" alt="nanoMuse: an open-source personal agent for every device you own">
+  <img src="https://raw.githubusercontent.com/zeeshanhaque21/nanoMuse/main/assets/brand/nanomuse-cover.png" alt="nanoMuse: an open-source personal agent for every device you own">
 </p>
 
 <p align="center">
@@ -15,22 +15,21 @@
   <a href="https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/readme/README_vi.md">Tiếng Việt</a>
 </p>
 <p align="center">
-  <a href="https://github.com/zeeshanhaque21/nanoMuse/stargazers"><img src="https://img.shields.io/github/stars/nano-muse/nanoMuse?style=flat&label=stars" alt="GitHub stars"></a>
-  <a href="https://github.com/zeeshanhaque21/nanoMuse/releases"><img src="https://img.shields.io/github/downloads/nano-muse/nanoMuse/total?label=downloads" alt="Downloads"></a>
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/stargazers"><img src="https://img.shields.io/github/stars/zeeshanhaque21/nanoMuse?style=flat&label=stars" alt="GitHub stars"></a>
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/releases"><img src="https://img.shields.io/github/downloads/zeeshanhaque21/nanoMuse/total?label=downloads" alt="Downloads"></a>
   <a href="https://github.com/zeeshanhaque21/nanoMuse/actions/workflows/ci.yml"><img src="https://github.com/zeeshanhaque21/nanoMuse/actions/workflows/ci.yml/badge.svg?branch=main" alt="Test Suite"></a>
   <a href="https://github.com/zeeshanhaque21/nanoMuse/releases"><img src="https://img.shields.io/badge/Fork%20releases-zeeshanhaque21%2FnanoMuse-5B4EE6" alt="Fork releases"></a>
   <a href="https://github.com/zeeshanhaque21/nanoMuse"><img src="https://img.shields.io/badge/Fork-zeeshanhaque21%2FnanoMuse-0a66e4" alt="Fork"></a>
-  <a href="https://github.com/zeeshanhaque21/nanoMuse/blob/main/LICENSE"><img src="https://img.shields.io/github/license/nano-muse/nanoMuse?label=license" alt="GPL-3.0-or-later"></a>
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/blob/main/LICENSE"><img src="https://img.shields.io/github/license/zeeshanhaque21/nanoMuse?label=license" alt="GPL-3.0-or-later"></a>
   <a href="https://discord.gg/bkTySmm28X"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="Discord"></a>
 </p>
 
 **nanoMuse is an open-source personal agent for every device you own.** One agent with a name and a look of its own, in the style of Meta's [Muse](https://about.fb.com/news/2026/09/introducing-muse-personal-ai-agent/): it does things instead of answering questions, keeps working while the app is closed, remembers you, and stops to ask before anything you could not undo.
 
-*nano* means the whole set, small enough to run and deploy yourself: the phone app, the desktop app, the web console and the relay that joins them are all in this repository, under GPL-3.0-or-later. **[Free, open source, non-profit. Let's build it together.](CONTRIBUTING.md)** Sign in and you get a free allowance of model use on the community relay (the developer pays for it); when it is gone, [use your own key](docs/own-key.md). The same relay runs on a server of yours, so nothing has to leave your house. Latest: **0.1.41 Choice**, [release notes](https://github.com/zeeshanhaque21/nanoMuse/releases/tag/v0.1.41) · [try it in the browser](https://demo.nanomuse.dev/).
+*nano* means the whole set, small enough to run and deploy yourself: the phone app, the desktop app, the web console and the relay that joins them are all in this repository, under GPL-3.0-or-later. **[Free, open source, non-profit. Let's build it together.](CONTRIBUTING.md)** Sign in and you get a free allowance of model use on the community relay (the developer pays for it); when it is gone, [use your own key](docs/own-key.md). The same relay runs on a server of yours, so nothing has to leave your house. Latest: **0.1.41 Choice**, [release notes](https://github.com/zeeshanhaque21/nanoMuse/releases/tag/v0.1.41).
 
 https://github.com/user-attachments/assets/c7694d5a-9450-4f99-9254-5d70560d7565
 
-<p align="center"><a href="https://nanomuse.cn/media/film/nanomuse-film-en-web.mp4">English</a> · <a href="https://nanomuse.cn/media/film/nanomuse-film-zh-web.mp4">中文</a> · <a href="https://nanomuse.cn/#film">nanomuse.cn</a></p>
 
 ## 🗞️ News
 
@@ -49,7 +48,7 @@ This fork ships no hosted demo and no default relay: configure [your own relay](
 3. Connect a model. *Sign in — free*: a phone number (the code comes by SMS) or an e-mail address, and the agent has a free allowance on [nanoMuse Cloud](docs/cloud.md) — no key needed, nothing to pay; the account page says how much is left and how it grows. The chat model is `deepseek-v4.1-flash` and the hands use `qwen3.8-27b`; the two are separate settings. When the allowance is gone, use your own key — [Alibaba Cloud Bailian](docs/own-key.md) in mainland China, [OpenRouter](docs/own-key.md) elsewhere (Bailian does not sign up overseas accounts), any OpenAI-compatible endpoint, or one of the OAuth sign-ins the app ships with. Then, if you like, the two permissions that let the agent use your phone's apps (skippable), and the first conversation, which asks what to call you and lets the agent pick its own name.
 4. Optional — *Settings → Image & video models*: an image model (qwen-image-3.0 on Alibaba Cloud Model Studio, gpt-image-1, or any provider with the OpenAI images endpoint) lets the agent change its look and draw pictures; a video model (wan2.2-i2v-flash on Model Studio) makes the look move. Muse has these built in; nanoMuse uses your own, and the agent tells you when one is missing.
 
-All downloads come from the [latest release](https://github.com/zeeshanhaque21/nanoMuse/releases/latest); the same files are on [nanomuse.cn/dl](https://nanomuse.cn/dl/) when GitHub is slow where you are. Open the app, sign in with an e-mail or a mainland-China phone number, and it has a model to think with. The phone, the desktop and the web share one account and show the same conversations.
+All downloads come from the [latest release](https://github.com/zeeshanhaque21/nanoMuse/releases/latest). Open the app, sign in with an e-mail or a mainland-China phone number, and it has a model to think with. The phone, the desktop and the web share one account and show the same conversations.
 
 ## What it does
 
@@ -77,7 +76,7 @@ All downloads come from the [latest release](https://github.com/zeeshanhaque21/n
 Each device runs its own agent: the phone inside the APK (Alpine Linux under proot, a shell, a browser, MCP), the computer inside nanoMuse Desktop (DeepSeek Harness with the Python runtime for the hands). Signed in, they meet on the relay and can ask each other for things; the text of the conversations travels through it, files and screenshots stay where they were made.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/nano-muse/nanoMuse/main/assets/brand/devices-loop.png" alt="Android, the desktop (Mac, Windows, Linux), iPhone and iPad, and the web app around one account: the relay signs the devices in and carries the conversation between them" width="92%">
+  <img src="https://raw.githubusercontent.com/zeeshanhaque21/nanoMuse/main/assets/brand/devices-loop.png" alt="Android, the desktop (Mac, Windows, Linux), iPhone and iPad, and the web app around one account: the relay signs the devices in and carries the conversation between them" width="92%">
 </p>
 
 [docs/every-device.md](docs/every-device.md) explains the devices, [docs/hub.md](docs/hub.md) the frames, [docs/cloud.md](docs/cloud.md) the relay, [docs/privacy.md](docs/privacy.md) what it keeps.
@@ -94,7 +93,7 @@ Each device runs its own agent: the phone inside the APK (Alpine Linux under pro
 
 ## Docs
 
-[nanomuse.cn/docs](https://nanomuse.cn/docs/): install per platform, every device, hands, connectors, memory, self-hosting, the protocols. The sources are in [docs/](docs/); what changed in each version is in the [CHANGELOG](CHANGELOG.md) and [docs/releases/](docs/releases/).
+[docs/](docs/): install per platform, every device, hands, connectors, memory, self-hosting, the protocols. The sources and the translations are in [docs/](docs/); what changed in each version is in the [CHANGELOG](CHANGELOG.md) and [docs/releases/](docs/releases/).
 
 ## Self-host
 

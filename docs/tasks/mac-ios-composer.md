@@ -57,7 +57,7 @@ Web 控制台 `web/`、中继 `cloud/`（登录、模型、hub、会话同步）
 - 提交用 Conventional Commits（`fix(ios): …`）并带 DCO 签名（`git commit -s`，用这台 Mac 上的 git
   身份）；分支名以 `mac/` 开头；PR 到 `main`；不 force-push。
 - 永远没有秘密：API key、手机号、邮箱、token、证书、`.p8`、`config/config.toml`、`cloud/.env` 不进
-  提交、不进 PR 描述、不贴进聊天；日志贴出来之前打码。不在 `cloud.nanomuse.cn` 上注册测试账号——
+  提交、不进 PR 描述、不贴进聊天；日志贴出来之前打码。不在公共中继上注册测试账号——
   测试用维护者自己的账号（验证码由维护者输入）。
 
 ## 1. 环境（这台 Mac）
@@ -231,7 +231,7 @@ cd android/src/ios
 xcodebuild build -project Minis.xcodeproj -scheme Minis -configuration Debug \
   -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO     # NanoMuse/ 下零 warning
 cd ../../.. && .venv/bin/python scripts/rebrand.py                  # 没有 .venv 就 uv venv && uv pip install -e ".[dev]"
-gh workflow run "iOS · build check" --repo nano-muse/nanoMuse --ref mac/ios-composer-0140
+gh workflow run "iOS · build check" --repo zeeshanhaque21/nanoMuse --ref mac/ios-composer-0140
 ```
 
 ## 7. 顺手的两项验收（证据收集完、等构建的时候做；只报告，发现问题另开 `mac/*` 分支）

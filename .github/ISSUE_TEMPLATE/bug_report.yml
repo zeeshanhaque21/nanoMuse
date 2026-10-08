@@ -46,7 +46,7 @@ body:
         - Daemon (nanomuse daemon / goals run)
         - Docker
         - Library / API
-        - The showcase (demo.nanomuse.dev)
+        - The showcase (the demo gateway)
     validations:
       required: true
   - type: input

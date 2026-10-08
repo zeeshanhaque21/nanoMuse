@@ -5,7 +5,7 @@ nanoMuse is one agent on your own devices, and nothing in it has to go through a
 | | What you run | What it gives you |
 |---|---|---|
 | [1. No server, your own key](#1-no-server-your-own-key) | nothing | the apps talk to a model provider directly; the community relay is still used for sign-in and for the devices to find each other |
-| [2. Your own relay](#2-your-own-relay) | nanoMuse Cloud on a small VPS or a home server | your own accounts, sign-in codes, hub and conversation sync; nothing about your account touches nanomuse.cn |
+| [2. Your own relay](#2-your-own-relay) | nanoMuse Cloud on a small VPS or a home server | your own accounts, sign-in codes, hub and conversation sync; nothing about your account touches the public relay |
 | [3. A runtime of your own](#3-a-runtime-of-your-own-for-the-web-app) | the Python runtime in Docker | the web app and the hands on a computer that is always on |
 
 ## 1. No server, your own key
@@ -14,7 +14,7 @@ The free allowance on the community relay runs out. When it does, or before, put
 
 ## 2. Your own relay
 
-nanoMuse Cloud is the relay behind nanomuse.cn: sign-in by e-mail or phone, the account's models through one OpenAI-compatible endpoint, the hub the devices meet on, conversation sync, a web console at `/app` and an admin page at `/app/admin/`. It is one Python service and one SQLite file, in this repository under [`cloud/`](../cloud/README.md), and it runs the same on a server of yours.
+nanoMuse Cloud is the relay the apps and the desktop sign in to: sign-in by e-mail or phone, the account's models through one OpenAI-compatible endpoint, the hub the devices meet on, conversation sync, a web console at `/app` and an admin page at `/app/admin/`. It is one Python service and one SQLite file, in this repository under [`cloud/`](../cloud/README.md), and it runs the same on a server of yours.
 
 ### What you need
 
@@ -53,7 +53,7 @@ A code goes out every time someone signs in. `CODE_SENDER` says how:
 
 ### Pointing the apps at it
 
-Every app signs in against `https://cloud.nanomuse.cn` unless you tell it otherwise. The devices of one account must all point at the same relay — the hub and the conversations live there.
+An app signs in against the relay its `base_url` names; with none set it does not sign in until you name one. The devices of one account must all point at the same relay — the hub and the conversations live there.
 
 - **Android** (0.1.38). *Use a different server* under the sign-in form takes the relay's address; *Check* asks its `/healthz` and shows the version, *Use this server* keeps the address across launches. `https://` is required outside your own network; plain `http://` is accepted for a private address (`10.x`, `172.16–31.x`, `192.168.x`, `localhost`, a `.local` or `.ts.net` name). Settings → Account shows the server with *Change*, which signs the phone out first ([android.md](android.md)).
 - **iPhone / iPad.** The same link on the sign-in sheet, with the same rules.
@@ -72,7 +72,7 @@ Every app signs in against `https://cloud.nanomuse.cn` unless you tell it otherw
 - **The terminal runtime and the hosted web app** (`nanomuse …`, the root `docker-compose.yml`): `NANOMUSE_CLOUD_BASE_URL=https://cloud.example.com` in the environment or `.env`, or `[cloud] base_url` in `config/config.toml` ([configuration.md](configuration.md)).
 - **The web console** is the relay's own `/app` — `https://<your domain>/app/` — and needs no pointing.
 
-Invitations from your relay link to its console (`INVITE_URL`, set by the script), so a friend you invite lands on your relay, not on nanomuse.cn.
+Invitations from your relay link to its console (`INVITE_URL`, set by the script), so a friend you invite lands on your relay.
 
 ### Updating
 
@@ -101,7 +101,7 @@ Hashed and encrypted identifiers, per-request counts and prices, the devices on 
 
 ## 3. A runtime of your own, for the web app
 
-The phone and the desktop carry their own agent. The web app does not — it talks to the Python runtime, which on nanomuse.cn runs in a container per visitor. You can run that runtime on a machine of your own, in Docker, and open the web app on it from any browser:
+The phone and the desktop carry their own agent. The web app does not — it talks to the Python runtime, which in the upstream showcase runs in a container per visitor. You can run that runtime on a machine of your own, in Docker, and open the web app on it from any browser:
 
 ```bash
 cp .env.example .env && $EDITOR .env      # a model key, NANOMUSE_SERVER_TOKEN; NANOMUSE_CLOUD_BASE_URL for your own relay

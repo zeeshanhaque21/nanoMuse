@@ -33,7 +33,6 @@
 
   | | |
   |---|---|
-  | Browser | [demo.nanomuse.dev](https://demo.nanomuse.dev/) — a nanoMuse on a simulated phone, after a sign-in; a demo, the apps below are the real thing |
   | Android 8.0+, arm64 | `nanoMuse-<version>-arm64.apk` |
   | iPhone, iPad | [TestFlight](https://testflight.apple.com/join/ZHexbDqc) — a beta; build <n>, delivered once Apple's beta review has passed |
   | Windows 10+ | `nanoMuse-Desktop-<version>-win-x64.exe` (the desktop app, on DeepSeek Harness) |
@@ -41,11 +40,9 @@
   | Linux x64 | `nanoMuse-Desktop-<version>-linux-x64.deb` / `.AppImage` (needs FUSE; `--appimage-extract-and-run` without) / `.tar.gz` (unpack anywhere, run `./nanomuse-desktop`) |
   | DeepSeek Harness Desktop you already run | `dsh-nanomuse-<version>.tgz` — `dsh plugin --profile desktop add …` ([how](https://github.com/zeeshanhaque21/nanoMuse/blob/main/harness/README.md)) |
 
-  GitHub's own downloads are the fastest source from China too in our measurements; if they fail where you are, the same files are on [nanomuse.cn/dl/v<version>/](https://nanomuse.cn/dl/v<version>/) within fifteen minutes.
-
 ## Community
 
-nanoMuse is open source and free. Sign in with a phone number or an e-mail and you get a starting allowance; the developer pays for it. The account page shows what is left and how to add more. When it is gone, use your own key or a plan you already pay for ([how](https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/own-key.md)). With an account, the text of your conversations is kept on nanoMuse Cloud so that your devices show the same chats — one switch in Data controls turns it off and deletes it; nothing is sold ([privacy policy](https://nanomuse.cn/privacy/)); delete the account whenever you want.
+nanoMuse is open source and free. Sign in with a phone number or an e-mail and you get a starting allowance; the developer pays for it. The account page shows what is left and how to add more. When it is gone, use your own key or a plan you already pay for ([how](https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/own-key.md)). With an account, the text of your conversations is kept on nanoMuse Cloud so that your devices show the same chats — one switch in Data controls turns it off and deletes it; nothing is sold ([privacy policy](docs/privacy.md)); delete the account whenever you want.
 
 This is a preview. We use it every day and know where it is rough; tell us where it broke for you and what you want it to do. Thanks to everyone who tried a build and reported what broke. [Open an issue](https://github.com/zeeshanhaque21/nanoMuse/issues/new/choose) · [send a pull request](https://github.com/zeeshanhaque21/nanoMuse/blob/main/CONTRIBUTING.md) · [Discussions](https://github.com/zeeshanhaque21/nanoMuse/discussions) · [Discord](https://discord.gg/bkTySmm28X) · [star the repo](https://github.com/zeeshanhaque21/nanoMuse) — if it is useful to you, a star helps others find it.
 
@@ -74,7 +71,6 @@ Based on [OpenMinis](https://github.com/OpenMinis/OpenMinis) 1.13 (GPL-3.0), mod
 
   | | |
   |---|---|
-  | 浏览器 | [demo.nanomuse.dev](https://demo.nanomuse.dev/)——模拟手机里的一个 nanoMuse，登录后体验；这是演示，下面的应用才是正式版 |
   | Android 8.0+，arm64 | `nanoMuse-<version>-arm64.apk` |
   | iPhone、iPad | [TestFlight](https://testflight.apple.com/join/ZHexbDqc)——测试版；第 <n> 个构建，通过 Apple 的测试版审核后即可安装 |
   | Windows 10+ | `nanoMuse-Desktop-<version>-win-x64.exe`（桌面 App，基于 DeepSeek Harness） |
@@ -82,11 +78,9 @@ Based on [OpenMinis](https://github.com/OpenMinis/OpenMinis) 1.13 (GPL-3.0), mod
   | Linux x64 | `nanoMuse-Desktop-<version>-linux-x64.deb` / `.AppImage`（需要 FUSE；没有就加 `--appimage-extract-and-run`）/ `.tar.gz`（解压到任意位置，运行 `./nanomuse-desktop`）|
   | 已在用 DeepSeek Harness Desktop | `dsh-nanomuse-<version>.tgz`——`dsh plugin --profile desktop add …`（[怎么装](https://github.com/zeeshanhaque21/nanoMuse/blob/main/harness/README.md)） |
 
-  实测从国内直接下 GitHub 也是最快的；万一下不动，同样的文件十五分钟内会出现在 [nanomuse.cn/dl/v<version>/](https://nanomuse.cn/dl/v<version>/)。
-
 ### 社区
 
-nanoMuse 开源、免费。手机号或邮箱登录后有一份起始额度，钱是开发者出的；剩多少、怎么加，账号页里有数。用完可以换成自己的 key，或者用你已经在付费的套餐登录（[教程](https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/own-key.md)）。登录后，对话文字会保存在 nanoMuse Cloud，让你的几台设备看到同样的对话——「数据控制」里一个开关就能关掉并删除；数据不卖（[隐私政策](https://nanomuse.cn/privacy/)）；账号想删就删。
+nanoMuse 开源、免费。手机号或邮箱登录后有一份起始额度，钱是开发者出的；剩多少、怎么加，账号页里有数。用完可以换成自己的 key，或者用你已经在付费的套餐登录（[教程](https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/own-key.md)）。登录后，对话文字会保存在 nanoMuse Cloud，让你的几台设备看到同样的对话——「数据控制」里一个开关就能关掉并删除；数据不卖（[隐私政策](docs/privacy.md)）；账号想删就删。
 
 现在是预览版。我们自己每天在用，知道哪些地方还糙；哪里坏了、想要什么，直接提 issue。谢谢每一位装过、试过、报过问题的人。[提 issue](https://github.com/zeeshanhaque21/nanoMuse/issues/new/choose) · [发 PR](https://github.com/zeeshanhaque21/nanoMuse/blob/main/CONTRIBUTING.md) · [Discussions](https://github.com/zeeshanhaque21/nanoMuse/discussions) · [Discord](https://discord.gg/bkTySmm28X) · [点个 Star](https://github.com/zeeshanhaque21/nanoMuse)——觉得有用，点个 Star，让更多人看到。
 

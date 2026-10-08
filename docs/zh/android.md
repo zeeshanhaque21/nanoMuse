@@ -10,8 +10,7 @@
 
 一个 APK，一种架构：`nanoMuse-<version>-arm64.apk`（arm64-v8a，Android 8.0 / API 26 及以上，
 `targetSdk` 35）。每个版本都用同一把签名密钥，所以新 APK 直接覆盖旧的，数据保留。没有上架
-Play 商店：「设置 → 版本」把已安装的构建和最新版本并排显示（先查 `nanomuse.cn/dl/index.json`，
-再查这个仓库的 GitHub Releases——「最新 0.1.x，你用的就是它」/「0.1.x 已发布，点此更新」），
+Play 商店：「设置 → 版本」把已安装的构建和最新版本并排显示（查这个仓库的 GitHub Releases——「最新 0.1.x，你用的就是它」/「0.1.x 已发布，点此更新」），
 并提供下载。
 
 ## 安装 {#install}

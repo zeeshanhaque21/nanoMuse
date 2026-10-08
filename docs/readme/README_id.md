@@ -1,59 +1,54 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/nano-muse/nanoMuse/main/assets/brand/nanomuse-cover.png" alt="nanoMuse: agen pribadi sumber terbuka untuk setiap perangkat yang kamu miliki">
+  <img src="https://raw.githubusercontent.com/zeeshanhaque21/nanoMuse/main/assets/brand/nanomuse-cover.png" alt="nanoMuse: agen pribadi sumber terbuka untuk setiap perangkat yang kamu miliki">
 </p>
 
 <p align="center">
-  <a href="https://github.com/nano-muse/nanoMuse/blob/main/README.md">English</a> |
-  <a href="https://github.com/nano-muse/nanoMuse/blob/main/docs/readme/README_zh.md">简体中文</a> |
-  <a href="https://github.com/nano-muse/nanoMuse/blob/main/docs/readme/README_zh-TW.md">繁體中文</a> |
-  <a href="https://github.com/nano-muse/nanoMuse/blob/main/docs/readme/README_es.md">Español</a> |
-  <a href="https://github.com/nano-muse/nanoMuse/blob/main/docs/readme/README_fr.md">Français</a> |
-  <a href="https://github.com/nano-muse/nanoMuse/blob/main/docs/readme/README_id.md">Bahasa Indonesia</a> |
-  <a href="https://github.com/nano-muse/nanoMuse/blob/main/docs/readme/README_ja.md">日本語</a> |
-  <a href="https://github.com/nano-muse/nanoMuse/blob/main/docs/readme/README_ko.md">한국어</a> |
-  <a href="https://github.com/nano-muse/nanoMuse/blob/main/docs/readme/README_ru.md">Русский</a> |
-  <a href="https://github.com/nano-muse/nanoMuse/blob/main/docs/readme/README_vi.md">Tiếng Việt</a>
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/blob/main/README.md">English</a> |
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/readme/README_zh.md">简体中文</a> |
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/readme/README_zh-TW.md">繁體中文</a> |
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/readme/README_es.md">Español</a> |
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/readme/README_fr.md">Français</a> |
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/readme/README_id.md">Bahasa Indonesia</a> |
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/readme/README_ja.md">日本語</a> |
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/readme/README_ko.md">한국어</a> |
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/readme/README_ru.md">Русский</a> |
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/readme/README_vi.md">Tiếng Việt</a>
 </p>
 <p align="center">
-  <a href="https://github.com/nano-muse/nanoMuse/stargazers"><img src="https://img.shields.io/github/stars/nano-muse/nanoMuse?style=flat&label=stars" alt="Bintang GitHub"></a>
-  <a href="https://github.com/nano-muse/nanoMuse/releases"><img src="https://img.shields.io/github/downloads/nano-muse/nanoMuse/total?label=downloads" alt="Unduhan"></a>
-  <a href="https://github.com/nano-muse/nanoMuse/actions/workflows/ci.yml"><img src="https://github.com/nano-muse/nanoMuse/actions/workflows/ci.yml/badge.svg?branch=main" alt="Test Suite"></a>
-  <a href="https://demo.nanomuse.dev/"><img src="https://img.shields.io/badge/Coba-demo.nanomuse.dev-0a66e4" alt="Coba di browser"></a>
-  <a href="https://nanomuse.cn/"><img src="https://img.shields.io/badge/Situs_web-nanomuse.cn-0a66e4" alt="Situs web"></a>
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/stargazers"><img src="https://img.shields.io/github/stars/zeeshanhaque21/nanoMuse?style=flat&label=stars" alt="Bintang GitHub"></a>
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/releases"><img src="https://img.shields.io/github/downloads/zeeshanhaque21/nanoMuse/total?label=downloads" alt="Unduhan"></a>
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/actions/workflows/ci.yml"><img src="https://github.com/zeeshanhaque21/nanoMuse/actions/workflows/ci.yml/badge.svg?branch=main" alt="Test Suite"></a>
   <a href="https://arxiv.org/abs/2610.08699"><img src="https://img.shields.io/badge/arXiv-2610.08699-b31b1b" alt="Makalah di arXiv"></a>
-  <a href="https://github.com/nano-muse/nanoMuse/blob/main/LICENSE"><img src="https://img.shields.io/github/license/nano-muse/nanoMuse?label=license" alt="GPL-3.0-or-later"></a>
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/blob/main/LICENSE"><img src="https://img.shields.io/github/license/zeeshanhaque21/nanoMuse?label=license" alt="GPL-3.0-or-later"></a>
   <a href="https://discord.gg/bkTySmm28X"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="Discord"></a>
 </p>
 
 **nanoMuse adalah agen pribadi sumber terbuka untuk setiap perangkat yang kamu miliki.** Satu agen dengan nama dan rupa sendiri, seperti [Muse](https://about.fb.com/news/2026/09/introducing-muse-personal-ai-agent/) dari Meta: ia mengerjakan sesuatu alih-alih sekadar menjawab pertanyaan, terus bekerja saat aplikasinya ditutup, mengingatmu, dan berhenti untuk bertanya sebelum melakukan apa pun yang tidak bisa kamu batalkan.
 
-*nano* berarti satu paket lengkap yang cukup kecil untuk kamu jalankan dan pasang sendiri: aplikasi ponsel, aplikasi desktop, konsol web, dan relay yang menghubungkan semuanya ada di repositori ini, di bawah GPL-3.0-or-later. **[Gratis, sumber terbuka, nirlaba. Mari bangun bersama.](../../CONTRIBUTING.md)** Masuk dan kamu mendapat jatah gratis pemakaian model di relay komunitas (pengembang yang membayarnya); kalau habis, [pakai kunci sendiri](../own-key.md). Relay yang sama bisa berjalan di servermu, jadi tidak ada data yang harus keluar dari rumahmu. Versi terbaru: **0.1.41 Choice**, [catatan rilis](https://github.com/nano-muse/nanoMuse/releases/tag/v0.1.41) · [coba di browser](https://demo.nanomuse.dev/).
 
 https://github.com/user-attachments/assets/c7694d5a-9450-4f99-9254-5d70560d7565
 
-<p align="center"><a href="https://nanomuse.cn/media/film/nanomuse-film-en-web.mp4">English</a> · <a href="https://nanomuse.cn/media/film/nanomuse-film-zh-web.mp4">中文</a> · <a href="https://nanomuse.cn/#film">nanomuse.cn</a></p>
 
 ## 🗞️ Kabar
 
 - `2026-10-07` 📄 Makalah kami tersedia di [arXiv](https://arxiv.org/abs/2610.08699).
-- `2026-10-07` 🚀 Versi terbaru: [0.1.41 Choice](https://github.com/nano-muse/nanoMuse/releases/tag/v0.1.41).
+- `2026-10-07` 🚀 Versi terbaru: [0.1.41 Choice](https://github.com/zeeshanhaque21/nanoMuse/releases/tag/v0.1.41).
 - `2026-09-25` 🎉 nanoMuse dirilis.
 
-Semua versi: [releases](https://github.com/nano-muse/nanoMuse/releases).
+Semua versi: [releases](https://github.com/zeeshanhaque21/nanoMuse/releases).
 
 ## Pemasangan
 
 | | |
 |---|---|
-| **Browser** | [demo.nanomuse.dev](https://demo.nanomuse.dev/): sebuah nanoMuse di ponsel simulasi, setelah masuk. Ini demo; aplikasi di bawah inilah yang sebenarnya |
-| **Android** 8.0+, arm64 | [nanoMuse-0.1.41-arm64.apk](https://github.com/nano-muse/nanoMuse/releases/download/v0.1.41/nanoMuse-0.1.41-arm64.apk): setiap versi ditandatangani dengan kunci yang sama dan dipasang menimpa versi sebelumnya |
+| **Android** 8.0+, arm64 | [nanoMuse-0.1.41-arm64.apk](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v0.1.41/nanoMuse-0.1.41-arm64.apk): setiap versi ditandatangani dengan kunci yang sama dan dipasang menimpa versi sebelumnya |
 | **iPhone / iPad** | [TestFlight](https://testflight.apple.com/join/ZHexbDqc): versi beta; tautan ini memberikan build begitu tinjauan beta Apple lolos · [iOS](../ios.md) |
-| **macOS** 12+ | [Apple Silicon](https://github.com/nano-muse/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-mac-arm64.dmg) · [Intel](https://github.com/nano-muse/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-mac-x64.dmg): belum dinotarisasi: klik kanan → *Open* saat pertama kali |
-| **Windows** 10+ | [nanoMuse-Desktop-0.1.41-win-x64.exe](https://github.com/nano-muse/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-win-x64.exe): klik *Run anyway* sekali |
-| **Linux** x64 | [AppImage](https://github.com/nano-muse/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-linux-x64.AppImage) · [.deb](https://github.com/nano-muse/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-linux-x64.deb) · [tar.gz](https://github.com/nano-muse/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-linux-x64.tar.gz) |
+| **macOS** 12+ | [Apple Silicon](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-mac-arm64.dmg) · [Intel](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-mac-x64.dmg): belum dinotarisasi: klik kanan → *Open* saat pertama kali |
+| **Windows** 10+ | [nanoMuse-Desktop-0.1.41-win-x64.exe](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-win-x64.exe): klik *Run anyway* sekali |
+| **Linux** x64 | [AppImage](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-linux-x64.AppImage) · [.deb](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-linux-x64.deb) · [tar.gz](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-linux-x64.tar.gz) |
 | **Docker** | `bash scripts/self-host.sh --local` untuk relay sendiri; `docker compose up -d app` untuk aplikasi web di servermu; lihat [self-hosting](../self-hosting.md) |
 
-Semua unduhan berasal dari [rilis terbaru](https://github.com/nano-muse/nanoMuse/releases/latest); berkas yang sama ada di [nanomuse.cn/dl](https://nanomuse.cn/dl/) kalau GitHub lambat di tempatmu. Buka aplikasinya, masuk dengan e-mail atau nomor ponsel Tiongkok daratan, dan agen langsung punya model untuk berpikir. Ponsel, desktop, dan web memakai satu akun dan menampilkan percakapan yang sama.
+Semua unduhan berasal dari [rilis terbaru](https://github.com/zeeshanhaque21/nanoMuse/releases/latest). Buka aplikasinya, masuk dengan e-mail atau nomor ponsel Tiongkok daratan, dan agen langsung punya model untuk berpikir. Ponsel, desktop, dan web memakai satu akun dan menampilkan percakapan yang sama.
 
 ## Apa yang dilakukannya
 
@@ -81,7 +76,7 @@ Semua unduhan berasal dari [rilis terbaru](https://github.com/nano-muse/nanoMuse
 Setiap perangkat menjalankan agennya sendiri: ponsel di dalam APK (Alpine Linux di bawah proot, shell, browser, MCP), komputer di dalam nanoMuse Desktop (DeepSeek Harness dengan runtime Python untuk tangannya). Setelah masuk, mereka bertemu di relay dan bisa saling meminta sesuatu; teks percakapan lewat relay, berkas dan tangkapan layar tetap di tempat dibuatnya.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/nano-muse/nanoMuse/main/assets/brand/devices-loop.png" alt="Android, desktop (Mac, Windows, Linux), iPhone dan iPad, serta aplikasi web di sekitar satu akun: relay memproses masuknya perangkat ke akun dan membawa percakapan di antaranya" width="92%">
+  <img src="https://raw.githubusercontent.com/zeeshanhaque21/nanoMuse/main/assets/brand/devices-loop.png" alt="Android, desktop (Mac, Windows, Linux), iPhone dan iPad, serta aplikasi web di sekitar satu akun: relay memproses masuknya perangkat ke akun dan membawa percakapan di antaranya" width="92%">
 </p>
 
 [docs/every-device.md](../every-device.md) menjelaskan perangkat-perangkatnya, [docs/hub.md](../hub.md) frame-nya, [docs/cloud.md](../cloud.md) relay-nya, [docs/privacy.md](../privacy.md) apa yang disimpannya.
@@ -98,7 +93,7 @@ Setiap perangkat menjalankan agennya sendiri: ponsel di dalam APK (Alpine Linux 
 
 ## Dokumentasi
 
-[nanomuse.cn/docs](https://nanomuse.cn/docs/): pemasangan per platform, setiap perangkat, tangan, konektor, memori, self-hosting, protokol. Sumbernya ada di [docs/](../); apa yang berubah di tiap versi ada di [CHANGELOG](../../CHANGELOG.md) dan [docs/releases/](../releases/).
+[docs/](../): pemasangan per platform, setiap perangkat, tangan, konektor, memori, self-hosting, protokol. Sumbernya ada di [docs/](../); apa yang berubah di tiap versi ada di [CHANGELOG](../../CHANGELOG.md) dan [docs/releases/](../releases/).
 
 ## Self-hosting
 
@@ -106,7 +101,7 @@ Satu VPS, satu jam: [docs/self-hosting.md](../self-hosting.md). Tiga jalan: tanp
 
 ## Berkontribusi
 
-Pakai untuk tugas nyata, laporkan apa yang rusak, lalu pilih sesuatu yang terfokus: [CONTRIBUTING.md](../../CONTRIBUTING.md) berisi penyiapan dan konvensinya, [AGENTS.md](../../AGENTS.md) aturan yang diikuti agen pemrograman di repositori ini, dan [peta jalan](../roadmap.md) menunjukkan dari mana memulai. [Issues](https://github.com/nano-muse/nanoMuse/issues) · [Discussions](https://github.com/nano-muse/nanoMuse/discussions) · [Discord](https://discord.gg/bkTySmm28X).
+Pakai untuk tugas nyata, laporkan apa yang rusak, lalu pilih sesuatu yang terfokus: [CONTRIBUTING.md](../../CONTRIBUTING.md) berisi penyiapan dan konvensinya, [AGENTS.md](../../AGENTS.md) aturan yang diikuti agen pemrograman di repositori ini, dan [peta jalan](../roadmap.md) menunjukkan dari mana memulai. [Issues](https://github.com/zeeshanhaque21/nanoMuse/issues) · [Discussions](https://github.com/zeeshanhaque21/nanoMuse/discussions) · [Discord](https://discord.gg/bkTySmm28X).
 
 ## ⭐️ Sitasi
 

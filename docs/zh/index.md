@@ -9,9 +9,6 @@ hero:
       text: 安装
       link: /zh/android
     - theme: alt
-      text: 在浏览器里看演示
-      link: https://demo.nanomuse.dev/
-    - theme: alt
       text: 自己部署
       link: /zh/self-hosting
     - theme: alt
@@ -26,7 +23,6 @@ hero:
 
 | | |
 |---|---|
-| **浏览器** | [demo.nanomuse.dev](https://demo.nanomuse.dev/)——登录之后，一台模拟手机里的 nanoMuse。这是演示；下面的 App 才是真的 |
 | **Android** 8.0 以上，arm64 | [nanoMuse-0.1.41-arm64.apk](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v0.1.41/nanoMuse-0.1.41-arm64.apk) · [怎么装](/zh/android) |
 | **iPhone / iPad** | [TestFlight](https://testflight.apple.com/join/ZHexbDqc)——测试版；Apple 的 beta 审核通过后，这个链接就能装 · [iOS](/zh/ios) |
 | **macOS** 12 以上 | [Apple 芯片](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-mac-arm64.dmg) · [Intel](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-mac-x64.dmg) · [桌面版](/zh/desktop) |
@@ -34,17 +30,13 @@ hero:
 | **Linux** x64 | [AppImage](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-linux-x64.AppImage) · [.deb](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-linux-x64.deb) · [tar.gz](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-linux-x64.tar.gz) |
 | **Docker** | `bash scripts/self-host.sh --local` 搭自己的中继；`docker compose up -d app` 跑网页版 · [自己部署](/zh/self-hosting) |
 
-所有下载都在 [最新版本](https://github.com/zeeshanhaque21/nanoMuse/releases/latest)；GitHub 下不动的话，同样的文件在 [nanomuse.cn/dl](https://nanomuse.cn/dl/)。
+所有下载都在 [最新版本](https://github.com/zeeshanhaque21/nanoMuse/releases/latest)。
 
 [0.1.41 Choice 改了什么](https://github.com/zeeshanhaque21/nanoMuse/releases/tag/v0.1.41) · [每个客户端能做什么](/zh/parity) · [从哪儿开始参与](/zh/roadmap) · [中继保存什么](/zh/privacy) · [什么留在手机上，归谁](/zh/sync)
 
 ## 宣传片
 
-<video controls playsinline preload="metadata" poster="https://nanomuse.cn/media/film/poster-zh.png" style="width:100%;max-width:960px;border-radius:12px;display:block;margin:0 auto">
-  <source src="https://nanomuse.cn/media/film/nanomuse-film-zh-web.mp4" type="video/mp4">
-</video>
-
-74 秒，看 nanoMuse 在手机、电脑和网页上做什么。还有[英文版](https://nanomuse.cn/media/film/nanomuse-film-en-web.mp4)。
+74 秒，看 nanoMuse 在手机、电脑和网页上做什么。
 
 ## 引用
 

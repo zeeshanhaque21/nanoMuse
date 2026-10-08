@@ -53,7 +53,7 @@ build 39，中继 0.20.0。下一版 0.1.39 由 L 统一发布；**你不改任�
   **不要自己合并**，L 看过 CI 后合并。不 force-push。
 - **永远没有秘密。** API key、手机号、邮箱、token、证书、`.p8`、`config/config.toml`、
   `cloud/.env` 不进提交、不进 PR 描述、不贴进聊天；日志贴出来之前把这些打码。
-  不在 `cloud.nanomuse.cn` 上注册测试账号——测试用维护者自己的账号（登录验证码由维护者输入）。
+  不在公共中继上注册测试账号——测试用维护者自己的账号（登录验证码由维护者输入）。
 
 ## 1. 环境
 
@@ -246,7 +246,7 @@ TestFlight 上 build 8 = 0.1.37，build 9 = 0.1.38（2026-10-05 上传）。先�
 `xcodebuild build -project Minis.xcodeproj -scheme Minis -configuration Debug -destination
 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO` 零 warning（`NanoMuse/` 下）；`CHANGELOG.md`
 *Unreleased* → `### iOS` 加条目；`.venv/bin/python scripts/rebrand.py` 跑完输出 `clean`。
-CI 的 **iOS · build check** 只能手动触发：`gh workflow run "iOS · build check" --repo nano-muse/nanoMuse --ref mac/ios-crash-0139`。
+CI 的 **iOS · build check** 只能手动触发：`gh workflow run "iOS · build check" --repo zeeshanhaque21/nanoMuse --ref mac/ios-crash-0139`。
 TestFlight 的上传由 L 在发布时做，你不用管。
 
 ## 4. 任务 C — iOS：换账号后不再加载别人的本地数据（契约 C10）

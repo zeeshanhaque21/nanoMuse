@@ -4,10 +4,10 @@
 //
 //   npm run docs:dev      # http://127.0.0.1:5173/<base>
 //   npm run docs:build    # .vitepress/dist, also the dead-link check
-//   DOCS_BASE=/docs/ npm run docs:build   # for nanomuse.cn/docs/
+//   DOCS_BASE=/docs/ npm run docs:build   # for a site served under /docs/
 //
-// DOCS_BASE defaults to /nanoMuse/docs/ — the project pages at nano-muse.github.io keep
-// site/index.html (the redirect to nanomuse.cn) and site/legacy.html at the root, and the
+// DOCS_BASE defaults to /nanoMuse/docs/ — the project's GitHub Pages site keeps
+// site/index.html and site/legacy.html at the root, and the
 // docs sit beside them under /docs/.
 import { posix } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -205,10 +205,9 @@ export default defineConfig({
       lang: 'en',
       themeConfig: {
         siteTitle: 'nanoMuse docs',
-        // Home and Try it are the project site and the demo, the same two the homepage's bar has.
+        // The nav links to the repository, the project's one public page here.
         nav: [
-          { text: 'Home', link: 'https://nanomuse.cn/' },
-          { text: 'Try it', link: 'https://demo.nanomuse.dev/' },
+          { text: 'GitHub', link: 'https://github.com/zeeshanhaque21/nanoMuse' },
           { text: 'Get started', link: '/android' },
           { text: 'Run it yourself', link: '/self-hosting' },
           { text: 'Roadmap', link: '/roadmap' },
@@ -238,8 +237,7 @@ export default defineConfig({
       themeConfig: {
         siteTitle: 'nanoMuse 文档',
         nav: [
-          { text: '首页', link: 'https://nanomuse.cn/' },
-          { text: '试一试', link: 'https://demo.nanomuse.dev/' },
+          { text: 'GitHub', link: 'https://github.com/zeeshanhaque21/nanoMuse' },
           { text: '上手', link: '/zh/android' },
           { text: '自己部署', link: '/zh/self-hosting' },
           { text: '路线图', link: '/zh/roadmap' },

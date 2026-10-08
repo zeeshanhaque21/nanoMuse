@@ -519,7 +519,7 @@ configured, a mirror index
   look go, the account signs out; the chats stay).
 - **Help & support** — the docs, the site, discussions, report an issue, the version.
 - **Legal** — the licence, the Meta trademark notice, the acknowledgements (DeepSeek
-  Harness, OpenMinis) and the privacy policy (`nanomuse.cn/privacy/`, the page every
+  Harness, OpenMinis) and the privacy policy (`docs/privacy.md`, the page every
   client links).
 - **Advanced** — every page another plugin registers (the harness's plugin manager,
   archived sessions…), grouped at the bottom so they are there and out of the way.

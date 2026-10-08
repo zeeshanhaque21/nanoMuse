@@ -5,7 +5,7 @@ nanoMuse 是跑在你自己设备上的一个智能体，里面没有任何东�
 | | 你要运行什么 | 你得到什么 |
 |---|---|---|
 | [1. 不要服务器，用自己的 key](#_1-no-server-your-own-key) | 什么都不用 | 各个 App 直接和模型服务商对话；社区中继仍然用于登录和让设备互相找到 |
-| [2. 自己的中继](#_2-your-own-relay) | 一台小 VPS 或家用服务器上的 nanoMuse Cloud | 你自己的账号、登录验证码、hub 和对话同步；关于你账号的一切都不碰 nanomuse.cn |
+| [2. 自己的中继](#_2-your-own-relay) | 一台小 VPS 或家用服务器上的 nanoMuse Cloud | 你自己的账号、登录验证码、hub 和对话同步；关于你账号的一切都不碰公共中继 |
 | [3. 自己的运行时](#_3-a-runtime-of-your-own-for-the-web-app) | Docker 里的 Python 运行时 | 网页版，以及一台常开电脑上的手 |
 
 ## 1. 不要服务器，用自己的 key {#_1-no-server-your-own-key}
@@ -14,7 +14,7 @@ nanoMuse 是跑在你自己设备上的一个智能体，里面没有任何东�
 
 ## 2. 自己的中继 {#_2-your-own-relay}
 
-nanoMuse Cloud 就是 nanomuse.cn 背后的那个中继：邮箱或手机号登录、通过一个 OpenAI 兼容端点提供账号的模型、设备相遇的 hub、对话同步、`/app` 下的网页控制台和 `/app/admin/` 下的管理页。它是一个 Python 服务加一个 SQLite 文件，在这个仓库的 [`cloud/`](../../cloud/README.md) 下，放到你的服务器上照样跑。
+nanoMuse Cloud 就是各端登录的那个中继：邮箱或手机号登录、通过一个 OpenAI 兼容端点提供账号的模型、设备相遇的 hub、对话同步、`/app` 下的网页控制台和 `/app/admin/` 下的管理页。它是一个 Python 服务加一个 SQLite 文件，在这个仓库的 [`cloud/`](../../cloud/README.md) 下，放到你的服务器上照样跑。
 
 ### 你需要什么 {#what-you-need}
 
@@ -53,7 +53,7 @@ bash scripts/self-host.sh --local --bind 0.0.0.0   # reachable from the phones o
 
 ### 把各个 App 指向它 {#pointing-the-apps-at-it}
 
-每个 App 默认都在 `https://cloud.nanomuse.cn` 上登录，除非你另外告诉它。同一个账号的设备必须都指向同一个中继——hub 和对话都在那里。
+每个 App 都在 `base_url` 指定的中继上登录；没有设置时它不登录，直到你填上一个中继。同一个账号的设备必须都指向同一个中继——hub 和对话都在那里。
 
 - **Android**（0.1.38）。登录表单下面的「使用其他服务器」填中继地址；「检查」会访问它的 `/healthz` 并显示版本，「使用这个服务器」让这个地址在重启 App 之后也保留。在你自己的网络之外必须用 `https://`；私有地址（`10.x`、`172.16–31.x`、`192.168.x`、`localhost`、`.local` 或 `.ts.net` 名字）接受明文 `http://`。「设置 → 账号」显示当前服务器和「更换」，更换会先把手机退出登录（[android.md](android.md)）。
 - **iPhone / iPad。** 登录页上同样的链接，同样的规则。
@@ -72,7 +72,7 @@ bash scripts/self-host.sh --local --bind 0.0.0.0   # reachable from the phones o
 - **终端运行时和托管的网页版**（`nanomuse …`、根目录的 `docker-compose.yml`）：环境变量或 `.env` 里的 `NANOMUSE_CLOUD_BASE_URL=https://cloud.example.com`，或者 `config/config.toml` 里的 `[cloud] base_url`（[configuration.md](configuration.md)）。
 - **网页控制台**就是中继自己的 `/app`——`https://<your domain>/app/`——不需要指向。
 
-从你的中继发出的邀请链接指向它自己的控制台（`INVITE_URL`，由脚本设置），所以你邀请的朋友落在你的中继上，而不是 nanomuse.cn。
+从你的中继发出的邀请链接指向它自己的控制台（`INVITE_URL`，由脚本设置），所以你邀请的朋友落在你的中继上。
 
 ### 更新 {#updating}
 
@@ -101,7 +101,7 @@ Caddy 的证书在 `caddy_data` 卷里，丢了会重新申请。
 
 ## 3. 自己的运行时，给网页版用 {#_3-a-runtime-of-your-own-for-the-web-app}
 
-手机和桌面各自带着自己的智能体。网页版没有——它对话的是 Python 运行时，在 nanomuse.cn 上，每个访客有一个自己的容器。你可以把这个运行时跑在自己的机器上，在 Docker 里，然后从任何浏览器打开它上面的网页版：
+手机和桌面各自带着自己的智能体。网页版没有——它对话的是 Python 运行时，在上游的展示站上，每个访客有一个自己的容器。你可以把这个运行时跑在自己的机器上，在 Docker 里，然后从任何浏览器打开它上面的网页版：
 
 ```bash
 cp .env.example .env && $EDITOR .env      # a model key, NANOMUSE_SERVER_TOKEN; NANOMUSE_CLOUD_BASE_URL for your own relay

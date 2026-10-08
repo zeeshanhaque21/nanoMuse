@@ -182,7 +182,7 @@ The account-wide sync switch is in the app (*Data controls → Sync*); this is t
 
 ```toml
 [cloud]
-base_url = "https://cloud.nanomuse.cn"   # a relay you run yourself goes here
+base_url = ""   # a relay you run yourself goes here; empty runs with no relay
 required = true
 sync = true
 models = true        # the account's models as a source; the console's "Use nanoMuse Cloud models"

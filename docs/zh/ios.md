@@ -242,8 +242,7 @@ scripts/gen-ios-icons.py         the app icon and the four alternates, from asse
   小龙的短视频来自 bundle。*图像与视频模型* 列出模型、*换形象后自动生成动态*（默认开）和
   *生成 / 重做短视频*；工作室的费用估算把短视频也算进去。
 - **版本、star 提示、动态的第一天（0.1.35）**（`NanoMuseUpdateCheck.swift`、
-  `NanoMuseNudges.swift`）：版本那一行显示已安装的构建和最新版本（先查
-  `nanomuse.cn/dl/index.json`，再查 GitHub，缓存一天——*最新 0.1.x——你用的就是它* /
+  `NanoMuseNudges.swift`）：版本那一行显示已安装的构建和最新版本（查 GitHub，缓存一天——*最新 0.1.x——你用的就是它* /
   *0.1.x 已发布* / *没查到——点一下再试*）。star 提示遵循中继的策略（`/v1/nudges`、`/v1/me`
   里的 `nudges`，内置同样的默认值）：第一次对话里绝不出现，然后在第 3 / 10 / 30 个任务
   （`NanoMuseStarWatch`：一个由人发起、无错误地离开 `activeSessions` 的会话）、第 7 / 30 天、
@@ -499,8 +498,8 @@ openssl req -new -key dist.key -out dist.csr -subj "/emailAddress=<account e-mai
 openssl x509 -inform DER -in dist.cer -out dist.pem
 openssl rand -base64 24 | tr -d '\n' > dist.p12.pass
 openssl pkcs12 -export -inkey dist.key -in dist.pem -out dist.p12 -passout file:dist.p12.pass   # with OpenSSL 3 add -legacy
-base64 -w0 dist.p12 | gh secret set IOS_DIST_P12_BASE64 -R nano-muse/nanoMuse
-gh secret set IOS_DIST_P12_PASSWORD -R nano-muse/nanoMuse < dist.p12.pass
+base64 -w0 dist.p12 | gh secret set IOS_DIST_P12_BASE64 -R zeeshanhaque21/nanoMuse
+gh secret set IOS_DIST_P12_PASSWORD -R zeeshanhaque21/nanoMuse < dist.p12.pass
 ```
 
 私钥留在维护者机器上的那个文件夹里（以及 secret 里）；它的任何部分都不进仓库、日志或者
@@ -538,7 +537,7 @@ nanoMuse 的样子长在 Android App 里；从 0.1.34 起，iPhone 在 OpenMinis
 | `cloud`——中继客户端、登录、账号 | 已完成：`NanoMuse/NanoMuseCloud*.swift`、`NanoMuseAccount*.swift`（0.1.32：密码、邀请码、以元计的额度、用量、会话、时间线、删除） |
 | `ui.onboarding`——带 *登录，免费开始* 的引导 | 已完成（0.1.34）：`NanoMuseFirstRun.swift`，含第一次对话；0.1.35 加了通知页；iOS 上没有「手」那一页 |
 | `community.StarPrompt`、`community.Nudges`——按中继策略的 star 提示 | 已完成（0.1.35）：`NanoMuseNudges.swift`、`NanoMuseStar`——时机、冷却和上限来自 `/v1/nudges` |
-| `community.UpdateCheck`、版本行 | 已完成（0.1.35）：`NanoMuseUpdateCheck.swift`——已安装和最新，先 `nanomuse.cn/dl/index.json` 再 GitHub |
+| `community.UpdateCheck`、版本行 | 已完成（0.1.35）：`NanoMuseUpdateCheck.swift`——已安装和最新，GitHub 的发布 |
 | `avatar.VideoGen`、`avatar.AvatarMotion`——动作短视频 | 已完成（0.1.35）：`NanoMuseVideoGen.swift`、`NanoMuseAvatarMotion.swift`、`NanoMuseMediaModels.swift` |
 | `nm.show_steps`——智能体的步骤，从 0.1.37 起默认显示 | 0.1.32：`NanoMuseSteps.swift`；已完成的消息只留对话本身，正在进行的那条显示它的步骤 |
 | `connectors`——目录、`SharedConnectors` | 已完成：`NanoMuseConnectors.swift`（0.1.33 目录，0.1.34 其他设备的条目） |

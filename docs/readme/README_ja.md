@@ -1,59 +1,54 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/nano-muse/nanoMuse/main/assets/brand/nanomuse-cover.png" alt="nanoMuse：あなたのすべてのデバイスのための、オープンソースのパーソナルエージェント">
+  <img src="https://raw.githubusercontent.com/zeeshanhaque21/nanoMuse/main/assets/brand/nanomuse-cover.png" alt="nanoMuse：あなたのすべてのデバイスのための、オープンソースのパーソナルエージェント">
 </p>
 
 <p align="center">
-  <a href="https://github.com/nano-muse/nanoMuse/blob/main/README.md">English</a> |
-  <a href="https://github.com/nano-muse/nanoMuse/blob/main/docs/readme/README_zh.md">简体中文</a> |
-  <a href="https://github.com/nano-muse/nanoMuse/blob/main/docs/readme/README_zh-TW.md">繁體中文</a> |
-  <a href="https://github.com/nano-muse/nanoMuse/blob/main/docs/readme/README_es.md">Español</a> |
-  <a href="https://github.com/nano-muse/nanoMuse/blob/main/docs/readme/README_fr.md">Français</a> |
-  <a href="https://github.com/nano-muse/nanoMuse/blob/main/docs/readme/README_id.md">Bahasa Indonesia</a> |
-  <a href="https://github.com/nano-muse/nanoMuse/blob/main/docs/readme/README_ja.md">日本語</a> |
-  <a href="https://github.com/nano-muse/nanoMuse/blob/main/docs/readme/README_ko.md">한국어</a> |
-  <a href="https://github.com/nano-muse/nanoMuse/blob/main/docs/readme/README_ru.md">Русский</a> |
-  <a href="https://github.com/nano-muse/nanoMuse/blob/main/docs/readme/README_vi.md">Tiếng Việt</a>
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/blob/main/README.md">English</a> |
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/readme/README_zh.md">简体中文</a> |
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/readme/README_zh-TW.md">繁體中文</a> |
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/readme/README_es.md">Español</a> |
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/readme/README_fr.md">Français</a> |
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/readme/README_id.md">Bahasa Indonesia</a> |
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/readme/README_ja.md">日本語</a> |
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/readme/README_ko.md">한국어</a> |
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/readme/README_ru.md">Русский</a> |
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/readme/README_vi.md">Tiếng Việt</a>
 </p>
 <p align="center">
-  <a href="https://github.com/nano-muse/nanoMuse/stargazers"><img src="https://img.shields.io/github/stars/nano-muse/nanoMuse?style=flat&label=stars" alt="GitHub スター"></a>
-  <a href="https://github.com/nano-muse/nanoMuse/releases"><img src="https://img.shields.io/github/downloads/nano-muse/nanoMuse/total?label=downloads" alt="ダウンロード数"></a>
-  <a href="https://github.com/nano-muse/nanoMuse/actions/workflows/ci.yml"><img src="https://github.com/nano-muse/nanoMuse/actions/workflows/ci.yml/badge.svg?branch=main" alt="Test Suite"></a>
-  <a href="https://demo.nanomuse.dev/"><img src="https://img.shields.io/badge/%E8%A9%A6%E3%81%97%E3%81%A6%E3%81%BF%E3%82%8B-demo.nanomuse.dev-0a66e4" alt="ブラウザで試す"></a>
-  <a href="https://nanomuse.cn/"><img src="https://img.shields.io/badge/%E5%85%AC%E5%BC%8F%E3%82%B5%E3%82%A4%E3%83%88-nanomuse.cn-0a66e4" alt="公式サイト"></a>
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/stargazers"><img src="https://img.shields.io/github/stars/zeeshanhaque21/nanoMuse?style=flat&label=stars" alt="GitHub スター"></a>
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/releases"><img src="https://img.shields.io/github/downloads/zeeshanhaque21/nanoMuse/total?label=downloads" alt="ダウンロード数"></a>
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/actions/workflows/ci.yml"><img src="https://github.com/zeeshanhaque21/nanoMuse/actions/workflows/ci.yml/badge.svg?branch=main" alt="Test Suite"></a>
   <a href="https://arxiv.org/abs/2610.08699"><img src="https://img.shields.io/badge/arXiv-2610.08699-b31b1b" alt="arXiv の論文"></a>
-  <a href="https://github.com/nano-muse/nanoMuse/blob/main/LICENSE"><img src="https://img.shields.io/github/license/nano-muse/nanoMuse?label=license" alt="GPL-3.0-or-later"></a>
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/blob/main/LICENSE"><img src="https://img.shields.io/github/license/zeeshanhaque21/nanoMuse?label=license" alt="GPL-3.0-or-later"></a>
   <a href="https://discord.gg/bkTySmm28X"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="Discord"></a>
 </p>
 
 **nanoMuse は、あなたのすべてのデバイスのためのオープンソースのパーソナルエージェントです。** 名前と姿を持つひとりのエージェント。Meta の [Muse](https://about.fb.com/news/2026/09/introducing-muse-personal-ai-agent/) と同じ種類のもので、質問に答えるのではなく実際に手を動かし、アプリを閉じても働き続け、あなたのことを覚えていて、取り消せない操作の前には立ち止まって尋ねます。
 
-*nano* は、自分で動かして自分でデプロイできるほど小さな、ひとそろいのセットという意味です。スマホアプリ、デスクトップアプリ、ウェブコンソール、そしてそれらをつなぐリレーが、すべてこのリポジトリに GPL-3.0-or-later で入っています。**[無料、オープンソース、非営利。いっしょに作っていきましょう。](../../CONTRIBUTING.md)** サインインするとコミュニティのリレーでモデルを使える無料枠がもらえます。費用は開発者が負担しています。使い切ったら[自分のキーに切り替えて](../own-key.md)ください。同じリレーは自分のサーバーでも動くので、データを外に出さないこともできます。最新版は **0.1.41 Choice**、[リリースノート](https://github.com/nano-muse/nanoMuse/releases/tag/v0.1.41) · [ブラウザで試す](https://demo.nanomuse.dev/)。
 
 https://github.com/user-attachments/assets/c7694d5a-9450-4f99-9254-5d70560d7565
 
-<p align="center"><a href="https://nanomuse.cn/media/film/nanomuse-film-en-web.mp4">English</a> · <a href="https://nanomuse.cn/media/film/nanomuse-film-zh-web.mp4">中文</a> · <a href="https://nanomuse.cn/#film">nanomuse.cn</a></p>
 
 ## 🗞️ ニュース
 
 - `2026-10-07` 📄 私たちの論文が [arXiv](https://arxiv.org/abs/2610.08699) に公開されました。
-- `2026-10-07` 🚀 最新版：[0.1.41 Choice](https://github.com/nano-muse/nanoMuse/releases/tag/v0.1.41)。
+- `2026-10-07` 🚀 最新版：[0.1.41 Choice](https://github.com/zeeshanhaque21/nanoMuse/releases/tag/v0.1.41)。
 - `2026-09-25` 🎉 nanoMuse を公開しました。
 
-すべてのバージョン：[releases](https://github.com/nano-muse/nanoMuse/releases)。
+すべてのバージョン：[releases](https://github.com/zeeshanhaque21/nanoMuse/releases)。
 
 ## インストール
 
 | | |
 |---|---|
-| **ブラウザ** | [demo.nanomuse.dev](https://demo.nanomuse.dev/)：サインインすると、シミュレートしたスマホの上で nanoMuse が動きます。これはデモで、本物は下のアプリです |
-| **Android** 8.0 以上、arm64 | [nanoMuse-0.1.41-arm64.apk](https://github.com/nano-muse/nanoMuse/releases/download/v0.1.41/nanoMuse-0.1.41-arm64.apk)：すべてのバージョンが同じ鍵で署名され、上書きインストールできます |
+| **Android** 8.0 以上、arm64 | [nanoMuse-0.1.41-arm64.apk](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v0.1.41/nanoMuse-0.1.41-arm64.apk)：すべてのバージョンが同じ鍵で署名され、上書きインストールできます |
 | **iPhone / iPad** | [TestFlight](https://testflight.apple.com/join/ZHexbDqc)：ベータ版。Apple のベータ審査が通り次第、このリンクからビルドが届きます · [iOS](../ios.md) |
-| **macOS** 12 以上 | [Apple シリコン](https://github.com/nano-muse/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-mac-arm64.dmg) · [Intel](https://github.com/nano-muse/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-mac-x64.dmg)：公証なし。初回は右クリック → 「開く」 |
-| **Windows** 10 以上 | [nanoMuse-Desktop-0.1.41-win-x64.exe](https://github.com/nano-muse/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-win-x64.exe)：一度だけ「実行」を押してください |
-| **Linux** x64 | [AppImage](https://github.com/nano-muse/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-linux-x64.AppImage) · [.deb](https://github.com/nano-muse/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-linux-x64.deb) · [tar.gz](https://github.com/nano-muse/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-linux-x64.tar.gz) |
+| **macOS** 12 以上 | [Apple シリコン](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-mac-arm64.dmg) · [Intel](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-mac-x64.dmg)：公証なし。初回は右クリック → 「開く」 |
+| **Windows** 10 以上 | [nanoMuse-Desktop-0.1.41-win-x64.exe](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-win-x64.exe)：一度だけ「実行」を押してください |
+| **Linux** x64 | [AppImage](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-linux-x64.AppImage) · [.deb](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-linux-x64.deb) · [tar.gz](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-linux-x64.tar.gz) |
 | **Docker** | `bash scripts/self-host.sh --local` で自分のリレーを、`docker compose up -d app` で自分のサーバーにウェブアプリを。[セルフホスティング](../self-hosting.md) |
 
-ダウンロードはすべて [GitHub の最新リリース](https://github.com/nano-muse/nanoMuse/releases/latest)から。GitHub が遅い地域では同じファイルが [nanomuse.cn/dl](https://nanomuse.cn/dl/) にあります。アプリを開き、メールアドレスか中国本土の携帯番号でサインインすれば、エージェントが使うモデルが用意されます。スマホ、デスクトップ、ウェブはひとつのアカウントを共有し、同じ会話が見えます。
+ダウンロードはすべて [GitHub の最新リリース](https://github.com/zeeshanhaque21/nanoMuse/releases/latest)から。アプリを開き、メールアドレスか中国本土の携帯番号でサインインすれば、エージェントが使うモデルが用意されます。スマホ、デスクトップ、ウェブはひとつのアカウントを共有し、同じ会話が見えます。
 
 ## できること
 
@@ -81,7 +76,7 @@ https://github.com/user-attachments/assets/c7694d5a-9450-4f99-9254-5d70560d7565
 どのデバイスも自分のエージェントを動かします。スマホは APK の中で（proot 上の Alpine Linux、シェル、ブラウザ、MCP）、パソコンは nanoMuse Desktop の中で（DeepSeek Harness と、手のための Python ランタイム）。サインインするとリレーで出会い、互いに頼みごとができます。会話のテキストはリレーを通りますが、ファイルやスクリーンショットは作られたデバイスに残ります。
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/nano-muse/nanoMuse/main/assets/brand/devices-loop.png" alt="Android、デスクトップ（Mac、Windows、Linux）、iPhone と iPad、ウェブ版がひとつのアカウントを囲む：リレーが各端末をサインインさせ、端末間で会話を運ぶ" width="92%">
+  <img src="https://raw.githubusercontent.com/zeeshanhaque21/nanoMuse/main/assets/brand/devices-loop.png" alt="Android、デスクトップ（Mac、Windows、Linux）、iPhone と iPad、ウェブ版がひとつのアカウントを囲む：リレーが各端末をサインインさせ、端末間で会話を運ぶ" width="92%">
 </p>
 
 デバイスについては [docs/every-device.md](../every-device.md)、フレームは [docs/hub.md](../hub.md)、リレーは [docs/cloud.md](../cloud.md)、何を保存するかは [docs/privacy.md](../privacy.md)。
@@ -98,7 +93,7 @@ https://github.com/user-attachments/assets/c7694d5a-9450-4f99-9254-5d70560d7565
 
 ## ドキュメント
 
-[nanomuse.cn/docs](https://nanomuse.cn/docs/)：プラットフォーム別のインストール、すべてのデバイス、Hands、コネクタ、記憶、セルフホスティング、プロトコル。ソースは [docs/](../) に、各バージョンの変更点は [CHANGELOG](../../CHANGELOG.md) と [docs/releases/](../releases/) にあります。
+[docs/](../)：プラットフォーム別のインストール、すべてのデバイス、Hands、コネクタ、記憶、セルフホスティング、プロトコル。ソースは [docs/](../) に、各バージョンの変更点は [CHANGELOG](../../CHANGELOG.md) と [docs/releases/](../releases/) にあります。
 
 ## セルフホスティング
 
@@ -106,7 +101,7 @@ VPS 1 台、1 時間：[docs/self-hosting.md](../self-hosting.md)。三つの道
 
 ## 貢献する
 
-実際の用事に使い、壊れたところを報告し、それから小さく具体的なことをひとつ選んでください。[CONTRIBUTING.md](../../CONTRIBUTING.md) にセットアップと規約、[AGENTS.md](../../AGENTS.md) にこのツリーでコーディングエージェントが守るルール、[ロードマップ](../roadmap.md)にどこから始めるか。[Issues](https://github.com/nano-muse/nanoMuse/issues) · [Discussions](https://github.com/nano-muse/nanoMuse/discussions) · [Discord](https://discord.gg/bkTySmm28X)。
+実際の用事に使い、壊れたところを報告し、それから小さく具体的なことをひとつ選んでください。[CONTRIBUTING.md](../../CONTRIBUTING.md) にセットアップと規約、[AGENTS.md](../../AGENTS.md) にこのツリーでコーディングエージェントが守るルール、[ロードマップ](../roadmap.md)にどこから始めるか。[Issues](https://github.com/zeeshanhaque21/nanoMuse/issues) · [Discussions](https://github.com/zeeshanhaque21/nanoMuse/discussions) · [Discord](https://discord.gg/bkTySmm28X)。
 
 ## ⭐️ 引用
 

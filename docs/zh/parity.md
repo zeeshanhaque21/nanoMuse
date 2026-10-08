@@ -73,7 +73,7 @@ nanoMuse 是同一个智能体，在每台设备上都是它：手机（Android�
 | hub，入站：这台设备回应别的设备（shell · 文件 · 打开 · 屏幕 · 通知 · 任务） | ✓ `HubActions` | ◐ 信息 · 打开 · 通知 · 任务；shell、文件和屏幕回答*不支持* *(10)* | ✓ `actions.ts` | ✓ 运行时；浏览器标签页不算一台设备 |
 | 手——这台设备自己的屏幕当手 | ✓ | n/a *(10)* | ✓ Linux X11（Wayland *(21)*）；macOS 上一次一个窗口、鼠标仍归人、按 App 授权、光晕和胶囊不进截图 *(19)*；Windows 待试 *(31)* | n/a |
 | 反馈问题：点一下打开一个 GitHub issue | ✓ 设置 → 账号 | ✓ 关于 → 「报告问题」 | ✓ 角落菜单；在外壳里截图存到「下载」，issue 带着内容打开 | ✓ 设置 → 反馈 |
-| 已安装和最新版本并排显示（先 `nanomuse.cn/dl/index.json`，再 GitHub，缓存一天） | ✓ 0.1.35 设置 → 版本 | ✓ 0.1.35 设置 → 版本 | ✓ 0.1.35 关于，设置里一行 | ✓ 0.1.35 设置 |
+| 已安装和最新版本并排显示（GitHub 的发布，缓存一天） | ✓ 0.1.35 设置 → 版本 | ✓ 0.1.35 设置 → 版本 | ✓ 0.1.35 关于，设置里一行 | ✓ 0.1.35 设置 |
 | 全黑的截图是一个带修法的错误（录屏、Wayland），绝不是一张图 | n/a | n/a | ✓ 0.1.33 | n/a |
 | macOS 权限实时读回；询问后「打开系统设置」；录屏需要重启的提示 | n/a | n/a | ✓ 0.1.33；0.1.35：只需打开一项，「试一下」行，录屏打开时弹重启对话框；0.1.38 起那一项是辅助应用「nanoMuse Computer Use」 *(26)* | n/a |
 | 设备上的迷你 Linux 沙箱 | ✓ | ✓ 上游（iSH） | n/a——运行时有自己的沙箱 | n/a |
@@ -156,6 +156,6 @@ nanoMuse 是同一个智能体，在每台设备上都是它：手机（Android�
 - 面向中继的代码在每个客户端上用同一个线路格式：`nanomuse/cloud.py`（运行时）、`harness/dsh-nanomuse/src/relay.ts`（桌面）、`io.github.nanomuse.cloud.NanoMuseCloud`（Android）、`NanoMuse/NanoMuseCloud.swift` + `NanoMuseAccount.swift`（iOS）。中继的新字段四处都要落。
 - 中继的拒绝代码（`docs/cloud.md`）在四个地方变成句子：`nanomuse/server/failures.py`（运行时和网页）、`harness/dsh-nanomuse/src/refusals.ts`（桌面——宿主改写失败，客户端画卡片）、Android 和 iOS 上的 `NanoMuseCloud.describe`。新代码四处都要落，句子在该客户端的每种语言里都要有；桌面的 `tests/refusals.test.mjs` 和 `tests/refusal-card.test.mjs` 是可以照抄的测试形状。
 - 请求点 Star 到处都遵循一个策略——中继的 `/v1/nudges`（`docs/cloud.md` 里的约定 C1），每个客户端内置同样的默认值：一个*任务*是这个人发起并得到回复的一轮，第一次对话、例程、动态和目标检查都不算；每个时机一次，间隔 `cooldown_days`，每台设备 `max_asks` 次，点了「去 GitHub 点亮 Star」之后永远不再问（`nm.star.*` / `nanomuse.star.*`）。客户端：`nanomuse/nudges.py`、`harness/dsh-nanomuse/src/nudges.ts`、`web/src/nudges.ts`、`io.github.nanomuse.community.Nudges`、`NanoMuse/NanoMuseNudges.swift`。
-- 版本检查在每个客户端上按同样的顺序读同样的两个来源：`https://nanomuse.cn/dl/index.json`，然后 GitHub 的 `releases/latest`；缓存一天；那一行永远也显示已安装的版本。
+- 版本检查在每个客户端上按同样的顺序读同一个来源：GitHub 的 `releases/latest`；缓存一天；那一行永远也显示已安装的版本。
 - 对话同步从四个客户端和一个中继说同一种线路格式（`docs/cloud.md` 里的约定 C7）：`cloud/nanomuse_cloud/sync.py`、`nanomuse/sync/`（运行时和网页）、`harness/dsh-nanomuse/src/sync.ts`（桌面）、`io.github.nanomuse.sync`（Android）、`NanoMuse/NanoMuseSync.swift`（iOS）。每个客户端都先应用一页的对话再应用它的消息，只在拉取时移动游标；每个客户端只推送这个人的话和最终答复——绝不推送工具步骤、工具结果或系统提示——例程、目标、动态和替另一台设备干的活都留在家里。
 - `ideas.en.json` / `ideas.zh.json` 是同一个文件存四份（Android 资源、iOS Resources、`harness/dsh-nanomuse/assets`、`web/src/ideas`）；某一份漂移时 harness 和网页的测试会失败。

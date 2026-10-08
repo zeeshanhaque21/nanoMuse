@@ -1,59 +1,54 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/nano-muse/nanoMuse/main/assets/brand/nanomuse-cover.png" alt="nanoMuse：开源的个人智能体，面向你的每一台设备">
+  <img src="https://raw.githubusercontent.com/zeeshanhaque21/nanoMuse/main/assets/brand/nanomuse-cover.png" alt="nanoMuse：开源的个人智能体，面向你的每一台设备">
 </p>
 
 <p align="center">
-  <a href="https://github.com/nano-muse/nanoMuse/blob/main/README.md">English</a> |
-  <a href="https://github.com/nano-muse/nanoMuse/blob/main/docs/readme/README_zh.md">简体中文</a> |
-  <a href="https://github.com/nano-muse/nanoMuse/blob/main/docs/readme/README_zh-TW.md">繁體中文</a> |
-  <a href="https://github.com/nano-muse/nanoMuse/blob/main/docs/readme/README_es.md">Español</a> |
-  <a href="https://github.com/nano-muse/nanoMuse/blob/main/docs/readme/README_fr.md">Français</a> |
-  <a href="https://github.com/nano-muse/nanoMuse/blob/main/docs/readme/README_id.md">Bahasa Indonesia</a> |
-  <a href="https://github.com/nano-muse/nanoMuse/blob/main/docs/readme/README_ja.md">日本語</a> |
-  <a href="https://github.com/nano-muse/nanoMuse/blob/main/docs/readme/README_ko.md">한국어</a> |
-  <a href="https://github.com/nano-muse/nanoMuse/blob/main/docs/readme/README_ru.md">Русский</a> |
-  <a href="https://github.com/nano-muse/nanoMuse/blob/main/docs/readme/README_vi.md">Tiếng Việt</a>
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/blob/main/README.md">English</a> |
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/readme/README_zh.md">简体中文</a> |
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/readme/README_zh-TW.md">繁體中文</a> |
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/readme/README_es.md">Español</a> |
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/readme/README_fr.md">Français</a> |
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/readme/README_id.md">Bahasa Indonesia</a> |
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/readme/README_ja.md">日本語</a> |
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/readme/README_ko.md">한국어</a> |
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/readme/README_ru.md">Русский</a> |
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/readme/README_vi.md">Tiếng Việt</a>
 </p>
 <p align="center">
-  <a href="https://github.com/nano-muse/nanoMuse/stargazers"><img src="https://img.shields.io/github/stars/nano-muse/nanoMuse?style=flat&label=stars" alt="GitHub stars"></a>
-  <a href="https://github.com/nano-muse/nanoMuse/releases"><img src="https://img.shields.io/github/downloads/nano-muse/nanoMuse/total?label=downloads" alt="下载量"></a>
-  <a href="https://github.com/nano-muse/nanoMuse/actions/workflows/ci.yml"><img src="https://github.com/nano-muse/nanoMuse/actions/workflows/ci.yml/badge.svg?branch=main" alt="Test Suite"></a>
-  <a href="https://demo.nanomuse.dev/"><img src="https://img.shields.io/badge/%E5%9C%A8%E7%BA%BF%E4%BD%93%E9%AA%8C-demo.nanomuse.dev-0a66e4" alt="在线体验"></a>
-  <a href="https://nanomuse.cn/"><img src="https://img.shields.io/badge/%E5%AE%98%E7%BD%91-nanomuse.cn-0a66e4" alt="官网"></a>
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/stargazers"><img src="https://img.shields.io/github/stars/zeeshanhaque21/nanoMuse?style=flat&label=stars" alt="GitHub stars"></a>
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/releases"><img src="https://img.shields.io/github/downloads/zeeshanhaque21/nanoMuse/total?label=downloads" alt="下载量"></a>
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/actions/workflows/ci.yml"><img src="https://github.com/zeeshanhaque21/nanoMuse/actions/workflows/ci.yml/badge.svg?branch=main" alt="Test Suite"></a>
   <a href="https://arxiv.org/abs/2610.08699"><img src="https://img.shields.io/badge/arXiv-2610.08699-b31b1b" alt="arXiv 上的论文"></a>
-  <a href="https://github.com/nano-muse/nanoMuse/blob/main/LICENSE"><img src="https://img.shields.io/github/license/nano-muse/nanoMuse?label=license" alt="GPL-3.0-or-later"></a>
+  <a href="https://github.com/zeeshanhaque21/nanoMuse/blob/main/LICENSE"><img src="https://img.shields.io/github/license/zeeshanhaque21/nanoMuse?label=license" alt="GPL-3.0-or-later"></a>
   <a href="https://discord.gg/bkTySmm28X"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="Discord"></a>
 </p>
 
 **nanoMuse 是一个开源的个人智能体，面向你的每一台设备。** 一个有名字、有自己形象的智能体，和 Meta 的 [Muse](https://about.fb.com/news/2026/09/introducing-muse-personal-ai-agent/) 是同一类东西：不只回答问题，而是动手做事；App 关了也继续干；记得你；遇到无法撤销的操作会先停下来问你。
 
-*nano* 的意思是完整的一套，小到你自己就能跑、能部署：手机 App、桌面 App、网页控制台，还有把它们连在一起的中继，都在这个仓库里，GPL-3.0-or-later。**[免费、开源、非营利。一起把它做好。](../../CONTRIBUTING.md)** 登录就有一份免费的模型额度，走社区中继，钱是开发者出的；用完可以[换自己的 key](../own-key.md)。同一套中继也能跑在你自己的服务器上，数据不用出门。最新版本：**0.1.41 Choice**，[发布说明](https://github.com/nano-muse/nanoMuse/releases/tag/v0.1.41) · [在线体验](https://demo.nanomuse.dev/)。
 
 https://github.com/user-attachments/assets/bf0ec2ae-59aa-4358-9dd0-c9d045ee7bee
 
-<p align="center"><a href="https://nanomuse.cn/media/film/nanomuse-film-en-web.mp4">English</a> · <a href="https://nanomuse.cn/media/film/nanomuse-film-zh-web.mp4">中文</a> · <a href="https://nanomuse.cn/#film">nanomuse.cn</a></p>
 
 ## 🗞️ 动态
 
 - `2026-10-07` 📄 我们的论文已发布在 [arXiv](https://arxiv.org/abs/2610.08699)。
-- `2026-10-07` 🚀 最新版本：[0.1.41 Choice](https://github.com/nano-muse/nanoMuse/releases/tag/v0.1.41)。
+- `2026-10-07` 🚀 最新版本：[0.1.41 Choice](https://github.com/zeeshanhaque21/nanoMuse/releases/tag/v0.1.41)。
 - `2026-09-25` 🎉 nanoMuse 发布。
 
-全部版本：[releases](https://github.com/nano-muse/nanoMuse/releases)。
+全部版本：[releases](https://github.com/zeeshanhaque21/nanoMuse/releases)。
 
 ## 安装
 
 | | |
 |---|---|
-| **浏览器** | [demo.nanomuse.dev](https://demo.nanomuse.dev/)：一台模拟手机上的 nanoMuse，登录后体验。这是演示；下面的客户端才是正式的 |
-| **Android** 8.0 以上，arm64 | [nanoMuse-0.1.41-arm64.apk](https://github.com/nano-muse/nanoMuse/releases/download/v0.1.41/nanoMuse-0.1.41-arm64.apk)：每个版本同一把签名，覆盖安装即可升级 |
+| **Android** 8.0 以上，arm64 | [nanoMuse-0.1.41-arm64.apk](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v0.1.41/nanoMuse-0.1.41-arm64.apk)：每个版本同一把签名，覆盖安装即可升级 |
 | **iPhone / iPad** | [TestFlight](https://testflight.apple.com/join/ZHexbDqc)：测试版；Apple 的 beta 审核通过后，这个链接就能装到构建 · [iOS](../ios.md) |
-| **macOS** 12 以上 | [Apple 芯片](https://github.com/nano-muse/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-mac-arm64.dmg) · [Intel](https://github.com/nano-muse/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-mac-x64.dmg)：没有公证：第一次右键 → 打开 |
-| **Windows** 10 以上 | [nanoMuse-Desktop-0.1.41-win-x64.exe](https://github.com/nano-muse/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-win-x64.exe)：点一次「仍要运行」 |
-| **Linux** x64 | [AppImage](https://github.com/nano-muse/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-linux-x64.AppImage) · [.deb](https://github.com/nano-muse/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-linux-x64.deb) · [tar.gz](https://github.com/nano-muse/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-linux-x64.tar.gz) |
+| **macOS** 12 以上 | [Apple 芯片](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-mac-arm64.dmg) · [Intel](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-mac-x64.dmg)：没有公证：第一次右键 → 打开 |
+| **Windows** 10 以上 | [nanoMuse-Desktop-0.1.41-win-x64.exe](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-win-x64.exe)：点一次「仍要运行」 |
+| **Linux** x64 | [AppImage](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-linux-x64.AppImage) · [.deb](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-linux-x64.deb) · [tar.gz](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-linux-x64.tar.gz) |
 | **Docker** | `bash scripts/self-host.sh --local` 搭自己的中继；`docker compose up -d app` 在自己的服务器上跑网页版；见[自己部署](../self-hosting.md) |
 
-下载都来自 [GitHub 最新版本](https://github.com/nano-muse/nanoMuse/releases/latest)；GitHub 下不动时，同样的文件在 [nanomuse.cn/dl](https://nanomuse.cn/dl/)。打开 App，用邮箱或中国大陆手机号登录，它就有模型可用。手机、桌面和网页共用一个账号，看到的是同样的对话。
+下载都来自 [GitHub 最新版本](https://github.com/zeeshanhaque21/nanoMuse/releases/latest)。打开 App，用邮箱或中国大陆手机号登录，它就有模型可用。手机、桌面和网页共用一个账号，看到的是同样的对话。
 
 ## 能做什么
 
@@ -81,7 +76,7 @@ https://github.com/user-attachments/assets/bf0ec2ae-59aa-4358-9dd0-c9d045ee7bee
 每台设备上都跑着自己的智能体：手机上在 APK 里（proot 下的 Alpine Linux、shell、浏览器、MCP），电脑上在 nanoMuse Desktop 里（DeepSeek Harness 加上负责「手」的 Python 运行时）。登录后它们在中继上相遇，可以互相拜托；对话的文字经中继传递，文件和截图留在产生它们的设备上。
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/nano-muse/nanoMuse/main/assets/brand/devices-loop.png" alt="Android、桌面端（Mac、Windows、Linux）、iPhone 和 iPad、网页版围绕同一个账号：中继负责登录，并在设备之间同步对话" width="92%">
+  <img src="https://raw.githubusercontent.com/zeeshanhaque21/nanoMuse/main/assets/brand/devices-loop.png" alt="Android、桌面端（Mac、Windows、Linux）、iPhone 和 iPad、网页版围绕同一个账号：中继负责登录，并在设备之间同步对话" width="92%">
 </p>
 
 [docs/every-device.md](../every-device.md) 讲设备之间怎么配合，[docs/hub.md](../hub.md) 讲帧格式，[docs/cloud.md](../cloud.md) 讲中继，[docs/privacy.md](../privacy.md) 讲它保存什么。
@@ -98,7 +93,7 @@ https://github.com/user-attachments/assets/bf0ec2ae-59aa-4358-9dd0-c9d045ee7bee
 
 ## 文档
 
-[nanomuse.cn/docs](https://nanomuse.cn/docs/)：各平台的安装、多端、「手」、连接器、记忆、自己部署、协议。源文件在 [docs/](../)；每个版本改了什么在 [CHANGELOG](../../CHANGELOG.md) 和 [docs/releases/](../releases/)。
+[docs/](../)：各平台的安装、多端、「手」、连接器、记忆、自己部署、协议。源文件在 [docs/](../)；每个版本改了什么在 [CHANGELOG](../../CHANGELOG.md) 和 [docs/releases/](../releases/)。
 
 ## 自己部署
 
@@ -106,7 +101,7 @@ https://github.com/user-attachments/assets/bf0ec2ae-59aa-4358-9dd0-c9d045ee7bee
 
 ## 参与
 
-拿它做一件真事，报告哪里坏了，然后挑一件小而具体的事做：[CONTRIBUTING.md](../../CONTRIBUTING.md) 有环境和约定，[AGENTS.md](../../AGENTS.md) 是编程智能体在这棵树里要守的规矩，[路线图](../roadmap.md)说从哪儿入手。[Issues](https://github.com/nano-muse/nanoMuse/issues) · [Discussions](https://github.com/nano-muse/nanoMuse/discussions) · [Discord](https://discord.gg/bkTySmm28X)。
+拿它做一件真事，报告哪里坏了，然后挑一件小而具体的事做：[CONTRIBUTING.md](../../CONTRIBUTING.md) 有环境和约定，[AGENTS.md](../../AGENTS.md) 是编程智能体在这棵树里要守的规矩，[路线图](../roadmap.md)说从哪儿入手。[Issues](https://github.com/zeeshanhaque21/nanoMuse/issues) · [Discussions](https://github.com/zeeshanhaque21/nanoMuse/discussions) · [Discord](https://discord.gg/bkTySmm28X)。
 
 ## ⭐️ 引用
 

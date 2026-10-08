@@ -66,7 +66,7 @@ harness 构建以 *nanoMuse Harness* 的名字另放在旁边；从 0.1.30 起�
   还有手的运行时（`nanomuse mcp` 继承同一组变量）。nanoMuse 云端——中继、hub 的 WebSocket、同步——和本机回环永远不经过。
   外壳把它存在 `desktop.json` 里，和「登录时启动」放在一起，启动 dsh Host 时写进它的环境
   （`HTTP_PROXY`、`HTTPS_PROXY`、SOCKS 时还有 `ALL_PROXY`，`NO_PROXY` 带着
-  `localhost,127.0.0.1,::1`、`cloud.nanomuse.cn` 和插件所连的中继，以及让 Node 的 fetch 读这些
+  `localhost,127.0.0.1,::1` 和插件所连的中继，以及让 Node 的 fetch 读这些
   变量的 `NODE_USE_ENV_PROXY=1`），所以重启后生效——这一行下面的「立即重启」会在窗口不关的
   情况下重启 Host。手机上同样的设置在服务商表单里，网页版在自有 key 表单里，运行时是
   `[llm] proxy`（[own-key.md](own-key.md#when-the-provider-cannot-be-reached)）；

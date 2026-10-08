@@ -114,7 +114,7 @@ Muse 的名字和外观照旧跟着账号走。从 0.1.40 起，手机走得更�
 
 ## 浏览器：一台模拟手机上的演示 {#the-browser-a-demo-on-a-simulated-phone}
 
-[nanomuse.cn/web](https://nanomuse.cn/web/) 通向展示站：浏览器里的一台模拟手机（MobileGym，nanoMuse App 放在前台——`demo/mobilegym/apps/nanoMuse`），背后是展示站网关为这次访问启动的、访客自己的一份私有 nanoMuse——`ghcr.io/nano-muse/nanomuse` 镜像，跑在一个除了网关没有任何出口的网络里，和展示站的模型对话，访问结束就消失。访客先登录 nanoMuse Cloud（验证码发到手机或邮箱，或用账号密码；`demo/showcase/gateway/showcase_gateway/visitors.py`），这样项目知道是谁在试，而且到安装 App 那天，同一个账号就在那里等着。页面上直说：这是一个演示，离 Android App 还差得远，并告诉你 App 在哪里。首页 [nanomuse.cn](https://nanomuse.cn/) 把同一个页面放在一个框架里显示（`?embed=1`：没有自己的页头，手机等你点一下才开机，而不是自己亮起来，所以打开首页什么都不会启动）。
+上游的展示站（nanomuse.cn/web，这个 fork 不托管它）通向：浏览器里的一台模拟手机（MobileGym，nanoMuse App 放在前台——`demo/mobilegym/apps/nanoMuse`），背后是展示站网关为这次访问启动的、访客自己的一份私有 nanoMuse——`ghcr.io/nano-muse/nanomuse` 镜像，跑在一个除了网关没有任何出口的网络里，和展示站的模型对话，访问结束就消失。访客先登录 nanoMuse Cloud（验证码发到手机或邮箱，或用账号密码；`demo/showcase/gateway/showcase_gateway/visitors.py`），这样项目知道是谁在试，而且到安装 App 那天，同一个账号就在那里等着。页面上直说：这是一个演示，离 Android App 还差得远，并告诉你 App 在哪里。首页 上游的首页（nanomuse.cn，这个 fork 不托管它） 把同一个页面放在一个框架里显示（`?embed=1`：没有自己的页头，手机等你点一下才开机，而不是自己亮起来，所以打开首页什么都不会启动）。
 
 网页版早先的形状——每个 Cloud 账号一份常驻的 Muse，带命名卷，在 hub 上和其他设备一样占一个位置（`accounts.py`，`WEB_ENABLED=1`）——仍然留在网关里，给自己跑网关的人用；项目自己的服务器上从 0.1.26 起关掉了。细节和设置项在 [demo/showcase/README.md](../../demo/showcase/README.md)。
 
@@ -141,7 +141,7 @@ iOS 会说 hub 的话（`info`、`open`、`notify`、`task`），形状从 0.1.3
 | Android 形状的界面 | 参照 | 网页版（宽屏用侧栏）+ 窗口（0.1.19） | 网页版 | 控制台 | 0.1.34 起 |
 | 手干活时的舞台 | `HandsStage` | 「手」卡片；窗口里的舞台悬浮层 | — | — | — |
 
-随 0.1.19 发布的：APK、桌面安装包（`nanoMuse-Desktop-…`，[`.github/workflows/desktop-app.yml`](../../.github/workflows/desktop-app.yml)）、终端二进制（0.1.39 已去掉），以及 nanomuse.cn/web 上的 nanoMuse Web（0.1.26 起是模拟手机上的演示）。
+随 0.1.19 发布的：APK、桌面安装包（`nanoMuse-Desktop-…`，[`.github/workflows/desktop-app.yml`](../../.github/workflows/desktop-app.yml)）、终端二进制（0.1.39 已去掉），以及上游在 nanomuse.cn/web 上的 nanoMuse Web（0.1.26 起是模拟手机上的演示）。
 
 ## 在一台机器上调试整套东西 {#debugging-it-all-on-one-machine}
 

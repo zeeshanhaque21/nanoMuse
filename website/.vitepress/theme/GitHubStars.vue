@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // The repository link in the nav, with its star count. The same fetch, cache key, TTL and
-// number format as the homepage's site.js (nanomuse.cn), so a visitor who has seen one page
+// number format as upstream's homepage site.js, so a visitor who has seen one page
 // sees the same number on the other without a second request: `nm-stars` in localStorage,
 // `{ n, t }`, good for an hour. Without a number — API down, private mode, first visit while
 // offline — the link still says GitHub. The count's slot is reserved so nothing moves when
@@ -9,7 +9,7 @@ import { onMounted, ref } from 'vue'
 import { useData } from 'vitepress'
 
 const REPO = 'https://github.com/zeeshanhaque21/nanoMuse'
-const API = 'https://api.github.com/repos/nano-muse/nanoMuse'
+const API = 'https://api.github.com/repos/zeeshanhaque21/nanoMuse'
 const KEY = 'nm-stars'
 const TTL = 3600000
 

@@ -182,7 +182,7 @@ side_chats = false   # off: only the main conversation travels between devices
 
 ```toml
 [cloud]
-base_url = "https://cloud.nanomuse.cn"   # 自己架的中继写在这里
+base_url = ""   # 自己架的中继写在这里；留空则不连任何中继
 required = true
 sync = true
 models = true        # 账号的模型是否作为来源；控制台里的「使用 nanoMuse Cloud 模型」

@@ -587,8 +587,8 @@ openssl req -new -key dist.key -out dist.csr -subj "/emailAddress=<account e-mai
 openssl x509 -inform DER -in dist.cer -out dist.pem
 openssl rand -base64 24 | tr -d '\n' > dist.p12.pass
 openssl pkcs12 -export -inkey dist.key -in dist.pem -out dist.p12 -passout file:dist.p12.pass   # with OpenSSL 3 add -legacy
-base64 -w0 dist.p12 | gh secret set IOS_DIST_P12_BASE64 -R nano-muse/nanoMuse
-gh secret set IOS_DIST_P12_PASSWORD -R nano-muse/nanoMuse < dist.p12.pass
+base64 -w0 dist.p12 | gh secret set IOS_DIST_P12_BASE64 -R zeeshanhaque21/nanoMuse
+gh secret set IOS_DIST_P12_PASSWORD -R zeeshanhaque21/nanoMuse < dist.p12.pass
 ```
 
 The private key stays in that folder on the maintainer's machine (and in the secret); nothing

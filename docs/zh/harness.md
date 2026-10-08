@@ -201,7 +201,7 @@ Laptop B 自己的聊天里让它的 Muse「在 Desk A 上」运行一条命令�
 | 技能、日程、目标、记忆、子智能体             | dsh 自己的（`skill`、`schedule`、`goals`、压缩、委派）——我们的不移植                                                       | 有意为之  |
 | 网页界面、zh-CN                                           | dsh 的网页 App（它自带中文）；我们的字符串在 bundle 的语言表里                                                                        | 已完成     |
 | 桌面外壳                                       | `harness/desktop`：我们的 Electron 外壳，harness 的 Host 作为子进程以 Node 模式运行，里面是 dsh + bundle + 负责手的运行时；Windows、macOS、Linux 的安装包由 `desktop-app.yml` 产出 | 已完成（未签名） |
-| nanomuse.cn/web 的浏览器演示                         | 留在 Python 运行时上                                                                                                                  | 不变  |
+| 上游的浏览器演示                         | 留在 Python 运行时上                                                                                                                  | 不变  |
 | 手机                                               | 留在 Python 运行时上；通过账号和 Reach 与桌面版相遇                                                                 | 不变  |
 
 ## 做这一块时学到的 {#what-we-learned-building-the-slice}
