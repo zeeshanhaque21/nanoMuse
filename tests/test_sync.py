@@ -726,6 +726,68 @@ def test_a_sign_out_during_a_push_marks_nothing_synced(synced) -> None:
 
 
 # ----------------------------------------------------------------------------- the switch, the failures
+@pytest.mark.parametrize("operation", ["push", "pull", "delete", "state"])
+@pytest.mark.parametrize("status,code", [(401, "bad_key"), (409, "sync_off"), (0, "network")])
+@pytest.mark.parametrize("next_account", ["acct-B", "acct-A"])
+def test_an_old_accounts_late_error_does_not_change_the_new_accounts_state(
+    synced,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+    status: int,
+    code: str,
+    next_account: str,
+) -> None:
+    client, service, llm, relay = synced
+    wait_for(lambda: settled(service))
+    _switch_to(client, service, relay, "acct-A", "key-A")
+    wait_for(lambda: settled(service))
+    side = None
+    if operation == "delete":
+        side = client.post("/api/threads", json={"title": "A side chat"}).json()
+        wait_for(lambda: settled(service) and service.sync.cid_of(side["id"]) is not None)
+    method = {
+        "push": "push",
+        "pull": "changes",
+        "delete": "delete_conversation",
+        "state": "state",
+    }[operation]
+    original = getattr(relay, method)
+    gate = _Gate()
+
+    async def late_error(*args, **kwargs):
+        if gate.armed:
+            gate.armed = False
+            gate.entered.set()
+            await asyncio.to_thread(gate.release.wait, 10)
+            raise CloudError(status, code, "old account request refused")
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(relay, method, late_error)
+    state_request = None
+    if operation == "push":
+        client.portal.call(service.rename_thread, MAIN_THREAD, "A pending title")  # type: ignore[union-attr]
+    elif operation == "delete":
+        assert side is not None
+        assert client.delete(f"/api/threads/{side['id']}").status_code == 200
+    elif operation == "state":
+        state_request = client.portal.start_task_soon(service.sync.relay_state)  # type: ignore[union-attr]
+    else:
+        client.portal.call(service.sync.pull_soon)  # type: ignore[union-attr]
+    assert gate.entered.wait(5)
+    _switch_to(client, service, relay, next_account, "key-B")
+    gate.release.set()
+    if state_request is not None:
+        assert state_request.result(timeout=5) is None
+    wait_for(lambda: settled(service))
+    wait_for(lambda: all(task.done() for task in service.sync._tasks))
+    assert service.sync.account_id == next_account
+    assert service.sync.active
+    assert service.sync.last_error == ""
+    llm.script.append(LLMResponse(content="B answer", finish_reason="stop"))
+    client.post(f"/api/threads/{MAIN_THREAD}/send", json={"text": "B still syncs"})
+    wait_for(lambda: "B still syncs" in _pushed_texts(relay, "key-B"))
+
+
 def test_the_switch_and_the_relays_refusals(synced) -> None:
     client, service, llm, relay = synced
     st = client.get("/api/sync/state").json()

@@ -449,10 +449,11 @@ class ConversationSync:
         if not self.svc.hub.signed_in:
             return None
         self.client.cloud.api_key = self.svc.hub._key()
+        account = self._account_gen, self._token
         try:
             return await self.client.state()
         except CloudError as exc:
-            self._note_error(exc)
+            self._note_error(exc, account)
             return None
 
     async def delete_remote(self) -> dict[str, Any] | None:
@@ -539,7 +540,8 @@ class ConversationSync:
                 return
             self._keep(
                 loop.create_task(
-                    self._delete_remote_conversation(cid, self._token), name="sync-delete"
+                    self._delete_remote_conversation(cid, self._account_gen, self._token),
+                    name="sync-delete",
                 )
             )
 
@@ -600,12 +602,12 @@ class ConversationSync:
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
 
-    async def _delete_remote_conversation(self, cid: str, token: str) -> None:
+    async def _delete_remote_conversation(self, cid: str, generation: int, token: str) -> None:
         try:
             await self.client.delete_conversation(cid, token=token)
         except CloudError as exc:
             if exc.code != "no_conversation":
-                self._note_error(exc)
+                self._note_error(exc, (generation, token))
 
     # ------------------------------------------------------------------ scheduling
     def push_soon(self, delay: float | None = None) -> None:
@@ -675,9 +677,11 @@ class ConversationSync:
             if not self._pull_again or self._stopped:
                 return applied
 
-    def _note_error(self, exc: CloudError) -> None:
+    def _note_error(self, exc: CloudError, account: tuple[int, str]) -> None:
         """Rule 7: network errors are silent (the next trigger tries again); ``sync_off`` flips
         the switch here; a refused key pauses until the next sign-in."""
+        if account != (self._account_gen, self._token):
+            return
         if exc.code == "sync_off":
             self.state["enabled"] = False
             self._save()
@@ -742,10 +746,11 @@ class ConversationSync:
         if not self.active:
             return {"pushed": 0}
         async with self._lock:
+            account = self._account_gen, self._token
             try:
                 return await self._push_locked()
             except CloudError as exc:
-                self._note_error(exc)
+                self._note_error(exc, account)
                 raise
 
     async def _push_locked(self) -> dict[str, Any]:
@@ -840,10 +845,11 @@ class ConversationSync:
         if not self.active:
             return 0
         async with self._lock:
+            account = self._account_gen, self._token
             try:
                 return await self._pull_locked()
             except CloudError as exc:
-                self._note_error(exc)
+                self._note_error(exc, account)
                 raise
 
     async def _pull_locked(self) -> int:
