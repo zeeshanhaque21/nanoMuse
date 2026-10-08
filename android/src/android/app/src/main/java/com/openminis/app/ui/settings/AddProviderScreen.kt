@@ -94,17 +94,19 @@ fun AddProviderScreen(
     onSaved: () -> Unit,
     preset: String? = null, // nanoMuse: open straight on the form, pre-filled for a known vendor
 ) {
-    // nanoMuse: a preset (from "use your own key" — Alibaba Cloud Bailian, OpenRouter) skips the
+    // nanoMuse: a preset (from "use your own key" — a vendor of the own-key catalogue) skips the
     // type and credential steps; the form opens with the vendor's name and public endpoint —
-    // for OpenRouter on its sign-in (OpenRouterOAuthManager), a key with no paste.
-    val presetTemplate = remember(preset) { io.github.nanomuse.cloud.OwnKeyPresets.template(preset) }
+    // `<id>:oauth` on its sign-in (OpenAIOAuthManager for a ChatGPT plan, ClaudeOAuthManager,
+    // OpenRouterOAuthManager, Kimi's device code), a key with no paste.
+    val presetContext = LocalContext.current
+    val presetTemplate = remember(preset) { io.github.nanomuse.cloud.OwnKeyPresets.template(presetContext, preset) }
     var step by remember { mutableStateOf(if (presetTemplate != null) AddProviderStep.CONFIGURE else AddProviderStep.CHOOSE_TYPE) }
     var selectedType by remember { mutableStateOf<ProviderType?>(presetTemplate?.providerType) }
     var selectedCredential by remember {
         mutableStateOf<ProviderCredential?>(
-            when (presetTemplate?.id) {
-                null -> null
-                io.github.nanomuse.cloud.OwnKeyPresets.OPENROUTER -> ProviderCredential.oauth
+            when {
+                presetTemplate == null -> null
+                io.github.nanomuse.cloud.OwnKeyPresets.signIn(presetContext, preset) -> ProviderCredential.oauth
                 else -> ProviderCredential.apiKey
             },
         )
@@ -113,7 +115,7 @@ fun AddProviderScreen(
     // Voice Chat Provider template row — preseeds type/base URL/label/appendV1
     // on the configure step (mirrors iOS applyVoiceTemplate).
     var selectedVoiceTemplate by remember {
-        mutableStateOf<com.openminis.app.data.model.VoiceProviderTemplate?>(presetTemplate)
+        mutableStateOf<com.openminis.app.data.model.VoiceProviderTemplate?>(presetTemplate) // nanoMuse: a preset opens on its template
     }
 
     // Unified back handler: reuse each step's onBack so predictive-back gesture
@@ -588,7 +590,7 @@ private fun ColumnScope.ApiKeyConfigSection(
             "The URL is used verbatim. Include the full path up to (but not including) the endpoint."
         }
         // nanoMuse: plain http:// only for addresses on the local network (io.github.nanomuse.net.LanOnly)
-        val baseUrlProblem = io.github.nanomuse.net.LanOnly.problem(customBaseURL)
+        val baseUrlProblem = io.github.nanomuse.net.LanOnly.refusedHost(customBaseURL)?.let { stringResource(R.string.nm_lan_only_https, it) }
         SettingsSection(
             header = stringResource(R.string.add_provider_endpoint),
             footer = baseUrlProblem ?: baseUrlFooter,
@@ -674,7 +676,8 @@ private fun ColumnScope.ApiKeyConfigSection(
         // (custom base URL filled in) — ollama / LM Studio / LiteLLM /
         // private relays need no key. Official endpoints and OAuth flows
         // keep requiring a credential. Mirrors iOS AddProviderView.
-        enabled = io.github.nanomuse.net.LanOnly.problem(customBaseURL) == null && (
+        // nanoMuse: no saving while the endpoint is a plain http:// address off the local network
+        enabled = io.github.nanomuse.net.LanOnly.refusedHost(customBaseURL) == null && (
             apiKey.isNotBlank() || (
                 customBaseURL.isNotBlank() &&
                     (providerType == ProviderType.openAI || providerType == ProviderType.anthropic)
@@ -896,7 +899,7 @@ private fun ColumnScope.OAuthConfigSection(
             ProviderType.unsupported -> ""
         }
         // nanoMuse: plain http:// only for addresses on the local network
-        val manualBaseProblem = io.github.nanomuse.net.LanOnly.problem(customBaseURL)
+        val manualBaseProblem = io.github.nanomuse.net.LanOnly.refusedHost(customBaseURL)?.let { stringResource(R.string.nm_lan_only_https, it) }
         SettingsSection(
             header = stringResource(R.string.add_provider_or_configure_manually),
             footer = manualBaseProblem ?: stringResource(R.string.add_provider_for_third_party_coding_plans_e_g_minimax),
@@ -949,7 +952,7 @@ private fun ColumnScope.OAuthConfigSection(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp),
-            enabled = manualToken.isNotBlank() && manualBaseProblem == null,
+            enabled = manualToken.isNotBlank() && manualBaseProblem == null, // nanoMuse: LanOnly
         ) {
             Text(stringResource(R.string.provider_list_add_provider))
         }

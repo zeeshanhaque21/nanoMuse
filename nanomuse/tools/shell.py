@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import signal
 import sys
 import tempfile
 import uuid
@@ -26,7 +27,7 @@ from typing import Any
 
 from nanomuse.sandbox import Sandbox, needs_network
 from nanomuse.schema import RiskLevel, ToolResult
-from nanomuse.tools.base import BaseTool, CallAssessment
+from nanomuse.tools.base import BaseTool, CallAssessment, number_arg
 
 _SECRET_ENV = re.compile(
     r"(KEY|TOKEN|SECRET|PASSW|PASSPHRASE|CREDENTIAL|_AUTH|AUTH_|COOKIE|SESSION)", re.IGNORECASE
@@ -50,6 +51,29 @@ def scrubbed_env(source: dict[str, str] | None = None) -> dict[str, str]:
         env[name] = value
     env["NANOMUSE_SANDBOX"] = "1"
     return env
+
+
+def kill_tree(proc: Any) -> None:
+    """Stop a child started with ``start_new_session`` and everything it started, so a
+    timed-out or cancelled command cannot linger. ``proc`` is an asyncio or subprocess
+    process; on Windows ``taskkill /T`` walks the tree, on POSIX the process group goes."""
+    if os.name == "nt":
+        import subprocess
+
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True)
+        return
+    try:
+        # looked up by name so mypy on Windows does not object to what its os module lacks
+        killpg = getattr(os, "killpg")  # noqa: B009
+        sigkill = getattr(signal, "SIGKILL")  # noqa: B009
+        # the child is its own group leader (start_new_session), so its pid names the
+        # group; a child that is not raises ProcessLookupError and is killed alone
+        killpg(proc.pid, sigkill)
+    except (ProcessLookupError, PermissionError, AttributeError, OSError):
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
 
 
 _DANGEROUS = [
@@ -146,7 +170,9 @@ def programs_of(command: str) -> str | None:
     session does not allow ``curl``. Returns ``None`` when nothing recognisable is found.
     """
     names: list[str] = []
-    for segment in re.split(r"\|\||&&|;|\||\n", command):
+    # a command inside `$(…)` or backticks runs too: it counts as a segment of its own
+    flattened = re.sub(r"\$\(|`|<\(|>\(", "\n", command)
+    for segment in re.split(r"\|\||&&|;|\||\n", flattened):
         tokens = segment.strip().split()
         while tokens and (
             re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", tokens[0]) or tokens[0] in ("env", "time")
@@ -154,12 +180,34 @@ def programs_of(command: str) -> str | None:
             tokens.pop(0)
         if not tokens:
             continue
-        program = tokens[0].rsplit("/", 1)[-1]
+        program = tokens[0].rsplit("/", 1)[-1].rstrip(")")
         if program in _SKIP_PROGRAMS or not re.fullmatch(r"[A-Za-z0-9_.+-]+", program):
             continue
         if program not in names:
             names.append(program)
     return ",".join(sorted(names)) if names else None
+
+
+# the most of a command's stdout (and, separately, stderr) kept in memory; the model sees
+# 20k characters of it anyway, and `cat` of a disk image must not be the runtime's memory
+MAX_OUTPUT_BYTES = 2 * 1024 * 1024
+
+
+async def _read_capped(stream: asyncio.StreamReader, cap: int) -> tuple[bytes, int]:
+    """Read a pipe to its end, keeping the first ``cap`` bytes; returns them and how many
+    bytes there were in all. The rest is drained so the child never blocks on a full pipe."""
+    chunks: list[bytes] = []
+    kept = total = 0
+    while True:
+        chunk = await stream.read(65536)
+        if not chunk:
+            break
+        total += len(chunk)
+        if kept < cap:
+            piece = chunk[: cap - kept]
+            chunks.append(piece)
+            kept += len(piece)
+    return b"".join(chunks), total
 
 
 async def _run(
@@ -183,6 +231,9 @@ async def _run(
         argv = ["/bin/sh", "-c", cmd] if isinstance(cmd, str) else list(cmd)
         cmd = sandbox.wrap(argv, network=network, cwd=cwd)
         shell = False
+    # its own session on POSIX, so a timeout (or a cancelled turn) can stop the shell and
+    # everything it started: `sleep 999 | tee`, a server put in the background
+    own_session = os.name != "nt"
     try:
         if shell:
             proc = await asyncio.create_subprocess_shell(
@@ -191,6 +242,7 @@ async def _run(
                 env=env,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                start_new_session=own_session,
             )
         else:
             proc = await asyncio.create_subprocess_exec(
@@ -199,20 +251,36 @@ async def _run(
                 env=env,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                start_new_session=own_session,
             )
         try:
-            out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            assert proc.stdout is not None and proc.stderr is not None
+            (out, out_total), (err, err_total), _ = await asyncio.wait_for(
+                asyncio.gather(
+                    _read_capped(proc.stdout, MAX_OUTPUT_BYTES),
+                    _read_capped(proc.stderr, MAX_OUTPUT_BYTES),
+                    proc.wait(),
+                ),
+                timeout=timeout,
+            )
         except TimeoutError:
-            proc.kill()
+            kill_tree(proc)
             await proc.wait()
             return ToolResult.fail(f"timed out after {timeout:.0f}s")
+        except asyncio.CancelledError:
+            kill_tree(proc)
+            raise
     except FileNotFoundError as exc:
         return ToolResult.fail(str(exc))
     stdout = out.decode("utf-8", errors="replace")
     stderr = err.decode("utf-8", errors="replace")
     text = stdout
+    if out_total > MAX_OUTPUT_BYTES:
+        text += f"\n[stdout cut: {out_total} bytes in all, the first {MAX_OUTPUT_BYTES} kept]"
     if stderr.strip():
         text += ("\n" if text else "") + f"[stderr]\n{stderr}"
+    if err_total > MAX_OUTPUT_BYTES:
+        text += f"\n[stderr cut: {err_total} bytes in all, the first {MAX_OUTPUT_BYTES} kept]"
     text += f"\n[exit code {proc.returncode}]"
     if proc.returncode != 0:
         if without_network and _NO_NETWORK.search(stderr + stdout):
@@ -293,7 +361,7 @@ class Shell(BaseTool):
     ) -> ToolResult:
         if not command.strip():
             return ToolResult.fail("empty command")
-        timeout = max(1.0, min(float(timeout or 60), 600.0))
+        timeout = number_arg(timeout, 60, 1.0, 600.0)
         self.workspace.mkdir(parents=True, exist_ok=True)
         env, grant = bridge_env(self.bridge, self.name, timeout)
         try:
@@ -350,7 +418,7 @@ class PythonExecute(BaseTool):
             # the level, not a warning: a warning is something in the code itself and is
             # never waved through; this is the computer's condition, which `auto` mode and
             # always_allow_tools are entitled to accept
-            summary += " — runs without a sandbox on this computer"
+            summary += "; runs without a sandbox on this computer"
         return CallAssessment(
             risk=RiskLevel.SENSITIVE if reach or not boxed else RiskLevel.MODERATE,
             egress=bool(reach.get("network")) or bool(reach.get("processes")),
@@ -362,7 +430,7 @@ class PythonExecute(BaseTool):
     async def execute(self, code: str = "", timeout: float = 60, **_: Any) -> ToolResult:
         if not code.strip():
             return ToolResult.fail("empty code")
-        timeout = max(1.0, min(float(timeout or 60), 600.0))
+        timeout = number_arg(timeout, 60, 1.0, 600.0)
         self.workspace.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(
             "w",
@@ -407,6 +475,7 @@ __all__ = [
     "Shell",
     "bridge_env",
     "code_reach",
+    "kill_tree",
     "needs_network",
     "programs_of",
     "scrubbed_env",

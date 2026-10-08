@@ -20,8 +20,9 @@ takes the screenshot and does the moving; otherwise the Python backends do.
 
 Two modes (``[hands] mode``). *Screen*: the whole screen through ``mss`` and the system
 mouse. *Window* (macOS, :mod:`nanomuse.computer.mac_window`): one application's window —
-the picture the model sees is that window, events go to that process, the person keeps the
-cursor. ``auto`` is window mode on macOS as soon as a target application is set
+the picture the model sees is that window (taken by the desktop app's helper when the app
+is around, by the runtime's own Quartz call otherwise), events go to that process, the
+person keeps the cursor. ``auto`` is window mode on macOS as soon as a target application is set
 (``set_target``, the ``computer_target`` action or ``app`` on ``computer_act``), screen
 everywhere else. A window that cannot be found or captured drops back to the screen with a
 note in the observation, never an error that ends the task.
@@ -145,6 +146,11 @@ class ComputerLink:
             return False
         return True
 
+    def reset_backend(self) -> None:
+        """Forget the chosen backend; the next action picks one again from the settings."""
+        self._backend = None
+        self._backend_error = ""
+
     def _hands(self) -> hands_mod.HandsBackend:
         if self._backend is None:
             try:
@@ -192,8 +198,21 @@ class ComputerLink:
         return mac_window.available()
 
     def _window_hands(self) -> mac_window.MacWindowHands:
+        """The window hands, made on first use: under the desktop app with its helper
+        bundle, the windows and their pictures come through the operator (the helper holds
+        Screen Recording and captures with ScreenCaptureKit); otherwise the runtime's own
+        Quartz path, which says so in the log."""
         if self._window is None:
-            self._window = mac_window.MacWindowHands(mac_window.QuartzAdapter())
+            operator = self._operator()
+            adapter: mac_window.MacAdapter
+            if operator is not None and operator.helper_present:
+                logger.info(
+                    "window mode: windows are listed and captured through the desktop app's helper"
+                )
+                adapter = mac_window.OperatorWindowAdapter(operator.client)
+            else:
+                adapter = mac_window.QuartzAdapter()
+            self._window = mac_window.MacWindowHands(adapter)
         return self._window
 
     def set_target(self, app: str, title: str = "") -> None:
@@ -224,7 +243,7 @@ class ComputerLink:
         self.window_frame = None
         if self.settings.mode == "auto":
             self._window_broken = self._window_error
-            logger.warning("window mode: {} — the screen from here on", exc)
+            logger.warning("window mode: {}; the screen from here on", exc)
         else:
             logger.warning("window mode: {}", exc)
 
@@ -273,7 +292,7 @@ class ComputerLink:
             note, self._window_error = self._window_error, ""
         raw = await asyncio.to_thread(self._capture_screen)
         if raw is not None and note:
-            raw["note"] = (note + " — showing the whole screen instead")[:300]
+            raw["note"] = (note + "; showing the whole screen instead")[:300]
         if raw is None:
             raise DeviceError(
                 "no screenshot could be taken on this computer: install mss and Pillow "
@@ -319,6 +338,13 @@ class ComputerLink:
         if operator_mod.operator_owns_the_screen():
             why = self._backend_error or "the desktop app's operator returned no picture"
             raise DeviceError(f"could not take a screenshot of this computer: {why}")
+        if hands_mod.wayland_session():
+            # Linux under Wayland: mss would grab the XWayland root — black, or the X
+            # windows alone — and the hands could not act on it anyway. Said plainly, on
+            # the first attempt, with the same words as Settings → Computer use.
+            raise DeviceError(
+                f"the hands are off on this computer: {self._backend_error or hands_mod.WAYLAND_TEXT}"
+            )
         try:
             return capture(max_width)
         except Exception as exc:  # noqa: BLE001 — platform tools fail in many ways
@@ -374,7 +400,7 @@ class ComputerLink:
         except mac_window.WindowLayerBroken as exc:
             self._window_layer_failed(exc)
             raise DeviceError(
-                f"{action} failed: {exc} — the hands work on the whole screen from here"
+                f"{action} failed: {exc}; the hands work on the whole screen from here"
             ) from exc
         except mac_window.WindowUnavailable as exc:
             # the window went away under the hands: back to the screen for the next look
@@ -389,7 +415,7 @@ class ComputerLink:
             if isinstance(hands, mac_window.MacWindowHands):
                 self._window_layer_failed(exc)
                 raise DeviceError(
-                    f"{action} failed: {exc} — the hands work on the whole screen from here"
+                    f"{action} failed: {exc}; the hands work on the whole screen from here"
                 ) from exc
             raise DeviceError(f"{action} failed: {exc}") from exc
         settle = max(0.0, self.settings.settle_s - (time.monotonic() - started))
@@ -450,7 +476,7 @@ class ComputerLink:
             "screenshot": base64.b64encode(data).decode(),
             "mime": mime,
             "mode": "window",
-            "note": f"{where} — coordinates are pixels of this window picture",
+            "note": f"{where}; coordinates are pixels of this window picture",
         }
 
     def _hands_for(self, action: str) -> hands_mod.HandsBackend:

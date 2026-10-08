@@ -11,7 +11,10 @@ import com.openminis.app.data.model.ProviderInstance
 import com.openminis.app.data.model.hasImageInput
 import com.openminis.app.data.repository.ProviderRepository
 import io.github.nanomuse.cloud.NanoMuseCloud
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
@@ -36,9 +39,23 @@ object Hands {
     fun enabled(context: Context): Boolean = prefs(context).getBoolean(KEY_ENABLED, false)
     fun setEnabled(context: Context, on: Boolean) { prefs(context).edit().putBoolean(KEY_ENABLED, on).apply() }
 
+    /** The switch as a flow: the current value, then every change, wherever it is made. */
+    fun enabledFlow(context: Context): Flow<Boolean> = callbackFlow {
+        val p = prefs(context.applicationContext)
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == KEY_ENABLED) trySend(p.getBoolean(KEY_ENABLED, false))
+        }
+        p.registerOnSharedPreferenceChangeListener(listener)
+        trySend(p.getBoolean(KEY_ENABLED, false))
+        awaitClose { p.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+
     /** The chosen screen model's entry id; null means "pick one" ([screenModel]). */
     fun modelEntryId(context: Context): String? = prefs(context).getString(KEY_MODEL, null)?.takeIf { it.isNotBlank() }
-    fun setModelEntryId(context: Context, id: String?) { prefs(context).edit().putString(KEY_MODEL, id ?: "").apply() }
+    /** Null forgets the choice: the screen's model follows the automatic order again. */
+    fun setModelEntryId(context: Context, id: String?) {
+        prefs(context).edit().apply { if (id == null) remove(KEY_MODEL) else putString(KEY_MODEL, id) }.apply()
+    }
 
     // ── readiness ──────────────────────────────────────────────────────────
 
@@ -64,7 +81,7 @@ object Hands {
     // ── the screen model ───────────────────────────────────────────────────
 
     /** How the screen model was arrived at, for the settings page to say. */
-    enum class Why { CHOSEN, MENU, DEFAULT, CHAT, GROUP, VISION_GROUP, ANY }
+    enum class Why { CHOSEN, CHAT_PROVIDER, MENU, DEFAULT, CHAT, GROUP, VISION_GROUP, ANY }
 
     /**
      * The hands' default model wherever it is served (contract C4): `qwen3.8-27b` on nanoMuse
@@ -79,39 +96,63 @@ object Hands {
         val modelId: String get() = entry.model.id
     }
 
-    /** Every enabled model that declares image input, for the picker. */
+    /**
+     * Every enabled model that declares image input, for the picker — of providers whose
+     * vendor has vision models (contract C11, [io.github.nanomuse.cloud.Capabilities]; a
+     * provider the catalogue does not know is taken at its models' word).
+     */
     fun visionEntries(context: Context): List<Pair<ProviderInstance, ModelEntry>> {
         val repo = repo(context) ?: return emptyList()
         val cfg = repo.config.value
         return cfg.modelEntries.filter { !it.isHidden && it.model.hasImageInput }.mapNotNull { e ->
-            cfg.instances.firstOrNull { it.id == e.providerInstanceId && it.isEnabled }?.let { it to e }
+            cfg.instances.firstOrNull { it.id == e.providerInstanceId && it.isEnabled && sees(context, it) }?.let { it to e }
         }
     }
 
+    /** The vendor of [inst] has models that see (C11); true for an endpoint the catalogue does not know. */
+    fun sees(context: Context, inst: ProviderInstance): Boolean =
+        io.github.nanomuse.cloud.Capabilities.allows(context, inst, io.github.nanomuse.cloud.ProviderCatalogue.VISION)
+
+    /** No configured provider has a model that sees the screen: the one sentence that says so (C11), or null when one has. */
+    fun unavailableLine(context: Context): String? =
+        if (visionEntries(context).isEmpty()) io.github.nanomuse.cloud.Capabilities.unavailableLine(context, io.github.nanomuse.cloud.ProviderCatalogue.VISION) else null
+
     /**
      * The model that looks at the screen — the *hands model*, a setting of its own beside the
-     * chat model (contract C4) — in this order: the one chosen in Settings → Hands; nanoMuse
-     * Cloud's model for the screen (`qwen3.8-27b`, what the relay marks `for: gui`), when
-     * signed in; the same default under the person's own key (`qwen3.8-27b` on 百炼,
-     * `qwen/qwen3.8-27b` on OpenRouter); then, for a set-up with none of those, the chat model
-     * the person last picked when it sees, the first sighted member of the default group, the
-     * Vision Group, and last any enabled vision model, preferring names that say so (`vl`,
-     * `vision`) — but never one of the Cloud's catalog models the person did not pick, so a
-     * member is not quietly billed for `qwen-vl-max` because its name has `vl` in it. Null when
-     * none of the user's models sees.
+     * chat model (contract C4) — in the order of the Models page (0.1.41, [io.github.nanomuse.models.SlotOrder]):
+     * the one chosen in Settings → Models (or → Hands); the chat provider's own model for the
+     * screen (the catalogue's `defaults.hands`, else its first model that sees) when the chat
+     * provider is the person's own and sees — the relay never jumps ahead of a provider the
+     * person chose; nanoMuse Cloud's model for the screen (`qwen3.8-27b`, what the relay marks
+     * `for: gui`), when signed in; the same default under the person's own key (`qwen3.8-27b`
+     * on 百炼, `qwen/qwen3.8-27b` on OpenRouter); then, for a set-up with none of those, the
+     * chat model the person last picked when it sees, the first sighted member of the default
+     * group, the Vision Group, and last any enabled vision model, preferring names that say so
+     * (`vl`, `vision`) — but never one of the Cloud's catalog models the person did not pick,
+     * so a member is not quietly billed for `qwen-vl-max` because its name has `vl` in it.
+     * Null when none of the user's models sees. [automatic] leaves the choice aside and answers
+     * what the rest of the order gives now, for the picker's *Automatic* row.
      */
-    fun screenModel(context: Context): ScreenModel? {
+    fun screenModel(context: Context, automatic: Boolean = false): ScreenModel? {
         val repo = repo(context) ?: return null
         val cfg = repo.config.value
         fun usable(inst: ProviderInstance?, entry: ModelEntry?, why: Why): ScreenModel? {
-            if (inst == null || entry == null || !inst.isEnabled || !entry.model.hasImageInput) return null
+            if (inst == null || entry == null || !inst.isEnabled || !entry.model.hasImageInput || !sees(context, inst)) return null
             val key = repo.usableApiKey(inst) ?: return null
             return ScreenModel(inst, entry, key, why)
         }
         fun byEntry(entry: ModelEntry?, why: Why): ScreenModel? =
             entry?.let { e -> usable(cfg.instances.firstOrNull { it.id == e.providerInstanceId }, e, why) }
-        modelEntryId(context)?.let { id -> byEntry(cfg.modelEntries.firstOrNull { it.id == id }, Why.CHOSEN) }?.let { return it }
+        if (!automatic) modelEntryId(context)?.let { id -> byEntry(cfg.modelEntries.firstOrNull { it.id == id }, Why.CHOSEN) }?.let { return it }
         val cloud = NanoMuseCloud.instance(context)
+        // the chat provider's own model for the screen, when the chat provider is the
+        // person's own and sees: `defaults.hands` of the catalogue, else its first that sees
+        io.github.nanomuse.models.ModelSlots.ownChatInstance(context)?.takeIf { sees(context, it) }?.let { own ->
+            val wanted = io.github.nanomuse.models.ModelSlots.defaultOf(context, own, io.github.nanomuse.models.ModelSlots.Slot.HANDS)
+            val sighted = cfg.modelEntries.filter { it.providerInstanceId == own.id && !it.isHidden && it.model.hasImageInput }
+            (sighted.firstOrNull { wanted != null && it.model.id.equals(wanted, ignoreCase = true) } ?: sighted.firstOrNull())
+                ?.let { byEntry(it, Why.CHAT_PROVIDER) }
+        }?.let { return it }
         if (cloud != null) {
             NanoMuseCloud.sightedModelId(context)?.let { sighted ->
                 byEntry(cfg.modelEntries.firstOrNull { it.providerInstanceId == cloud.id && it.model.id == sighted && !it.isHidden }, Why.MENU)
@@ -143,6 +184,13 @@ object Hands {
     private val _active = MutableStateFlow(false)
     val active: StateFlow<Boolean> = _active.asStateFlow()
     internal fun setActive(on: Boolean) { _active.value = on }
+
+    /**
+     * Takes the hands for a run: true when they were free, false when another run holds them.
+     * One atomic step, so two `nanomuse-hands run` arriving together cannot both start; the
+     * run that gets them hands them back in [HandsOperator.run]'s finish.
+     */
+    internal fun claim(): Boolean = _active.compareAndSet(expect = false, update = true)
 
     /** The run in progress, so Stop can reach it from anywhere. */
     @Volatile internal var current: HandsOperator? = null

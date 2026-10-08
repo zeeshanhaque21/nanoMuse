@@ -146,16 +146,18 @@ def _print_banner(url: str, service: MuseService, print_qr: bool) -> None:
     from rich.console import Console
 
     console = Console()
-    name = service.profile.name
-    console.print(f"[bold magenta]nanoMuse[/bold magenta] · [bold]{name}[/bold] is ready.")
+    name = (service.profile.name or "").strip()
+    # "nanoMuse · Lumi is ready."; before the agent has a name of its own, "nanoMuse is ready."
+    who = f" · [bold]{name}[/bold]" if name and name != "nanoMuse" else ""
+    console.print(f"[bold magenta]nanoMuse[/bold magenta]{who} is ready.")
     if not STATIC_DIR.is_dir():
         console.print(
-            "[yellow]web app not built[/yellow] — run `cd web && npm install && npm run build`"
+            "[yellow]web app not built[/yellow]: run `cd web && npm install && npm run build`"
         )
     console.print(f"Open on this device or your phone:  [bold cyan]{url}[/bold cyan]")
     if service.token:
         console.print(
-            "[dim]The link includes your access token — share it only with your own devices.[/dim]"
+            "[dim]The link includes your access token; share it only with your own devices.[/dim]"
         )
     if print_qr:
         try:

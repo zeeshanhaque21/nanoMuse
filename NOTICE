@@ -25,7 +25,7 @@ are marked with a `// nanoMuse:` comment.
 OpenMinis is a trademark of its authors; nanoMuse does not use the
 OpenMinis name or logo for its own application. The complete corresponding
 source of every nanoMuse release is the tagged commit on
-https://github.com/nano-muse/nanoMuse together with the submodule
+https://github.com/zeeshanhaque21/nanoMuse together with the submodule
 android/deps/proot (https://github.com/nano-muse/proot).
 
 Other components and their licences: THIRD_PARTY_NOTICES.md.

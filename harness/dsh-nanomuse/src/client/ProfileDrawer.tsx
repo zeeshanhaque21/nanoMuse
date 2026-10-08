@@ -11,7 +11,7 @@
  * phone wears them too. Escape closes it.
  */
 import { createElement as h, Fragment, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import { call, type Translate } from './api.ts'
+import { call, type Translate, failureText } from './api.ts'
 import { Avatar } from './Avatar.tsx'
 import { profileBus, settingsBus, useProfileOpen } from './bus.ts'
 import { IconAlarm, IconBell, IconCheck, IconChevronDown, IconChevronRight, IconClock, IconClose, IconList, IconPencil, IconShare, IconShield, IconSparkle, IconSpinner, IconSquare } from './icons.tsx'
@@ -225,7 +225,8 @@ function Activity({ t, name, stop, useSessions, open }: { t: Translate; name: st
 
 function Approvals({ t, name, approvals, grants }: { t: Translate; name: string; approvals: { at: number; toolName: string; reason: string; outcome: 'allowed' | 'rejected' }[]; grants: { id: string; target: string; at: number }[] }): ReactNode {
   const [openRow, setOpenRow] = useState<number | null>(null)
-  const manage = h('div', { className: 'nm-pf-row nm-clickable', role: 'button', tabIndex: 0, onClick: () => { profileBus.close(); settingsBus.openSection?.(COMPUTER_SECTION) } },
+  const openPermissions = () => { profileBus.close(); settingsBus.openSection?.(COMPUTER_SECTION) }
+  const manage = h('div', { className: 'nm-pf-row nm-clickable', role: 'button', tabIndex: 0, onClick: openPermissions, onKeyDown: (e: { key: string; preventDefault(): void }) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPermissions() } } },
     h('span', { className: 'nm-pf-row-icon' }, h(IconShield, { size: 18 })),
     h('div', { className: 'nm-pf-row-main' }, h('div', { className: 'nm-pf-row-title' }, t('pfManagePermissions'))),
     h('span', { className: 'nm-pf-row-chev' }, h(IconChevronRight, { size: 16 })))
@@ -324,7 +325,7 @@ function NameEditor({ t, profile, onDone }: { t: Translate; profile: LiveProfile
     setError(undefined)
     call('profile', { name })
       .then(() => onDone())
-      .catch((err: unknown) => setError(t('failed', { message: (err as Error).message })))
+      .catch((err: unknown) => setError(failureText(t, err)))
       .finally(() => setBusy(false))
   }
   return h('form', { className: 'nm-pf-stack', onSubmit: save },
@@ -348,7 +349,7 @@ function LookEditor({ t, profile, onDone }: { t: Translate; profile: LiveProfile
     setError(undefined)
     call('profile', avatar === 'emoji' ? { avatar, emoji, color } : { avatar })
       .then(() => onDone())
-      .catch((err: unknown) => setError(t('failed', { message: (err as Error).message })))
+      .catch((err: unknown) => setError(failureText(t, err)))
       .finally(() => setBusy(false))
   }
   return h('div', { className: 'nm-pf-stack' },

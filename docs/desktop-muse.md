@@ -40,7 +40,11 @@ stylesheet over the harness's stable DOM hooks (`data-composer-card`,
   main chat* — and **Side chats** with a *+*: every other session, pinned first, each
   with a *···* for *Make main chat*, *Pin*, *Rename* (inline), *Archive*. A blank
   session reads *New chat*; a dot marks a running one, a mark one that waits for you.
-  It collapses to the rail alone.
+  It collapses to the rail alone. The column shows the account that is signed in: a
+  synced conversation remembers the account it came from, so another account's
+  conversations stay on this computer, hidden from the column and the search until that
+  account signs in again, and are never pushed under a different account; a change of
+  account starts the pull over from the beginning. Signed out, everything local is shown.
 - Above the conversation, in the harness's `conversation.header.leading` seat, the face
   and name are pinned at the top centre with the status chip: *connected* / *not signed
   in* / *thinking…* / *Hands · step N · what it is doing* / *Reach · step N · on Laptop
@@ -55,9 +59,9 @@ stylesheet over the harness's stable DOM hooks (`data-composer-card`,
   bottom, as in Muse, with the workspace and preset row above it.
 - The composer is one pill: *+* (attach), *Message*, the send disc (the stop square
   while a turn runs). The harness's model picker, permission mode and plan toggle are
-  hidden from it — the model lives in Settings → Models and the default permission mode
-  in General, as in Muse — and come back with *Show DeepSeek Harness controls* under
-  General. The microphone appears when the harness's voice input is switched on in
+  hidden from it (the models live in Settings → Models, dsh's own Models page is under
+  Advanced, and the default permission mode in General, as in Muse) and come back with
+  *Show DeepSeek Harness controls* under General. The microphone appears when the harness's voice input is switched on in
   Plugins (Settings → Dictation says how).
 - Theme: the harness's light and dark palettes are overridden to Muse's tones (`#f9f9f9`
   surfaces, `#e3e4e6` agent bubbles in the light; `#171717` with `#242424` bubbles and
@@ -86,13 +90,25 @@ on a fresh install and never shown twice:
 
 1. **Welcome** — the face, *Welcome to nanoMuse*, the three feature rows (chat, hands,
    reach), the community notice, one blue *Sign in* pill and *Use my own API key*. Sign-in
-   is the phone's: *Phone number or e-mail*, the code boxes that verify themselves on the
+   is the phone's: *Phone number or e-mail* with the line that a mainland China number
+   gets an SMS and anything else an e-mail, the code boxes that verify themselves on the
    sixth digit, *Try another way* for a password (`/v1/auth/code`, `/v1/auth/verify`,
    `/v1/auth/login`).
 2. **Set a password** (a fresh account only; *Later* skips it).
 3. **Which model answers** — the Cloud account's models, or your own key.
-4. **Choose models** (own key only) — opens Settings → Models beside the page and waits
-   for a key; *Skip for now*.
+4. **Choose models** (own key only) — the providers of the catalogue
+   (`assets/providers.json`, the same list as the phones' and the web app's), the ones for
+   where you are first — Alibaba Cloud Bailian in mainland China, one key for chat, the
+   hands, pictures and clips; OpenRouter and then OpenAI elsewhere — each row saying what it
+   covers (*chat · screen operation · pictures · clips*), with *Get a key* opening the vendor's
+   key page and *Add key* taking the key right there (it goes to the credential store under
+   `NANOMUSE_KEY_<PROVIDER>`; `cloud.json` keeps the name only). Under OpenAI, **Sign in with
+   ChatGPT**: a Plus, Pro or Team plan signed in through OpenAI's page, which covers chat and
+   the hands only — no pictures, no clips — with the one honest line that OpenAI's terms
+   cover using a ChatGPT plan inside OpenAI's own Codex and other apps have had this access
+   cut off before. *More ways* folds out the rest of the catalogue, the servers on this
+   computer (Ollama, LM Studio, vLLM) and any OpenAI-compatible endpoint by hand. *Skip for
+   now* until a key is saved or a sign-in finished; *Continue* then.
 5. **Allow nanoMuse to use your computer?** (macOS only) — *Accessibility* and *Screen
    Recording* rows, each with *Allow* that asks the system through the desktop shell and
    turns into a green check as the system grants it (polled, and again when the window gets
@@ -104,7 +120,9 @@ on a fresh install and never shown twice:
    pane, so nanoMuse is on the pane's list, and when the permission is granted while the app
    runs a dialog says macOS applies it only to freshly started apps, with *Restart now*
    (`relaunch` over the bridge). *Try it* rows — a test screenshot, a mouse move — and the
-   runtime row say whether it works, and a black capture gets its own notice with *Relaunch*.
+   runtime row say whether it works (the row names the binary and, when its last start for
+   the hands failed, why, in the host's words), and a black capture gets its own notice with
+   *Relaunch*.
    On Linux and Windows the page is skipped.
 6. **Meet <name>** — the face, *Start*.
 
@@ -191,7 +209,9 @@ works, a small hop when it waits for you.
 to stop top-left, take-over controls top-right, a caption bottom-left saying what was
 just done ("typed · <app>", "pressed ↵ · <app>"), the face as the cursor marker. Inline
 permission cards in the chat — *allow <name> to take a screenshot?* / *write a file?* —
-with *Allow (this task)*, *Always allow*, *Deny*.
+with *Allow (this task)*, *Always allow*, *Deny*. (nanoMuse had a stage like that from
+0.1.34 to 0.1.39 and dropped it in 0.1.40 for the trajectory below: a picture-in-picture
+that follows the hands is one more thing moving, and it cannot be looked back at.)
 
 **nanoMuse on dsh.** Hands are the runtime's `computer_screen` / `computer_act` over
 MCP, so what the model sees is the screenshot it asked for and the status chip says
@@ -199,11 +219,11 @@ MCP, so what the model sees is the screenshot it asked for and the status chip s
 into Muse's permission card — a shield, the headline, the detail, *Allow once* in blue
 first and *Reject* in grey — and every answer is written to the agent page's
 *Approvals* tab; the Sentinel's reasons ([sentinel.md](sentinel.md)) are in the
-headline. The same question is on the **stage** while the hands work — *Allow once*,
-*Always in <app>* (for the hands' tools; the app is the window title's first part), *Deny*
-(the host's `ApprovalDesk` sits first in the `approval/request` waterfall and answers
-for the card) — and on the **capsule**, a small always-on-top window the shell shows
-when the nanoMuse window is not in front, so you can answer from wherever you are.
+headline. The same question — *Allow once*, *Always in <app>* (for the hands' tools; the
+app is the window title's first part), *Deny* (the host's `ApprovalDesk` sits first in
+the `approval/request` waterfall and answers for the card) — is on the **capsule**, the
+small always-on-top pill the shell shows when the nanoMuse window is not in front, so
+you can answer from wherever you are.
 *Always in <app>* writes a `computer_app:<app>` grant: the hands' tools in that app are
 allowed without asking until you revoke the grant, on the agent page or under Settings →
 Computer use → *Always allowed*. Settings → **Computer use** shows the two macOS
@@ -219,15 +239,18 @@ asked first.
 **Holds — whose turn it is.** When the agent needs you (a password, a captcha, a choice
 it should not make) it calls `computer_act` with `action: "hand_over"` and a `reason`;
 the host opens a *hold* (contract C1: `{type:"hold", tool:"computer", status:"on",
-by:"agent", reason}`), the stage says **Your turn — <reason> — Done**, the capsule says
-it outside the window, and the tool call waits (up to ten minutes) until you press
-**Done**. **I'll take it** on the stage opens a hold yourself (`POST
-/nanomuse/cloud/holds`) so the agent pauses before its next hands call while you use the
-mouse; *Done* resumes. Questions keep *Open*. Stop (the square) still cancels the turn.
+by:"agent", reason}`), the trajectory card in the chat says **Your turn — <reason> —
+Done**, the capsule says it outside the window (amber, the glow amber with it), and the
+tool call waits (up to ten minutes) until you press **Done**. **I'll take it** — on the
+trajectory card and on the capsule — opens a hold yourself (`POST /nanomuse/cloud/holds`)
+so the agent pauses before its next hands call while you use the mouse; *Done* resumes.
+Questions keep *Open*. Stop (the square) still cancels the turn.
 
 **The operator.** The hands themselves are the shell's (`src/operator.ts`, a port of
 UI-TARS-desktop's `NutJSOperator` on `@computer-use/nut-js`): the screenshot through
-Electron's `desktopCapturer` at the display's size, the pointer moved straight to the
+Electron's `desktopCapturer` at the display's size (on a Mac, through the helper
+*nanoMuse Computer Use* and ScreenCaptureKit instead — [desktop.md](desktop.md#macos-permissions)),
+the pointer moved straight to the
 point and left there 100 ms before the click, drags, scrolls, typing through the
 clipboard for anything beyond ASCII, the hotkey table (`ctrl` is ⌘ on a Mac). The
 runtime's `nanomuse mcp` reaches them over a loopback HTTP server the shell starts per
@@ -238,36 +261,83 @@ where it pointed, on a scaled display as on a plain one
 ([gui.md](gui.md#hands-on-the-computer-the-picture-is-the-unit)). Without the shell
 (`nanomuse` run on its own) the runtime falls back to `pyautogui` / `xdotool`.
 
-**The glow.** While the hands run, the shell puts a transparent, click-through,
-always-on-top window over the whole display (UI-TARS's ScreenMarker): a slow animated
-gradient along the edge — amber while a hold is on — the agent's face as a small
-cursor sprite where the hands last pointed, with the step's words under it, and the
-**prediction marker** at the exact point the operator acted on: a turning red dashed
-ring with a dot in the middle and the action's name beside it, a dashed line from start
-to end for a drag, fading 1.6 s after the action. The marker comes from the operator
-itself (its own fractions of the display), not from the client's reading of the tool
-call, so it is where the click went. It cannot take focus or a click, it is gone 400 ms
-after the hands stop, and it, the capsule and the nanoMuse window itself while the hands
-run all have `setContentProtection(true)`, so none of them is in the screenshots the
-runtime takes — on Linux, where content protection does nothing, the glow steps out of
-the way for the instant of the capture instead.
+**Breathing, not flowing.** Since 0.1.40 nothing in the desktop app runs round a rim,
+sweeps across a surface or shimmers: every light that says "working" — the dot by a
+chat's name, the status dot in the header, the dot of another device's turn, the
+thinking dots under a running turn, the microphone while it listens, the glow, the
+capsule's ring and bars, the trajectory's live dot — breathes at the phone's rhythm,
+2.4 s in and 2.4 s out, ease-in-out, between a dim and a full light. One-shot motions
+stay (a card sliding in, the marker locking on, the two ripples of a click), and so do
+the face's moods and the plain spinners. Under the system's *reduce motion* setting every
+breathing light is a steady light and the marker's arc stands still.
 
-**The live stage** is Muse's, picture-in-picture over the chat (bottom right and 400 px
-to begin with; drag it anywhere, resize it from the bottom-right corner, and the place
-is remembered in `prefs.stage` and kept inside the window): the latest screenshot the
-agent took, dimmed while it works, × top-left to put it away,
-*Expand* top-right (the frame in a sheet), a **Take over** pill while a step runs (it
-cancels the session's turn — the agent lets go, your mouse is yours), a caption bottom-
-left — *looking at the screen · nanoMuse*, *clicked "Save" · Finder*, *typed "hello" ·
-WeChat*, *pressed ⌘ S · Pages* — and the agent's face as the cursor marker, with a
-ripple, where it last clicked. The host keeps one frame in memory and no history: a
-`tools/execute` middleware around the hands' calls takes the picture out of the MCP
-result (`computer_screen` returns it; `computer_act` returns the screen after the
-action) with the window title and size from the first line, and `GET
-/nanomuse/cloud/stage/frame?seq=N` serves it to the browser half; ten minutes after the
-last step the frame is dropped. When the agent looks at a *phone* through Reach
-(`device_screen`), the same stage shows that screen with the device's name — that is
-what the phone app shows while its own Hands work ([gui.md](gui.md)), seen from here.
+**The glow.** While the hands run, the shell puts a transparent, click-through,
+always-on-top window over the whole display (UI-TARS's ScreenMarker, in the phone's
+vocabulary — `HandsStage.kt` drawn for a desktop): a light breathing along the four
+edges, 7 % of the shorter side deep with a 1.5 px hairline at the rim — Muse's action blue
+while the hands work, amber while a hold is on — and at the exact point the operator
+acted on, the **marker**: a soft halo, a 12 px ring in the action blue with a cyan arc
+turning round it, a dot with a white core at the centre, and the action's name in a dark
+pill beside it (to its left near the right edge). It locks on in 220 ms from 1.8× and,
+for a click, ripples twice as the click lands; for a drag it draws the path as a dashed
+line from blue to cyan with an arrowhead and a landing ring at the far end and sends the
+ring along it; typing, a key chord, an app opening and a wait, which have no point on the
+screen, write their name where the last ring was. The marker fades 1.6 s after the
+action. It comes from the operator itself (its own fractions of the display), not from
+the client's reading of the tool call, so it is where the click went; when another
+backend acts (the runtime's own hands), the client's point stands in, without words. The
+glow cannot take focus or a click, it is gone 400 ms after the hands stop, and it, the
+capsule and the nanoMuse window itself while the hands run all have
+`setContentProtection(true)`, so none of them is in the screenshots the runtime takes —
+on Linux, where content protection does nothing, the glow and the capsule step out of the
+way for the instant of the capture instead. The phone's long-press ring has no desktop
+equivalent (nothing is long-pressed); the phone's face follows the finger only inside its
+capsule, so the desktop's face at the pointer (0.1.34–0.1.39) is gone.
+
+**The capsule** is the phone's `HandsCapsule`, sized for a pointer: a pill at most 420 px
+wide at the top centre of the work area (ink at 82 %, a white hairline), the agent's face
+in a 36 px ring of three hues — the action blue, violet, cyan — breathing with four small
+bars, **Step N** and what the hands are doing (*clicked "Save"*, *typed "hello"*, *looking
+at the screen*), **I'll take it** and a red **Stop**. It slides in over 320 ms when the
+hands start, is shown only while the nanoMuse window is not the one in front (the chat
+shows the same in the trajectory card), and goes 220 ms after the run ends. When the
+hands are about to click or drag under it, it moves to the bottom of the work area first
+(and back up next time), the way the phone's capsule dodges the finger. A hold turns it
+amber with **Your turn — <reason> — Done**; a question the agent asked before a step
+hangs under it as a card with *Allow once*, *Always in <app>*, *Deny*. The shell feeds it
+over IPC from the main window (`nanomuse:overlay`, `{hands: {active, held, step, title,
+text, face, stop, take, x, y, kind}, cards}`) and its answers come back the same way.
+
+**The trajectory** is how a hands run is looked at, during and after it, in the chat: a
+card under the run's last tool call (the chat's own row, so it scrolls with the thread)
+with the step's screenshot and, drawn on it in the marker's hues, what the hands did
+there — the ring and dot of a click (two rings for a double click), the dashed path and
+arrowhead of a drag, a chevron for a scroll, the typed text, the key chord or the app's
+name in the label pill when the action had no point — a caption in words (*Step 3 ·
+clicked "Save" · Finder*), the agent's words from just before the step (its short
+reasoning, clamped to three lines on the card), a filmstrip of thumbnails, *previous* and
+*next* (the ← and → keys when the card has focus, Home and End for the ends), *Open
+large* (the step in a sheet with the whole text) and *Copy this step*. While the run is
+on the card follows the newest step with a breathing dot and offers **I'll take it** and
+**Stop**; a hold shows *Your turn — <reason>* with **Done**. Pictures are loaded lazily
+and only the chosen step's at full size. The host keeps the run in memory
+(`src/trajectory.ts`): a *run* opens with the first hands call of a turn and closes when
+the turn ends or the hands rest for ten minutes; a *step* is a frame the model was shown
+(`computer_screen` returns one, `computer_act` the screen after the action — a
+`tools/execute` middleware takes it out of the MCP result with the window title and size
+from the first line), with the action the model then took on it and the words of its last
+assistant message before acting. The caps: **40 steps per run** (older ones drop off the
+front and the card says *the first N steps are no longer kept*), **4 runs in all**, and
+the pictures together under **64 MB** (the oldest go first; their steps keep their words
+and say the picture is gone). Nothing is written to disk; a restart forgets it. The
+browser half reads `GET /nanomuse/cloud/trajectory?session=<id>` (`{rev, runs: [{id,
+sessionId, source, device, startedAt, endedAt, firstCall, lastCall, dropped, steps: [{i,
+seq, at, width, height, title, action, words, callId}]}]}`, no bytes) and `GET
+/nanomuse/cloud/stage/frame?seq=N` for a picture (immutable, cached an hour); the live
+state's `trajectory: {rev, sessions}` says when to read again. When the agent looks at a
+*phone* through Reach (`device_screen`), the run is a *device* run with the phone's name —
+that is what the phone app shows while its own Hands work ([gui.md](gui.md)), seen from
+here.
 
 ## Settings
 
@@ -302,11 +372,58 @@ configured, a mirror index
   Harness controls* (the model picker, the modes, the workspace browser in place of the
   chats column). The harness's other rows (permission presets, font size, link opening,
   Enter to send, performance, session log) live under *Advanced → Harness*.
+- **Models** (right after General, since 0.1.41) — one row per thing a model does for
+  you: **Chat** (*The model that talks with you.*), **Operating the screen** (*Looks at the
+  screen and acts for you. Needs a model that can see images.*), **Making pictures**
+  (*Portraits of your Muse and the pictures you ask for.*) and **Making clips** (*Short
+  clips of your Muse.*), a picker on each. Every picker lists nanoMuse Cloud first while
+  signed in, its recommended model marked *Recommended*, then one group per provider you
+  added, each holding only the models that can do the row's job; the value reads
+  `<provider> · <model>`. A chat change says *Applies to new chats.*; a hands change takes
+  effect at the hands' next step (the plugin restarts `nanomuse mcp` with the new model,
+  no cold restart). The hands speak OpenAI's shape only, so an Anthropic or native Gemini
+  key is named in one sentence under the row and not listed. A row nothing can do shows
+  the gate's sentence — *Pictures need a provider with image models: Alibaba Cloud
+  Bailian, Zhipu GLM, SiliconFlow, …* — and *Add a provider*; the page ends with *Add a
+  provider*, which opens the ways on under Account. When you have not chosen, a row
+  follows the provider new chats answer through (its catalogue default for the job) when
+  that is one of your own, else nanoMuse Cloud while signed in, else the first of your
+  providers that can.
 - **Account** (under *Advanced*) — the nanoMuse account: sign in or the masked
-  identifier, the allowance, the look, the models, *Open Devices*.
-- **Media** — the models that draw the face and its clips (the relay's, or your own
-  Bailian key), *Animate the avatar after a change*, *Make / Redo clips* with the state
-  of each of the four, and the cost note.
+  identifier, the allowance, the look, *Open Devices*, a line that opens Settings → Models
+  with what chat and the hands use now, and the block the own keys share with the account:
+  - **Ways on** — your account's row first while signed in (what it covers right now, from
+    the relay's model list), then the catalogue in the first run's groups: the region's
+    providers, the ChatGPT sign-in, the rest ordered by how much they cover, the local
+    servers, a custom endpoint. Each row says what it covers, takes or changes a key inline,
+    links to the vendor's key page and has *Remove*; removing a row drops its credential and
+    any chat or hands choice that pointed at it. The ChatGPT row runs the bundled runtime's
+    sign-in: *Sign in* opens OpenAI's page, the row waits with *Cancel* (and *Open the
+    sign-in page* again), then reads *Signed in as ChatGPT Plus* and offers *Sign out*; the
+    sign-in covers chat and the hands only, not pictures or clips, and the line about
+    OpenAI's terms sits under it. Without the runtime the row says so and stays disabled. A
+    sign-in on file comes back after a restart, with its local bridge. Signed out of the
+    account, the same block is under the sign-in form, so a key can be changed without an
+    account. Once a key is saved, a card asks **Use it for** — *Pick what this key should
+    handle. nanoMuse Cloud keeps the rest.* — with a toggle per thing the key can handle
+    (chat, the screen, pictures, clips), all on, each naming the model it would get; *Use
+    it* switches those rows on the Models page to the provider, *Not now* changes nothing,
+    and a footnote says *You can change this any time under Settings › Models.*
+- **Media** — the models that draw the face and its clips: the same two pickers as
+  Settings → Models' *Making pictures* and *Making clips*, nanoMuse Cloud first while
+  signed in, then each own provider's models (the video picker has *Off* too). Pictures
+  through your own key go to that provider directly — Model Studio's native image API,
+  OpenRouter's image API, the OpenAI shape for OpenAI, Zhipu, SiliconFlow, Volcengine and
+  xAI — and the studio says *Drawn with <provider> · <model>. Nothing is billed to your
+  nanoMuse Cloud account.* in place of the estimate; a Google key draws only through the
+  OpenAI-compatible layer. When nothing configured covers pictures or clips the row says who could,
+  where you are, with the way to Settings → nanoMuse Cloud — the same sentence the avatar studio
+  shows in place of the estimate — and with only the ChatGPT sign-in, that pictures and
+  clips are not covered by it.
+  Below: *Animate the avatar after a change*, *Make / Redo clips* with the state of each
+  of the four, and the cost note. When clips through your own key failed and you are
+  signed in, the failure line offers *Use nanoMuse Cloud this time*: that one run through
+  the account, the picker untouched; the studio offers the same after a failed round.
 - **Models**, **Agents** — the harness's pages, unchanged, under *Advanced*.
 - **Connectors** — Muse's catalogue shape: a search field, category chips (*All*,
   *Built in*, *Work*, *Talk*, *Files*, *Developer*, *Data*, *Design*, *Money*,
@@ -320,7 +437,8 @@ configured, a mirror index
   the hands and the mailbox), the vendor's documentation, and *Disconnect* (asked
   twice). Three kinds of row:
   - **Built in** is what the agent can really reach: *Hands — this computer* (on when
-    the runtime answered, with the reason when it did not), *Mailbox*, *Calendar*,
+    the runtime answered; when it did not, the reason: no runtime, a path that leads
+    nowhere, or a runtime that did not start, with the start's own error), *Mailbox*, *Calendar*,
     *Address book* (the runtime's connectors, on when their tools arrive through
     `nanomuse mcp`), *Reach — your other devices*, *Web*, *Files*, *Terminal*, the
     rooms, *Schedule*. *Connect* on the mailbox, the calendar or the address book opens a
@@ -387,7 +505,12 @@ configured, a mirror index
   with its path, *Show the folder*) and what is never kept (the system keychain, your
   passwords); which channels reach the agent (this desktop, the browser, the invite link
   when signed in, your other devices) and that no third-party messenger is wired in.
-- **Data controls** — *We take your privacy seriously* with the privacy policy, *Help
+- **Data controls** — *We take your privacy seriously* with the privacy policy, *Sync
+  conversations between my devices* (the account's switch, with how many chats and
+  messages the relay keeps and *Delete synced conversations*) and under it *Also sync
+  side chats* (同时同步旁聊; this computer's own switch, off by default — *Off: side
+  chats stay on this device. On: this device's side chats go to the account and the
+  other devices' side chats come here*; see [every-device.md](every-device.md)), *Help
   improve nanoMuse's AI models* (the relay's switch, with how many turns it kept and
   *Delete*), as on every other app; then *On this computer*: **Import memory**,
   **Download your agent data** (a zip in Downloads — the account snapshot without the
@@ -396,7 +519,8 @@ configured, a mirror index
   look go, the account signs out; the chats stay).
 - **Help & support** — the docs, the site, discussions, report an issue, the version.
 - **Legal** — the licence, the Meta trademark notice, the acknowledgements (DeepSeek
-  Harness, OpenMinis), the privacy policy and the terms.
+  Harness, OpenMinis) and the privacy policy (`docs/privacy.md`, the page every
+  client links).
 - **Advanced** — every page another plugin registers (the harness's plugin manager,
   archived sessions…), grouped at the bottom so they are there and out of the way.
 - **Sign out** at the foot while signed in. Signing out (or *Reset*) takes the window
@@ -406,6 +530,8 @@ Wallet, secure storage and message channels are not there: the Cloud has no wall
 members have an allowance ([cloud.md](cloud.md#allowance)) — nanoMuse keeps no
 passwords for the agent, and messages reach you through the phone app's notifications
 rather than a messenger.
+
+<a id="rail-rooms"></a>
 
 ## The rail's other rooms — Feed, Ideas, Goals, Library
 
@@ -458,8 +584,8 @@ serves `/nanomuse/rooms/*` and streams changes to the browser half:
 - **Library** — shelves (All, Documents, Web; Media: Images, Videos, Podcasts; System
   files at the foot), *Select*, *+ Create…* (a brief → a chat that writes the file under
   `~/nanoMuse/Library` — `构件` in Chinese — with the workspace-write preset), *Recent*
-  and a card grid; a viewer and a Markdown editor for text, pictures and media inline,
-  *Open* / *Show in folder* for the rest. Everything the agent delivers with `present`
+  and a card grid; a viewer and a Markdown editor for text (restoring IDENTITY.md or SOUL.md
+  to the stock text asks first), pictures and media inline, *Open* / *Show in folder* for the rest. Everything the agent delivers with `present`
   lands here, and `library_add` lists a file without delivering it.
 
 Rooms need a model that answers; signed out, they say so. The hidden chat the feed is
@@ -489,12 +615,16 @@ nowhere else.
   desktop's status line counts it; *Reach* lets either side ask the other for something
   ([hub.md](hub.md)).
 - **Any model, your key.** The relay's models for members, a DeepSeek key, or any
-  OpenAI-compatible provider the harness supports. Settings → nanoMuse Cloud shows two rows:
-  the **chat model** (the relay's `/v1/models` entries marked `for: ["chat"]`, default
-  `deepseek-v4.1-flash`) and the **hands model** (`for: ["gui"]`, default
-  `qwen3.8-27b`); a DeepSeek entry is shown as sighted only when its id says `v4.1`,
-  `vision` or `ocr`. The hands model is written to `$DSH_HOME/nanomuse/hands.json`
-  (mode 0600) and the preset passes it to the runtime at the next start.
+  OpenAI-compatible provider the harness supports. Settings → Models shows four rows:
+  **Chat** (the relay's `/v1/models` entries marked `for: ["chat"]`, default
+  `deepseek-v4.1-flash`), **Operating the screen** (`for: ["gui"]`, default
+  `qwen3.8-27b`), **Making pictures** and **Making clips**; a DeepSeek entry is shown as
+  sighted only when its id says `v4.1`, `vision` or `ocr`. The hands model is written to
+  `$DSH_HOME/nanomuse/hands.json` (mode 0600) and handed to `nanomuse mcp` as its
+  environment by the plugin's own MCP client, which it restarts when the model changes.
+  When a model of your own fails under a turn, the card offers *Use nanoMuse Cloud this
+  time* (signed in): that one message again through the account, the chat back to its
+  model when the turn ends, the Models page as it was. Nothing falls back on its own.
 - **Connectors on every device.** What you connected here (service, label, URL for a
   custom MCP, how it signs in, which device) is published to the account's profile
   (contract C3; never a token or a key — the host refuses any field named like one), so

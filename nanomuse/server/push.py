@@ -24,8 +24,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from nanomuse.background import keep_task
 from nanomuse.logger import logger
-from nanomuse.server.events import keep_task
 
 VAPID_FILE = "push-vapid.json"
 SUBSCRIPTIONS_FILE = "push-subscriptions.json"
@@ -62,16 +62,21 @@ class PushService:
                 data = json.loads(self._vapid.read_text())
                 self.private_key_pem = data["private_key_pem"]
                 self.public_key = data["public_key"]
-            except (ValueError, KeyError):
+            except (ValueError, KeyError, TypeError, OSError):
                 logger.warning("push: unreadable {}; generating a new key pair", self._vapid)
         if not self.public_key and available():
             self._generate_keys()
         if self._subs_file.is_file():
             try:
                 self.subscriptions = [
-                    s for s in json.loads(self._subs_file.read_text()) if s.get("endpoint")
+                    s
+                    for s in json.loads(self._subs_file.read_text())
+                    if isinstance(s, dict) and s.get("endpoint")
                 ]
-            except ValueError:
+            except (ValueError, TypeError, OSError):
+                logger.warning(
+                    "push: unreadable {}; starting without subscriptions", self._subs_file
+                )
                 self.subscriptions = []
 
     def _generate_keys(self) -> None:
@@ -171,11 +176,26 @@ class PushService:
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
-            self._send_all(payload)
+            self._forget(self._send_all(payload))
             return
-        keep_task(loop.create_task(asyncio.to_thread(self._send_all, payload)))
 
-    def _send_all(self, payload: dict[str, Any]) -> None:
+        async def deliver() -> None:
+            # the network goes to a worker thread; the list and its file are only ever
+            # touched on the loop, where subscribe() and unsubscribe() run too
+            self._forget(await asyncio.to_thread(self._send_all, payload))
+
+        keep_task(loop.create_task(deliver()))
+
+    def _forget(self, gone: list[str]) -> None:
+        """Drop the endpoints a push service reported gone (404/410)."""
+        if not gone:
+            return
+        self.subscriptions = [s for s in self.subscriptions if s["endpoint"] not in gone]
+        self._save_subscriptions()
+
+    def _send_all(self, payload: dict[str, Any]) -> list[str]:
+        """Send ``payload`` to a snapshot of the devices; returns the endpoints that are
+        gone. Reads the list, never writes it: it may run in a worker thread."""
         from pywebpush import WebPushException, webpush
 
         data = json.dumps(payload)
@@ -198,9 +218,7 @@ class PushService:
                     logger.warning("push failed ({}): {}", status, str(exc)[:200])
             except Exception as exc:  # noqa: BLE001
                 logger.warning("push failed: {}", str(exc)[:200])
-        if gone:
-            self.subscriptions = [s for s in self.subscriptions if s["endpoint"] not in gone]
-            self._save_subscriptions()
+        return gone
 
     async def test(self, name: str = "nanoMuse") -> dict[str, Any]:
         if not self.enabled:

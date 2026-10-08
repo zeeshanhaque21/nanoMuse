@@ -47,6 +47,9 @@ export interface AssistantEvent extends BaseEvent {
   quiet?: boolean;
   /** the device whose Muse said this (a chat addressed to a device) */
   device?: string;
+  /** a synced reply written on another device of the account */
+  via_device?: string;
+  via_device_name?: string;
 }
 
 export interface ToolEvent extends BaseEvent {
@@ -123,6 +126,8 @@ export interface NoticeEvent extends BaseEvent {
     invite_bonus_cny?: number;
     invitee_bonus_cny?: number;
     own_key_docs?: string;
+    /** relay 0.21: the region's providers and what each covers */
+    guidance?: Guidance;
   };
 }
 
@@ -287,6 +292,10 @@ export interface ThreadMeta {
 export interface SyncState {
   /** the switch on this device */
   enabled: boolean;
+  /** C9: this device's side chats too (per device, default off); off = the main chat only */
+  side_chats?: boolean;
+  /** C9: the other devices' turns under way on synced chats */
+  working?: WorkingPresence[];
   /** signed in to nanoMuse Cloud, so syncing can happen at all */
   available: boolean;
   /** the relay refused the key: nothing moves until the next sign-in */
@@ -297,6 +306,19 @@ export interface SyncState {
   error: string;
   /** the relay's own view; null when it could not be asked */
   relay: { enabled: boolean; cursor: number; counts: { conversations: number; messages: number }; limits: { messages: number; text_bytes: number } } | null;
+}
+
+/**
+ * Another device of the account is working on a synced chat (contract C9): the hub's
+ * `working` frame as the runtime keeps it. `at` is Unix seconds; a line older than ten
+ * minutes is stale and not shown.
+ */
+export interface WorkingPresence {
+  thread: string;
+  cid: string;
+  device: string;
+  device_name: string;
+  at: number;
 }
 
 /** A device of the account on the hub (docs/hub.md). */
@@ -324,6 +346,8 @@ export interface CloudAccount {
   is_model: boolean;
   /** this runtime insists on an account (self-hosters may turn it off) */
   required?: boolean;
+  /** the account's models as a source (*Use nanoMuse Cloud models*); false leaves them out of the automatic order and the listings */
+  models?: boolean;
   has_password?: boolean;
   /** on the operator's list: no spend limit */
   member?: boolean;
@@ -365,7 +389,6 @@ export interface UsageRow {
   cost_cny: number;
 }
 
-/** `/api/cloud/me`: the account as the relay sees it. */
 /** GET /v1/config on the relay (0.15): what a client prints before anyone signs in. */
 export interface CloudConfig {
   version?: string;
@@ -382,6 +405,7 @@ export interface CloudConfig {
   improve_default?: boolean;
 }
 
+/** `/api/cloud/me`: the account as the relay sees it. */
 export interface CloudMe {
   account: {
     id: string;
@@ -422,10 +446,14 @@ export interface CloudMe {
     /** relay 0.9: the friend who signs up with the code gets the same */
     invitee_bonus_cny?: number;
     own_key_docs?: string;
+    /** relay 0.21 (contract C11): the whole own-key card for this person's region */
+    guidance?: Guidance;
     daily_cap: number;
     credit_left?: number;
     left_today?: number | null;
   };
+  /** relay 0.17: where the relay places the person */
+  region?: "cn" | "intl" | "unknown" | string;
   /** Relay 0.4/0.5: the account's invite code and what came of it (`earned_cny` since 0.5). */
   invite?: { code: string; url: string; invites: number; bonus_cny: number; invitee_bonus_cny?: number; earned_cny?: number; friends: Array<{ hint: string; joined_at: number }> };
   /**
@@ -437,6 +465,104 @@ export interface CloudMe {
   /** Relay 0.4 counted clips; 0.5 no longer does (always unlimited here). */
   clips?: { unlimited: boolean; allowed: number | null; used: number; left: number | null; per_face: number };
   models?: Array<{ id: string; name?: string; nanomuse?: { kind?: string; recommended?: boolean } }>;
+}
+
+// ------------------------------------------------------------------ own-key providers (C11)
+
+export type Capability = "chat" | "vision" | "image" | "video";
+
+/** One entry of `nanomuse/llm/providers.json`, the own-key catalogue every client reads. */
+export interface CatalogueProvider {
+  id: string;
+  name: string;
+  name_zh: string;
+  protocol: "openai" | "openai-responses" | "anthropic" | "gemini" | string;
+  base_url: string;
+  base_url_global?: string;
+  key_url: string;
+  key_url_global?: string;
+  key_hint?: string;
+  auth: string[];
+  /** a sign-in that gives less than the key does (the ChatGPT one: chat and vision) */
+  auth_capabilities?: Record<string, Capability[]>;
+  regions: Array<"cn" | "global">;
+  capabilities: Capability[];
+  defaults: Partial<Record<"chat" | "hands" | "image" | "video", string>>;
+  /** "custom": the person says what the endpoint can do */
+  user_capabilities?: boolean;
+  note: string;
+  note_zh: string;
+  verified: string;
+  /** from the runtime: the slots using this provider today */
+  configured?: string[];
+  /** from the runtime: the ChatGPT store holds tokens (on `openai`) */
+  signed_in?: boolean;
+}
+
+/** `GET /api/providers` on the runtime (team Runtime's CONTRACT-chatgpt.md, §3). */
+export interface ProvidersView {
+  providers: CatalogueProvider[];
+  region: "cn" | "global" | "";
+  configured: Partial<Record<"chat" | "hands" | "image" | "video", { provider: string; model: string; protocol?: string; source?: string } | null>>;
+  capabilities: Capability[];
+  unavailable: Partial<Record<Capability, string>>;
+  chatgpt?: { signed_in: boolean; label?: string; capabilities?: Capability[] };
+}
+
+/** The relay's own-key guidance (relay 0.21, `spend.guidance` and the refusal's). */
+export interface Guidance {
+  version?: number;
+  region: "cn" | "intl" | "unknown" | string;
+  docs: string;
+  providers: Array<{
+    id: string;
+    name: string;
+    name_zh: string;
+    protocol?: string;
+    base_url?: string;
+    key_url: string;
+    auth: string[];
+    regions?: string[];
+    covers: Capability[];
+    defaults?: Record<string, string>;
+    one_key?: boolean;
+    note?: string;
+    note_zh?: string;
+  }>;
+  plans: Array<{ id: string; provider: string; name: string; auth: string; clients: string[]; covers: Capability[] }>;
+  local?: Array<{ id: string; name: string; name_zh: string }>;
+  caveats?: { chatgpt?: string; chatgpt_zh?: string };
+}
+
+/** `POST /api/chatgpt/login`: the page to open; the runtime waits for the callback. */
+export interface ChatGptLogin {
+  url: string;
+  callback?: string;
+  expires_in?: number;
+  /** false when the runtime could not listen on port 1455: the callback address has to be pasted (`POST /api/chatgpt/callback`) */
+  port_bound?: boolean;
+}
+
+/** `GET /api/chatgpt/status`: the token store, never the tokens. */
+export interface ChatGptStatus {
+  signed_in: boolean;
+  label?: string;
+  plan?: string;
+  account_id?: string;
+  expires_at?: number;
+  expires_in?: number;
+  /** a sign-in started and not finished yet */
+  pending?: boolean;
+  /** the page of a pending sign-in, for a second tab */
+  url?: string;
+  /** while pending: whether the runtime listens for the callback itself */
+  port_bound?: boolean;
+  /** while pending: seconds until the login is given up */
+  login_expires_in?: number;
+  error?: string;
+  /** `cancelled`, `timeout`, `state_mismatch`, `exchange_failed`, … */
+  error_code?: string;
+  models?: string[];
 }
 
 /** A coding agent on a computer: Cursor, Codex, Claude Code. */
@@ -838,6 +964,26 @@ export interface ProviderPreset {
   region?: string;
 }
 
+/** One of the `image` / `video` slots: as set, and what it resolves to today. */
+export interface MediaSlotData {
+  /** a catalogue id, or `openai` / `openai_responses` with a `base_url`; "" when not set */
+  provider: string;
+  /** the catalogue entry that means, by id or by the URL's host; "" when unlisted or not set */
+  provider_id: string;
+  /** "" = the catalogue's default for the provider */
+  model: string;
+  base_url: string;
+  key_source: "none" | "vault" | "config" | "missing";
+  /** something is set here (an explicit choice) */
+  configured: boolean;
+  from_app: boolean;
+  /** what the slot resolves to: a catalogue id, `nanomuse_cloud`, `custom`; "" when nothing draws */
+  effective_provider: string;
+  effective_model: string;
+  /** `app` / `config` for a choice, `chat` for the chat provider's own model, `cloud` for the relay, "" for none */
+  effective_source: "app" | "config" | "chat" | "cloud" | "";
+}
+
 export interface ConnectionsData {
   llm: {
     provider: string;
@@ -854,6 +1000,8 @@ export interface ConnectionsData {
     image_model?: string;
     /** the clip model at the same host; "" = the runtime's pick */
     video_model?: string;
+    /** `[llm] proxy` for this slot's requests; credentials masked; "" = none (older runtimes: absent) */
+    proxy?: string;
   };
   providers: Record<string, ProviderPreset>;
   /** Recall by meaning: memories embedded through an OpenAI-compatible /embeddings endpoint. */
@@ -902,10 +1050,15 @@ export interface ConnectionsData {
   /** Operating the phone through its screen (the GUI agent) and the operator's model. */
   gui: {
     enabled: boolean;
+    /** a protocol (`openai` / `openai_responses`) or a catalogue id, as for the chat model */
     provider: string;
+    /** the catalogue entry `provider` means, by id or by the URL's host; "" when unlisted (0.1.41) */
+    provider_id?: string;
     model: string;
     /** the model the hands use right now: `model`, else the default below */
     effective_model?: string;
+    /** where that comes from: `gui` (set here), `chat` (the chat provider's hands model), `cloud` (the relay's) */
+    effective_source?: "gui" | "chat" | "cloud";
     /** what the hands use when `model` is empty: the relay's hands model with the account, the chat model otherwise */
     default_model?: string;
     /** the chat model is the account (the relay) */
@@ -915,6 +1068,10 @@ export interface ConnectionsData {
     max_steps: number;
     phone: PhoneStatus;
   };
+  /** Where pictures come from (`[image]`); absent on a runtime before 0.1.41. */
+  image?: MediaSlotData;
+  /** Where clips come from (`[video]`); absent on a runtime before 0.1.41. */
+  video?: MediaSlotData;
   calendar: {
     enabled: boolean;
     configured: boolean;
@@ -1095,6 +1252,34 @@ export interface StateSnapshot {
   hands?: HandsStatus;
   /** the holds that are on (contract C1), as `hold` events */
   holds?: HoldEvent[];
+  /** the other devices' turns under way on synced chats (contract C9) */
+  working?: WorkingPresence[];
+  /** the first conversation (contract C4); absent on an older runtime */
+  firstrun?: FirstRunView;
+}
+
+/** The first conversation's phases: `none → ask_user_name → ask_agent_name → named → done`. */
+export type FirstRunPhase = "none" | "ask_user_name" | "ask_agent_name" | "named" | "done";
+
+/** `GET /api/firstrun` and the `firstrun` frame: where the first conversation stands (contract C4). */
+export interface FirstRunView {
+  phase: FirstRunPhase;
+  /** the thread it is bound to; null until Start */
+  session_id: string | null;
+  user_address: string | null;
+  /** the model's name suggestions for itself, when it gave some */
+  suggestions: string[];
+  /** what the chooser offers: the suggestions, or two from the built-in pool */
+  chips: string[];
+  chosen: string | null;
+  /** the language the opening was shown in: "en", "zh", or "" */
+  lang: string;
+  /** started and not over: its turns are never tasks */
+  running: boolean;
+  started_at: number;
+  finished_at: number;
+  /** the three lines the app speaks first, in the language asked for (GET only) */
+  intro?: string[];
 }
 
 export interface AuditEntry {
@@ -1245,6 +1430,8 @@ export type WsMessage =
   | { kind: "thread_cleared"; thread: string }
   /** a synced message deleted on another device (contract C7 tombstone) */
   | { kind: "event_removed"; thread: string; id: string }
+  /** another device started (`working: true`) or finished a turn on a synced chat (contract C9) */
+  | ({ kind: "working"; working: boolean } & WorkingPresence)
   | { kind: "goals" }
   | { kind: "memory" }
   | { kind: "reminders" }
@@ -1261,9 +1448,10 @@ export type WsMessage =
   /** the avatar studio's session, every time it changes (the studio screen watches this; the chat has its card) */
   | { kind: "studio"; current: StudioSession | null }
   | { kind: "connections"; connections: ConnectionsData }
+  /** the first conversation moved on (Start, the model's block, a pick) */
+  | { kind: "firstrun"; firstrun: FirstRunView }
   | { kind: "skills"; skills: SkillsData }
   | { kind: "approvals_reset" }
   | { kind: "coding"; event: CodingEvent; agent: string; session_id: string; device?: string; run: CodingRun | null }
-  | { kind: "call"; state: "started" | "turn" | "ended" | string; turns?: number; cost_cny?: number; seconds?: number; reason?: string; source?: string; model?: string; video?: boolean }
   | { kind: "error"; error: string }
   | { kind: "pong"; status: Status };

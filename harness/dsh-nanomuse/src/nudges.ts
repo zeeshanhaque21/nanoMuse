@@ -15,7 +15,13 @@
  *   allowance card.
  * - `cooldown_days` between any two asks; `max_asks` is a lifetime cap — showing a card is an
  *   ask, "Not now" included; going to GitHub from any card sets `starred` and ends them all.
+ * - `text` and `text_zh` (optional, ≤ 200 characters each, empty by default): the
+ *   card's body sentence, when the relay wants to say it in its own words. Trimmed; a value
+ *   over the cap is dropped. A Chinese UI takes `text_zh`, else `text`, else the app's own
+ *   sentence for the moment; the title and the buttons stay the app's (`starText`).
  */
+
+import { relayFetch } from './relay.ts'
 
 // ---- the policy ----------------------------------------------------------------------
 
@@ -36,6 +42,9 @@ export interface NudgesPolicy {
     moments: NudgeMoments
     cooldown_days: number
     max_asks: number
+    /** The card's body sentence in the relay's words; '' means the app's own. */
+    text: string
+    text_zh: string
   }
 }
 
@@ -43,11 +52,33 @@ export const DEFAULT_NUDGES: NudgesPolicy = {
   version: 1,
   star: {
     enabled: true,
-    url: 'https://github.com/nano-muse/nanoMuse',
+    url: 'https://github.com/zeeshanhaque21/nanoMuse',
     moments: { signed_in: true, tasks: [3, 10, 30], new_look: true, exhausted: true, days_used: [7, 30], goal_done: true },
     cooldown_days: 7,
     max_asks: 4,
+    text: '',
+    text_zh: '',
   },
+}
+
+/** The longest body sentence a relay may put on the card; anything longer is dropped, not cut. */
+export const STAR_TEXT_MAX = 200
+
+/** A relay's sentence as the card may show it: trimmed; '' when it is not a string, empty, or over STAR_TEXT_MAX. */
+export function starSentence(value: unknown): string {
+  if (typeof value !== 'string') return ''
+  const text = value.trim()
+  return text.length > 0 && text.length <= STAR_TEXT_MAX ? text : ''
+}
+
+/**
+ * The card's body: the relay's Chinese sentence for a Chinese UI, else its English one, else
+ * the app's own words for the moment (`fallback`). Only the body changes; the title and the
+ * buttons are always the app's.
+ */
+export function starText(policy: Pick<NudgesPolicy, 'star'>, zh: boolean, fallback: string): string {
+  const s = policy.star
+  return (zh && s.text_zh) || s.text || fallback
 }
 
 /** The policy is fetched at most this often. */
@@ -57,6 +88,12 @@ export const NUDGES_EVERY_MS = 24 * 3600_000
  * operator configures a relay; no third-party host is contacted by default. */
 export const NUDGES_ORIGIN = ''
 export const NUDGES_TIMEOUT_MS = 5000
+
+/** The relay's policy (`GET /v1/nudges`), undefined when the relay did not send one. */
+export async function fetchNudgesPolicy(origin: string, fetchImpl: typeof fetch = fetch): Promise<unknown> {
+  const res = await relayFetch(origin, fetchImpl, NUDGES_TIMEOUT_MS)(`${origin}/v1/nudges`)
+  return res.ok ? res.json().catch(() => undefined) : undefined
+}
 
 function numbers(value: unknown, fallback: number[]): number[] {
   if (!Array.isArray(value)) return fallback
@@ -90,6 +127,8 @@ export function mergeNudges(raw: unknown): NudgesPolicy {
       },
       cooldown_days: typeof star.cooldown_days === 'number' && star.cooldown_days >= 0 ? star.cooldown_days : d.cooldown_days,
       max_asks: typeof star.max_asks === 'number' && star.max_asks >= 0 ? star.max_asks : d.max_asks,
+      text: starSentence(star.text),
+      text_zh: starSentence(star.text_zh),
     },
   }
 }

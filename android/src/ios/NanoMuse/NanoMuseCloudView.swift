@@ -22,7 +22,8 @@ struct NanoMuseCloudView: View {
     @State private var failed = false
     /// Which way out is being confirmed, if any.
     @State private var confirm: WayOut?
-    @State private var relayBase = ""
+    /// "Use a different server" (NanoMuseRelayPicker).
+    @State private var pickingRelay = false
 
     private enum WayOut: String, Identifiable {
         case here, everywhere, delete
@@ -50,15 +51,14 @@ struct NanoMuseCloudView: View {
             } else {
                 signInSections
             }
-            if NanoMuseCloud.canOverrideBase, !signedIn {
-                relaySection
-            }
         }
         .navigationTitle(NanoMuseCloud.label)
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $pickingRelay, onDismiss: { Task { config = await NanoMuseCloud.config() } }) {
+            NanoMuseRelayPickerSheet()
+        }
         .task {
             account = NanoMuseCloud.account
-            relayBase = NanoMuseCloud.baseURL == NanoMuseCloud.defaultBase ? "" : NanoMuseCloud.baseURL
             if signedIn { await refresh(quiet: true) } else { config = await NanoMuseCloud.config() }
         }
     }
@@ -86,6 +86,10 @@ struct NanoMuseCloudView: View {
                 Label(AppLocalized("Refresh"), systemImage: "arrow.clockwise")
             }
             .disabled(busy)
+            // The relay this sign-in belongs to; changing it signs out first.
+            NanoMuseRelayRow(busy: busy) { keep in
+                Task { await changeRelay(keep: keep) }
+            }
         } footer: {
             if let message {
                 Text(message).foregroundStyle(failed ? Color.red : Color.secondary)
@@ -151,18 +155,22 @@ struct NanoMuseCloudView: View {
             Text(AppLocalized("This phone's key is revoked and the Cloud provider removed; the allowance stays with your account."))
         }
         .disabled(busy)
+        // Delete: one confirmation. A sign-out: the sheet with its one question (C12).
         .confirmationDialog(
             confirmTitle,
-            isPresented: Binding(get: { confirm != nil }, set: { if !$0 { confirm = nil } }),
+            isPresented: Binding(get: { confirm == .delete }, set: { if !$0 { confirm = nil } }),
             titleVisibility: .visible
         ) {
-            if let way = confirm {
-                Button(way == .delete ? AppLocalized("Delete the account") : AppLocalized("Sign out"), role: .destructive) {
-                    Task { await leave(way) }
-                }
+            Button(AppLocalized("Delete the account"), role: .destructive) {
+                Task { await leave(.delete, keep: false) }
             }
         } message: {
             Text(confirmMessage)
+        }
+        .sheet(item: Binding(get: { confirm.flatMap { $0 == .delete ? nil : $0 } }, set: { if $0 == nil { confirm = nil } })) { way in
+            NanoMuseSignOutSheet(title: confirmTitle, message: confirmMessage, action: AppLocalized("Sign out")) { keep in
+                Task { await leave(way, keep: keep) }
+            }
         }
     }
 
@@ -177,8 +185,8 @@ struct NanoMuseCloudView: View {
     private var confirmMessage: String {
         switch confirm {
         case .everywhere: return AppLocalized("Every device signed in to this account loses its key, this phone included. The account stays; sign in again any time.")
-        case .delete: return AppLocalized("The account, its sign-ins, usage and history are deleted at the relay. This cannot be undone. Chats on this phone stay.")
-        case .here, .none: return AppLocalized("The nanoMuse Cloud provider and its models will be removed from this phone. Chats stay.")
+        case .delete: return AppLocalized("The account, its sign-ins, usage and history are deleted at the relay, and this account's chats, memory, feed, goals and face are removed from this phone. This cannot be undone.")
+        case .here, .none: return AppLocalized("The nanoMuse Cloud provider and its models will be removed from this phone.")
         }
     }
 
@@ -187,7 +195,7 @@ struct NanoMuseCloudView: View {
         Section {
             VStack(alignment: .leading, spacing: 6) {
                 Text(AppLocalized("Free, open source, non-profit")).font(.subheadline.weight(.semibold))
-                Text(AppLocalized("nanoMuse is a non-profit open-source community project — free, forever. The model comes with a free allowance paid by the developer; after that, your own key. Nothing is sold; what the relay keeps is in the privacy policy, and Settings → Data controls is yours."))
+                Text(AppLocalized("nanoMuse is a non-profit open-source community project, free, forever. The model comes with a free allowance paid by the developer; after that, your own key. Nothing is sold; what the relay keeps is in the privacy policy, and Settings → Data controls is yours."))
                     .font(.caption).foregroundStyle(.secondary)
                 Text(AppLocalized("Found a bug, want a feature, have a patch? The GitHub repository is the place."))
                     .font(.caption).foregroundStyle(.secondary)
@@ -205,7 +213,13 @@ struct NanoMuseCloudView: View {
     @ViewBuilder
     private var signInSections: some View {
         Section {
-            Text(AppLocalized("Sign in with a phone number or an e-mail address and start right away with a starter allowance — no key of your own needed. A provider of your own can be added at any time."))
+            if NanoMuseCloud.signInEnded {
+                // the relay refused the phone's key: the account's chats wait here for the
+                // same account to sign in again (C12)
+                Label(AppLocalized("Your sign-in on this phone was ended. Sign in again to continue; your chats are kept on this device until then."), systemImage: "person.crop.circle.badge.clock")
+                    .font(.subheadline)
+            }
+            Text(AppLocalized("Sign in with a phone number or an e-mail address and start right away with a starter allowance, no key of your own needed. A provider of your own can be added at any time."))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
             if let allowance = config.allowanceCny, allowance > 0 {
@@ -216,12 +230,28 @@ struct NanoMuseCloudView: View {
         }
 
         Section {
-            TextField(AppLocalized("Phone number or e-mail"), text: $identifier)
+            // The app's mark above the field (docs/brand.md: the sign-in stands for the app), as on Android.
+            HStack {
+                Spacer()
+                NanoMuseBrandMark(size: 64)
+                    .accessibilityHidden(true)
+                Spacer()
+            }
+            .padding(.vertical, 8)
+            .listRowBackground(Color.clear)
+            // SMS codes reach mainland-China numbers only: the placeholder says so, and a number
+            // from elsewhere gets the e-mail sentence while it is being typed, before any tap.
+            TextField(AppLocalized("Mainland China phone number or e-mail"), text: $identifier)
                 .keyboardType(.emailAddress)
                 .textContentType(.username)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .disabled(busy || codeSent)
+            if !codeSent, NanoMuseCloud.needsEmailInstead(identifier: identifier) {
+                Text(NanoMuseCloud.phoneRegionSentence)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
             if usePassword {
                 SecureField(AppLocalized("Password"), text: $password)
                     .textContentType(.password)
@@ -308,35 +338,47 @@ struct NanoMuseCloudView: View {
         } footer: {
             privacyFooter
         }
-    }
 
-    private var privacyFooter: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(AppLocalized("The relay keeps a hashed identifier and token counts. Messages are passed to the model and not stored."))
-            Link(AppLocalized("How nanoMuse Cloud works"), destination: URL(string: "https://github.com/nano-muse/nanoMuse/blob/main/docs/cloud.md")!)
+        // Anyone can run the relay; the sign-in can go to one's own.
+        Section {
+            Button(AppLocalized("Use a different server")) { pickingRelay = true }
+                .disabled(busy)
+        } footer: {
+            if NanoMuseCloud.usesOwnRelay {
+                Text(String(format: AppLocalized("Server: %@"), NanoMuseCloud.relayHost))
+            }
         }
     }
 
-    // MARK: - Relay
-
-    private var relaySection: some View {
-        Section {
-            TextField(NanoMuseCloud.defaultBase, text: $relayBase)
-                .keyboardType(.URL)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .onSubmit { NanoMuseCloud.setBaseURL(relayBase) }
-                .nmOnChange(of: relayBase) { newValue in NanoMuseCloud.setBaseURL(newValue) }
-        } header: {
-            Text(AppLocalized("Relay server"))
-        } footer: {
-            Text(AppLocalized("Another relay to sign in against, for example one running on a laptop on the same Wi-Fi. Empty means the default."))
+    /// Android's `nm_cloud_fine_print`: what the relay keeps, and where the rest is written.
+    private var privacyFooter: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(AppLocalized("The relay keeps an account id, a masked identifier, usage counts and your agent's name and look; what else, and what is yours to switch off, is in the privacy policy."))
+            Link(AppLocalized("Privacy policy"), destination: NanoMuseLinks.privacy)
         }
     }
 
     // MARK: - Actions
 
+    /// Settings → Account → Change: sign out on this phone (a sign-out like any other, C12), then the picker.
+    private func changeRelay(keep: Bool) async {
+        busy = true
+        defer { busy = false }
+        await NanoMuseCloud.signOut(keep: keep)
+        account = nil
+        message = nil
+        failed = false
+        pickingRelay = true
+    }
+
     private func sendCode() async {
+        // A number outside mainland China gets no text message; say so before asking the relay
+        // (whose `phone_region` answer is the same sentence).
+        if NanoMuseCloud.needsEmailInstead(identifier: identifier) {
+            failed = true
+            message = NanoMuseCloud.phoneRegionSentence
+            return
+        }
         busy = true
         failed = false
         defer { busy = false }
@@ -400,14 +442,15 @@ struct NanoMuseCloudView: View {
         }
     }
 
-    /// One of the ways out; the sign-in form comes back when it worked.
-    private func leave(_ way: WayOut) async {
+    /// One of the ways out; the sign-in form comes back when it worked. `keep` is the sheet's
+    /// answer (C12) — the account's data stays on the phone only when asked.
+    private func leave(_ way: WayOut, keep: Bool) async {
         busy = true
         defer { busy = false }
         do {
             switch way {
-            case .here: await NanoMuseCloud.signOut()
-            case .everywhere: try await NanoMuseCloud.signOutEverywhere()
+            case .here: await NanoMuseCloud.signOut(keep: keep)
+            case .everywhere: try await NanoMuseCloud.signOutEverywhere(keep: keep)
             case .delete: try await NanoMuseCloud.deleteAccount()
             }
             account = nil

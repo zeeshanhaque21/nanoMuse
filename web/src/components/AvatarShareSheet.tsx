@@ -31,7 +31,7 @@ const PALETTES: Palette[] = [
   { id: "green", background: "#D9F0DF", accent: "#2E7D4F", mood: "error" },
 ];
 
-const REPO = "github.com/nano-muse/nanoMuse";
+const REPO = "github.com/zeeshanhaque21/nanoMuse";
 // the card, in CSS pixels; drawn at 2× for a crisp picture
 const W = 540;
 const H = 720;
@@ -171,7 +171,7 @@ export function AvatarShareSheet({ open, onClose }: { open: boolean; onClose: ()
   const [previews, setPreviews] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const alive = useRef(true);
-  const bubble = t("Hi, I'm {name}, a personal AI agent. Meet nanoMuse — open source, runs on your phone.", { name });
+  const bubble = t("Hi, I'm {name}, a personal AI agent. Meet nanoMuse: open source, runs on your phone.", { name });
   const tagline = t("Your personal AI agent, open source · {repo}", { repo: REPO });
 
   useEffect(() => {
@@ -195,7 +195,7 @@ export function AvatarShareSheet({ open, onClose }: { open: boolean; onClose: ()
   const share = async () => {
     setBusy(true);
     try {
-      const palette = PALETTES[selected] ?? PALETTES[0]!;
+      const palette = PALETTES[selected] ?? PALETTES[0];
       const canvas = await render(palette, profile, name, bubble, tagline, 2);
       const blob = await toBlob(canvas);
       if (!blob) throw new Error(t("The card could not be drawn."));

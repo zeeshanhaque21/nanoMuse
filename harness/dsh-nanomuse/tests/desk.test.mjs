@@ -1,7 +1,9 @@
 // The stage's desk: approvals raced against the chat card, holds of the hands, the
 // update check, what the other devices see of the connectors, the model rules.
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import { test } from 'node:test'
+import { BUNDLE_VERSION } from '../lib/cloud.js'
 import { ApprovalDesk, HoldDesk, checkForUpdate, compareVersions, pickAsset, pickChatModel, pickHandsModel, readSharedConnectors, sharedConnectors, takesImages } from '../lib/desk.js'
 
 const req = (callId, sessionId = 's1') => ({ agent: { id: 'a1', session: { id: sessionId } }, toolName: 'bash', callId, reason: 'rm -rf build', displayReason: { en: 'Remove the build folder', zh: '删除 build 目录' } })
@@ -22,6 +24,41 @@ test('an approval the stage answers first wins; the chat card is let go', async 
   assert.equal(desk.decide('c1', true), false)
   chatResolve('allowed-once')
   assert.ok(changes >= 2)
+})
+
+test('the stage\'s answer withdraws the chat card through a signal of its own; the asker\'s signal still cancels both', async () => {
+  const desk = new ApprovalDesk(() => undefined)
+  const asker = new AbortController()
+  const request = { ...req('c1b'), signal: asker.signal }
+  // the chat card, as the bridge shows it: it reads the request's signal when it is shown and ends with it
+  let cardSignal
+  const chat = () => new Promise((resolve, reject) => {
+    cardSignal = request.signal
+    cardSignal.addEventListener('abort', () => reject(cardSignal.reason), { once: true })
+  })
+  const outcome = desk.handle(request, chat)
+  await new Promise((r) => setImmediate(r))
+  assert.notEqual(cardSignal, asker.signal, 'the card follows a signal of its own')
+  assert.equal(desk.decide('c1b', true), true)
+  assert.equal(await outcome, 'allowed-once')
+  assert.equal(cardSignal.aborted, true, 'the card is taken down')
+  assert.equal(asker.signal.aborted, false, 'the tool call itself is not cancelled')
+  assert.equal(request.signal, asker.signal, 'the request is put back as it came')
+
+  // the asker gives up (the turn is stopped): stage and card both end
+  const asker2 = new AbortController()
+  const request2 = { ...req('c1c'), signal: asker2.signal }
+  let card2
+  const chat2 = () => new Promise((_resolve, reject) => {
+    card2 = request2.signal
+    card2.addEventListener('abort', () => reject(card2.reason), { once: true })
+  })
+  const outcome2 = desk.handle(request2, chat2)
+  await new Promise((r) => setImmediate(r))
+  asker2.abort(new Error('stopped'))
+  assert.equal(await outcome2, 'cancelled')
+  assert.equal(card2.aborted, true)
+  assert.equal(desk.list().length, 0)
 })
 
 test('an approval the chat answers first clears the stage', async () => {
@@ -68,6 +105,36 @@ test('versions compare numerically, with pre-releases below the release', () => 
   assert.equal(compareVersions('0.1.9', '0.1.10'), -1)
   assert.equal(compareVersions('0.2.0-rc.2', '0.2.0'), -1)
   assert.equal(compareVersions('0.1.34', '0.1.34-rc.1'), 1)
+  // pre-release identifiers: numbers as numbers (rc.10 after rc.9), a number before a word,
+  // the shorter tag first; build metadata (+sha) is not part of the order
+  assert.equal(compareVersions('0.2.0-rc.10', '0.2.0-rc.9'), 1)
+  assert.equal(compareVersions('0.2.0-rc.1', '0.2.0-rc.1.1'), -1)
+  assert.equal(compareVersions('0.2.0-1', '0.2.0-alpha'), -1)
+  assert.equal(compareVersions('0.2.0-alpha', '0.2.0-beta'), -1)
+  assert.equal(compareVersions('0.2.0+build.7', '0.2.0'), 0)
+  assert.equal(compareVersions('0.2.0-rc.1+build.7', '0.2.0-rc.1'), 0)
+  // a labelled version reads as its number: 0.1.40 compared "dsh-nanomuse 0.1.40" as 0 and
+  // offered the installed release as an update
+  assert.equal(compareVersions('0.1.40', 'dsh-nanomuse 0.1.40'), 0)
+  assert.equal(compareVersions('dsh-nanomuse 0.1.41', 'v0.1.40'), 1)
+  assert.equal(compareVersions('nanoMuse-Desktop-0.1.40', '0.1.41'), -1)
+})
+
+test('the update check compares the bare bundle version, so the installed release is not offered again', async () => {
+  const mirror = { repo: 'nano-muse/nanoMuse', releases: [{ tag: 'v0.1.40', assets: [] }] }
+  const fetchMirror = async () => ({ ok: true, status: 200, json: async () => mirror })
+  const same = await checkForUpdate(BUNDLE_VERSION, fetchMirror)
+  assert.equal(same.current, BUNDLE_VERSION)
+  // the host bundle carries package.json's version: it read the environment until 0.1.41,
+  // which nothing set in the packaged app, so every install ran as 0.0.0 and saw every
+  // release as newer
+  const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
+  assert.equal(BUNDLE_VERSION, pkg.version)
+  assert.equal(same.newer, compareVersions('0.1.40', BUNDLE_VERSION) > 0)
+  const installed = await checkForUpdate('0.1.40', fetchMirror)
+  assert.equal(installed.newer, false)
+  const labelled = await checkForUpdate('dsh-nanomuse 0.1.40', fetchMirror)
+  assert.equal(labelled.newer, false)
 })
 
 test('the installer for this computer is picked from the release', () => {
@@ -75,7 +142,8 @@ test('the installer for this computer is picked from the release', () => {
   assert.equal(pickAsset(assets, 'darwin', 'arm64')?.name, 'nanoMuse-Desktop-0.1.34-mac-arm64.dmg')
   assert.equal(pickAsset(assets, 'darwin', 'x64')?.name, 'nanoMuse-Desktop-0.1.34-mac-x64.zip')
   assert.equal(pickAsset(assets, 'win32', 'x64')?.name, 'nanoMuse-Desktop-0.1.34-win-x64.exe')
-  assert.equal(pickAsset(assets, 'linux', 'x64')?.name, 'nanoMuse-Desktop-0.1.34-linux-x64.AppImage')
+  assert.equal(pickAsset(assets, 'linux', 'x64')?.name, 'nanoMuse-Desktop-0.1.34-linux-x64.deb', 'the .deb is the one the docs prefer')
+  assert.equal(pickAsset(assets, 'linux', 'x64', true)?.name, 'nanoMuse-Desktop-0.1.34-linux-x64.AppImage', 'an AppImage install stays an AppImage')
   assert.equal(pickAsset(assets, 'linux', 'arm64'), undefined)
 })
 
@@ -148,4 +216,23 @@ test('the chat and hands defaults follow the relay\'s `for`, with the 0.1.34 nam
   assert.equal(takesImages({ id: 'deepseek-v4.1-flash', inputModalities: ['text'] }), true)
   assert.equal(takesImages({ id: 'deepseek-ocr', inputModalities: [] }), true)
   assert.equal(takesImages({ id: 'qwen3-vl', inputModalities: ['text', 'image'] }), true)
+})
+
+test('the provider row carries the image budget of a request through the relay (413 too_large): 5 MiB of base64 images, 2 Mpx a picture, the per-image byte cap left to dsh', async () => {
+  const { providerRowFor, IMAGE_BUDGET } = await import('../lib/cloud.js')
+  const row = providerRowFor('https://relay.test/v1', [
+    { id: 'deepseek-v4.1', name: 'DeepSeek V4.1', kind: 'chat', recommended: true, inputModalities: ['text', 'image'], for: ['chat'] },
+    { id: 'qwen3.8-27b', name: 'Qwen', kind: 'chat', recommended: false, inputModalities: ['text', 'image'], for: ['gui'] },
+    { id: 'wan-video', name: 'Wan', kind: 'video', recommended: false, inputModalities: ['text'], for: ['video'] },
+  ])
+  assert.equal(row.api, 'openai-completions')
+  assert.equal(row.baseURL, 'https://relay.test/v1')
+  assert.equal(row.maxRequestImageBytes, 5 * 1024 * 1024)
+  assert.equal(row.requestImagePixelBudget, 2 * 1024 * 1024)
+  assert.equal(row.requestImageMaxBytes, undefined)
+  assert.deepEqual(IMAGE_BUDGET, { maxRequestImageBytes: 5 * 1024 * 1024, requestImagePixelBudget: 2 * 1024 * 1024 })
+  // under the relay's 6 MiB cap with room for the text
+  assert.ok(row.maxRequestImageBytes < 6 * 1024 * 1024)
+  assert.deepEqual(row.models.map((m) => m.id), ['deepseek-v4.1'])
+  assert.deepEqual(row.models[0].input, ['text', 'image'])
 })

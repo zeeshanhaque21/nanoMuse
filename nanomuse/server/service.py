@@ -16,7 +16,7 @@ import secrets
 import time
 import uuid
 from collections.abc import Coroutine
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from datetime import time as time_of_day
 from pathlib import Path
@@ -26,6 +26,7 @@ from nanomuse import __version__, prompts
 from nanomuse.agent import Incoming, MuseAgent
 from nanomuse.app import NanoMuseApp
 from nanomuse.avatar import AvatarStudio
+from nanomuse.background import spawn
 from nanomuse.bridge.server import Bridge
 from nanomuse.cloud import model_url
 from nanomuse.coding.service import CodingService
@@ -33,6 +34,7 @@ from nanomuse.config import Settings
 from nanomuse.goals import Goal
 from nanomuse.hub.service import HubService
 from nanomuse.llm import BaseLLM
+from nanomuse.llm.factory import llm_ready
 from nanomuse.logger import logger
 from nanomuse.memory.consolidate import TidyReport, tidy
 from nanomuse.nudges import NudgesPolicy
@@ -40,9 +42,11 @@ from nanomuse.phone import PhoneLink
 from nanomuse.reminders import Reminder
 from nanomuse.schema import Attachment, Message, Role
 from nanomuse.sentinel.grants import normalize_scope
+from nanomuse.server import firstrun
 from nanomuse.server.connections import Connections
 from nanomuse.server.events import MAIN_THREAD, EventBus, Timeline, new_id, now_iso
 from nanomuse.server.failures import failure_notice
+from nanomuse.server.providers import ChatGPTSignIn, Providers
 from nanomuse.server.push import PushService
 from nanomuse.server.webui import WebUI, current_thread
 from nanomuse.sync import ConversationSync, parse_mention, system_note
@@ -57,7 +61,7 @@ IDEAS_PROMPT = """You are {name}, the user's personal agent. Based on what you k
 What you know:
 {context}
 
-Answer with a JSON array only, no prose. Each item: {{"title": "<short title, max 8 words>", "detail": "<one sentence on what you would do and why it helps>", "prompt": "<the exact request the user could send you to start>", "area": "<one of: planning, research, goals, money, health, home, learning, people, files, fun>", "kind": "<chat for a one-off conversation; routine for something to do every day at a time; goal for something long-term to track>", "time": "<HH:MM, routines only>", "category": "<goals only — one of: health, finance, career, learning, relationships, family, home, travel, creative, other>"}}. Mostly chat; at most one routine and one goal. Write in the user's language ({language})."""
+Answer with a JSON array only, no prose. Each item: {{"title": "<short title, max 8 words>", "detail": "<one sentence on what you would do and why it helps>", "prompt": "<the exact request the user could send you to start>", "area": "<one of: planning, research, goals, money, health, home, learning, people, files, fun>", "kind": "<chat for a one-off conversation; routine for something to do every day at a time; goal for something long-term to track>", "time": "<HH:MM, routines only>", "category": "<goals only; one of: health, finance, career, learning, relationships, family, home, travel, creative, other>"}}. Mostly chat; at most one routine and one goal. Write in the user's language ({language})."""
 
 # what tapping an idea does on every client: a message in the main chat, a daily routine
 # (a repeating reminder with the prompt), or a goal conversation (the phone's IdeaKind)
@@ -129,7 +133,7 @@ STARTER_IDEAS = [
     },
     {
         "title": "Research & compare options",
-        "detail": "Laptops, flights, insurance, a new phone plan — I'll gather the facts and compare them for you.",
+        "detail": "Laptops, flights, insurance, a new phone plan: I'll gather the facts and compare them for you.",
         "prompt": "I need to make a purchase decision. Ask me what I'm choosing between, then research and compare the options.",
         "area": "research",
         "kind": "chat",
@@ -151,7 +155,7 @@ STARTER_IDEAS = [
     },
     {
         "title": "Build a quick tracker",
-        "detail": "Spending, habits, workouts, reading — I can write a small script or document to track it for you.",
+        "detail": "Spending, habits, workouts, reading: I can write a small script or document to track it for you.",
         "prompt": "Build me a simple tracker. Ask me what I want to track and how, then create it in the workspace.",
         "area": "files",
         "kind": "chat",
@@ -165,14 +169,14 @@ PROACTIVITY = ("off", "low", "default", "high")
 NAME_MAX = 20
 TAGLINE_MAX = 60
 TONES: dict[str, str] = {
-    "formal": "Tone: formal — polite and precise, no slang, no exclamation marks.",
-    "casual": "Tone: casual — relaxed and friendly, the way a capable friend talks.",
-    "playful": "Tone: playful — light and a little witty, never at the expense of being clear.",
-    "concise": "Tone: concise — say what matters, then stop; no preamble, no recap.",
+    "formal": "Tone: formal. Polite and precise, no slang, no exclamation marks.",
+    "casual": "Tone: casual. Relaxed and friendly, the way a capable friend talks.",
+    "playful": "Tone: playful. Light and a little witty, never at the expense of being clear.",
+    "concise": "Tone: concise. Say what matters, then stop; no preamble, no recap.",
 }
 COMMUNICATION: dict[str, str] = {
-    "short": "Length: keep replies short — a few sentences, one or two paragraphs at most, unless asked for more.",
-    "detailed": "Length: be thorough — give the reasoning, the alternatives and what you ruled out.",
+    "short": "Length: keep replies short, a few sentences, one or two paragraphs at most, unless asked for more.",
+    "detailed": "Length: be thorough; give the reasoning, the alternatives and what you ruled out.",
     "bullets": "Shape: prefer bullet points and short headings over running prose; one idea per line.",
 }
 # how the configured interval stretches or shrinks per level
@@ -318,6 +322,9 @@ class Thread:
     # it, for the "From Pixel 8" badge; "" for chats started here
     origin_device: str = ""
     origin_device_name: str = ""
+    # the main chat of another account of this device (contract C10): kept while someone
+    # else is signed in, hidden from them, back as `main` when that account returns
+    main_of: str = ""
 
     def meta(self) -> dict[str, Any]:
         meta: dict[str, Any] = {
@@ -337,6 +344,8 @@ class Thread:
         if self.origin_device:
             meta["origin_device"] = self.origin_device
             meta["origin_device_name"] = self.origin_device_name
+        if self.main_of:
+            meta["main_of"] = self.main_of
         return meta
 
 
@@ -405,8 +414,15 @@ class MuseService:
         # when the app may ask for a star on GitHub: the relay's policy, a day at a time
         # (contract C1; GET /api/nudges hands it to the web app)
         self.nudges = NudgesPolicy(self.data_dir, settings.cloud.base_url)
+        # the first conversation (contract C4): bound to the main chat by Start, the model
+        # hears its phase there and nowhere else (docs/web.md)
+        self.firstrun = firstrun.FirstRunStore(self.data_dir)
         # a new face from a description, drawn on the chat model's host (docs/avatar.md)
         self.avatar = AvatarStudio(self)
+        # the catalogue with what is configured and what that covers (contract C11), and the
+        # ChatGPT sign-in run from the app (GET /api/providers, /api/chatgpt/*)
+        self.providers = Providers(self)
+        self.chatgpt = ChatGPTSignIn(self)
         self.coding = CodingService(self)
         self.app.tools.add(CodingAgents(coding=self.coding))
         self.token = self._load_token()
@@ -484,6 +500,7 @@ class MuseService:
         await asyncio.sleep(0)
         for t in self.threads.values():
             t.timeline.flush()
+        await self.chatgpt.close()
         if self._started:
             await self.sync.stop()
             await self.coding.close()
@@ -591,6 +608,117 @@ class MuseService:
             self.hub.profile.changed()
         return self.profile
 
+    # ------------------------------------------------------------------ first conversation (C4)
+    def firstrun_lang(self, lang: str = "") -> str:
+        """The language of the opening: the one asked for, else the one Start was pressed in,
+        else the agent's reply language."""
+        return lang.strip() or self.firstrun.state.lang or self.ui_language()
+
+    def firstrun_view(self, lang: str = "", intro: bool = False) -> dict[str, Any]:
+        """``GET /api/firstrun`` and the ``firstrun`` frame: the state and the chips; with
+        ``intro``, the three lines the app speaks first, in ``lang``."""
+        view = self.firstrun.view(self.firstrun_lang(lang))
+        if intro:
+            view["intro"] = firstrun.intro_lines(self.firstrun_lang(lang))
+        return view
+
+    def _publish_firstrun(self) -> None:
+        self.bus.publish({"kind": "firstrun", "firstrun": self.firstrun_view()})
+
+    def _firstrun_addendum_for(self, thread_id: str):  # noqa: ANN202 - a closure for the agent
+        def addendum() -> str:
+            state = self.firstrun.state
+            if not firstrun.bound_to(state, thread_id):
+                return ""
+            return firstrun.prompt_addendum(state, self.firstrun_lang(), self.profile.name) or ""
+
+        return addendum
+
+    def start_first_conversation(self, lang: str = "") -> dict[str, Any]:
+        """Start was pressed: the main chat is bound as the first conversation and the
+        setup counts as finished (what ``POST /api/onboarded`` records). The app speaks
+        first there, from the browser, at no cost in tokens; the model only hears from the
+        person. A main chat that already holds a conversation (synced from another device
+        of the account, or an older install) is not begun again: no opening, no name to
+        choose — the thread simply continues."""
+        self.connections.set_onboarded(True)
+        state = self.firstrun.state
+        main = self.threads.get(MAIN_THREAD)
+        underway = main is not None and any(
+            e.get("type") in ("user", "assistant") for e in main.timeline.events
+        )
+        if state.phase != "done":
+            base = replace(state, phase="done" if underway else "none")
+        else:
+            base = state
+        lang = lang.strip().lower()
+        lang = "zh" if lang.startswith("zh") else ("en" if lang else "")
+        self.firstrun.save(firstrun.start_conversation(base, MAIN_THREAD, lang))
+        self._publish_firstrun()
+        if underway:
+            self.first_feed_day()
+        return self.firstrun_view(intro=True)
+
+    def pick_first_name(self, name: str) -> dict[str, Any]:
+        """A chip was picked on the chooser: the name is on the header before the model has
+        even replied; the web then sends the name as the person's message, and the ``named``
+        addendum tells the model what happened. :class:`LookupError` when no pick is due."""
+        nxt = firstrun.pick_name(self.firstrun.state, name)
+        if nxt is None:
+            raise LookupError("no name is being chosen right now")
+        self.firstrun.save(nxt)
+        self.update_profile({"name": name})
+        self._publish_firstrun()
+        return self.firstrun_view()
+
+    def dismiss_first_chooser(self) -> dict[str, Any]:
+        """The person moved on to something the app handles itself: the chooser goes."""
+        state = self.firstrun.state
+        nxt = firstrun.dismiss_chooser(state)
+        if nxt is not state:
+            self.firstrun.save(nxt)
+            self._publish_firstrun()
+            self.first_feed_day()
+        return self.firstrun_view()
+
+    def _firstrun_turn_ended(self, thread_id: str, final: str) -> None:
+        """The model's reply in the first conversation ended: read its block, move the
+        phase, keep what it said — the address on the profile and as the memory line the
+        phones write, the name on the profile."""
+        state = self.firstrun.state
+        if not firstrun.bound_to(state, thread_id) or not firstrun.running(state):
+            return
+        outcome = firstrun.after_turn(state, final)
+        if outcome.state is state:
+            return
+        self.firstrun.save(outcome.state)
+        if outcome.address_given:
+            self.update_profile({"user_name": outcome.address_given})
+            self._remember_address(outcome.address_given)
+        if outcome.named:
+            self.update_profile({"name": outcome.named})
+        self._publish_firstrun()
+        if firstrun.conversation_over(outcome.state):
+            # the feed's first day is written once the first conversation is over
+            self.first_feed_day()
+
+    def _remember_address(self, address: str) -> None:
+        """ "Call them: X" under what is known about the user: one memory, replaced when it
+        changes (the phones keep the line under ``## About the user``; the runtime keeps
+        memories as items, so the line is one item)."""
+        store = self.app.memory
+        if store is None:
+            return
+        line = firstrun.address_line(address)
+        try:
+            for item in store.all():
+                if item.content.lower().startswith(firstrun.ADDRESS_PREFIX.lower()):
+                    store.forget(item.id)
+            store.add(line, category="profile", source="agent")
+        except Exception as exc:  # noqa: BLE001 - the profile already holds the name
+            logger.warning("could not remember the address: {}", exc)
+        self.bus.publish({"kind": "memory"})
+
     # ------------------------------------------------------------------ threads
     def _load_threads(self) -> None:
         index = self.threads_dir / "index.json"
@@ -614,6 +742,8 @@ class MuseService:
             if m.get("origin_device"):
                 thread.origin_device = str(m["origin_device"])
                 thread.origin_device_name = str(m.get("origin_device_name") or "")
+            if m.get("main_of"):
+                thread.main_of = str(m["main_of"])
         self._save_index()
 
     def _save_index(self) -> None:
@@ -633,6 +763,8 @@ class MuseService:
             if t.origin_device:
                 m["origin_device"] = t.origin_device
                 m["origin_device_name"] = t.origin_device_name
+            if t.main_of:
+                m["main_of"] = t.main_of
             metas.append(m)
         (self.threads_dir / "index.json").write_text(
             json.dumps(metas, ensure_ascii=False, indent=1), "utf-8"
@@ -715,6 +847,97 @@ class MuseService:
         self.sync.thread_changed(thread)
         return thread
 
+    def ui_language(self) -> str:
+        """``zh`` when the agent is told to answer in Chinese, else ``en`` — the two languages
+        the runtime's own sentences come in."""
+        language = str(self.settings.agent.language or "").lower()
+        return "zh" if language.startswith(("中文", "zh", "chinese", "简体", "繁體")) else "en"
+
+    def visible_threads(self) -> list[Thread]:
+        """The conversation list (contract C10): signed in, the account's conversations and
+        the ones no account has; signed out, every local one. Hidden ones stay on disk."""
+        return [t for t in self.threads.values() if self.sync.visible(t)]
+
+    def rehome_main(self, owner: str, restore: str | None, keep: bool = True) -> Thread | None:
+        """A different account signed in (C10): the main chat so far is put aside under a new
+        id, marked as ``owner``'s (``keep``; dropped when it is empty and nobody's), and
+        ``restore`` — the thread holding the new account's main chat, when it has one — takes
+        the ``main`` id back; otherwise a fresh main chat begins. Returns the thread the old
+        main chat became, or None when it was dropped."""
+        main = self.threads.get(MAIN_THREAD)
+        if main is None:
+            return None
+        if main.busy:
+            self.stop_thread(MAIN_THREAD)
+        archived = self._move_thread(main, "t_" + uuid.uuid4().hex[:8]) if keep else None
+        if archived is not None:
+            archived.main_of = owner
+        else:
+            self._drop_thread(main)
+        if restore and restore in self.threads:
+            kept = self.threads[restore]
+            fresh = self._move_thread(kept, MAIN_THREAD)
+            fresh.main_of = ""
+            self.bus.publish({"kind": "thread_deleted", "thread": restore})
+        else:
+            fresh = self._make_thread(MAIN_THREAD, "Main chat")
+        self._save_index()
+        # the list changed shape: the apps reload it from the snapshot
+        if archived is not None:
+            self.bus.publish({"kind": "thread", "thread": archived.meta()})
+        self.bus.publish({"kind": "thread_cleared", "thread": MAIN_THREAD})
+        self.bus.publish({"kind": "thread", "thread": fresh.meta()})
+        return archived
+
+    def _drop_thread(self, thread: Thread) -> None:
+        """Forget a thread and its files without the sync tombstone (the main chat put aside)."""
+        self.threads.pop(thread.id, None)
+        if thread.worker:
+            thread.worker.cancel()
+        for p in (thread.timeline.path, thread.agent.session_file):
+            if p and Path(p).exists():
+                Path(p).unlink()
+        self.app.holds.clear_thread(thread.id)
+        self.app.sentinel.end_conversation(thread.id)
+
+    def _move_thread(self, thread: Thread, new_id: str) -> Thread:
+        """The same conversation under another id: its timeline and the agent's transcript
+        move file by file and the thread is rebuilt from them (the events say the new id)."""
+        self.threads.pop(thread.id, None)
+        if thread.worker:
+            thread.worker.cancel()
+        for ev in thread.timeline.events:
+            ev["thread"] = new_id
+        thread.timeline.save()
+        thread.timeline.flush()
+        thread.agent._save_session()
+        self.app.holds.clear_thread(thread.id)
+        self.app.sentinel.end_conversation(thread.id)
+        pairs = (
+            (thread.timeline.path, self.threads_dir / f"{new_id}.json"),
+            (thread.agent.session_file, self.threads_dir / f"{new_id}.session.json"),
+        )
+        # a write still on its way to disk lands under the new id, not the old one
+        thread.timeline.path = pairs[0][1]
+        for src, dst in pairs:
+            if src is None:
+                continue
+            src_path = Path(src)
+            if dst.exists():
+                dst.unlink()
+            if src_path.exists():
+                src_path.replace(dst)
+        moved = self._make_thread(new_id, thread.title, thread.created_at, thread.updated_at)
+        moved.device, moved.device_name = thread.device, thread.device_name
+        moved.remote_from = thread.remote_from
+        moved.origin_device, moved.origin_device_name = (
+            thread.origin_device,
+            thread.origin_device_name,
+        )
+        moved.main_of = thread.main_of
+        self.ui.last_assistant_text.pop(thread.id, None)
+        return moved
+
     def rename_thread(self, thread_id: str, title: str) -> Thread | None:
         thread = self.threads.get(thread_id)
         if thread is None:
@@ -749,7 +972,7 @@ class MuseService:
         The conversation stays; a pending approval or question closes unanswered."""
         thread = self.threads.get(thread_id)
         if thread is not None and thread.device and thread.busy:
-            asyncio.get_running_loop().create_task(self.hub.stop_remote(thread))
+            spawn(self.hub.stop_remote(thread), "stopping the remote run")
             return True
         if thread is None or not thread.busy or thread.worker is None or thread.worker.done():
             return False
@@ -799,17 +1022,23 @@ class MuseService:
         source: str = "user",
         label: str = "",
         files: list[str] | None = None,
+        language: str = "",
     ) -> dict[str, Any]:
         """Queue a message for a thread. Returns the timeline event that was created.
 
         ``files`` are workspace paths of attachments (uploaded first with ``save_upload``);
-        a message may be attachments alone."""
+        a message may be attachments alone. ``language`` is the BCP-47 tag of the client's
+        screens when the client said; the agent answers in it (see MuseAgent.run)."""
         text = text.strip()
+        language = language.strip()
         attachments = [self.attachment(path) for path in files or []]
         if not text and not attachments:
             raise ValueError("empty message")
         thread = self.threads.get(thread_id) or self._make_thread(thread_id, thread_id)
         thread.updated_at = now_iso()
+        if language:
+            # remembered on the conversation: a chat addressed to another device passes it on
+            thread.agent.ui_language = language
         if thread.device:
             # a chat addressed to another device: the text runs there, not here
             if thread.busy:
@@ -853,6 +1082,9 @@ class MuseService:
                 and all(a.kind == "image" for a in attachments)
                 and self.avatar.intercept(thread_id, text, [a.path for a in attachments])
             ):
+                # the first conversation's "what should I call you?" is not answered by this
+                if firstrun.bound_to(self.firstrun.state, thread_id):
+                    self.dismiss_first_chooser()
                 return event
         else:
             event = self.ui.emit(
@@ -866,7 +1098,9 @@ class MuseService:
             )
             if label:
                 thread.purposes[text] = label
-        thread.inbox.put_nowait(Incoming(text, attachments) if attachments else text)
+        thread.inbox.put_nowait(
+            Incoming(text, attachments, language) if attachments or language else text
+        )
         self._ensure_worker(thread)
         return event
 
@@ -925,8 +1159,15 @@ class MuseService:
                 self.ui.set_status("working", "", thread.id)
                 try:
                     purpose = thread.purposes.pop(text, None)
+                    # the first conversation speaks to the person's turns in its own chat;
+                    # a background run (a goal pass, a routine) never hears it
+                    thread.agent.prompt_addendum = (
+                        None if purpose else self._firstrun_addendum_for(thread.id)
+                    )
                     self.ui.begin_run(thread.id, background=purpose)
-                    final = await thread.agent.run(text, purpose=purpose, files=incoming.files)
+                    final = await thread.agent.run(
+                        text, purpose=purpose, files=incoming.files, language=incoming.language
+                    )
                     quiet, final = (
                         prompts.split_quiet(final or "") if purpose else (False, final or "")
                     )
@@ -974,6 +1215,8 @@ class MuseService:
             self._push_background(event)
         # the turn is done: its texts go to the account's other devices in a moment
         self.sync.turn_finished(thread)
+        if not purpose:
+            self._firstrun_turn_ended(thread.id, final)
 
     # ------------------------------------------------------------------ approvals
     def decide(
@@ -1040,7 +1283,7 @@ class MuseService:
         if tool is None:
             raise LookupError("the browser tool is not enabled")
         if action not in ("look", "navigate") and not tool.open:
-            raise LookupError("the browser is not open right now — open a URL first")
+            raise LookupError("the browser is not open right now; open a URL first")
         result = await tool.user_action(
             action,
             thread,
@@ -1076,7 +1319,7 @@ class MuseService:
             # the model hears that the page was used, the way the phone's sheet reports it
             tool = self.browser
             if tool is not None and tool.open:
-                asyncio.get_running_loop().create_task(self._browser_handed_back(tool, hold.thread))
+                spawn(self._browser_handed_back(tool, hold.thread), "browser handed back")
         return hold.to_event()
 
     async def _browser_handed_back(self, tool: Browser, thread: str) -> None:
@@ -1500,7 +1743,7 @@ class MuseService:
                 where = f" · {occ.location}" if occ.location else ""
                 self.fire_trigger(
                     trig.id,
-                    what=f"Coming up: {occ.summary} — {start:%a %Y-%m-%d} {when}{where} (in {minutes} min)",
+                    what=f"Coming up: {occ.summary}, {start:%a %Y-%m-%d} {when}{where} (in {minutes} min)",
                     context=cal.render([occ], now.date())
                     + (f"\n\n{occ.description}" if occ.description else ""),
                     key=f"{occ.uid}:{occ.start.isoformat()}",
@@ -1859,7 +2102,7 @@ class MuseService:
                 logger.info("first feed day not written: {}", exc)
 
         try:
-            asyncio.get_running_loop().create_task(write())
+            spawn(write(), "first feed day")
         except RuntimeError:  # pragma: no cover - no loop (a direct call outside the server)
             return False
         return True
@@ -1948,7 +2191,7 @@ class MuseService:
                 name=self.profile.name,
                 n=n,
                 instructions=data["instructions"]
-                or "(none yet — write what a good personal agent would)",
+                or "(none yet; write what a good personal agent would)",
                 context="\n".join(self._feed_context()),
                 language="the same language as the context above"
                 if language in ("", "auto")
@@ -2220,12 +2463,7 @@ class MuseService:
             "data_dir": str(self.data_dir),
             "started_at": self.started_at,
             "onboarded": bool(self.connections.data.get("onboarded")),
-            "llm_ready": bool(s.llm.api_key and not self.app.vault.has_placeholders(s.llm.api_key))
-            or bool(
-                s.llm.base_url
-                and "127.0.0.1" in s.llm.base_url
-                or "localhost" in (s.llm.base_url or "")
-            ),
+            "llm_ready": llm_ready(s.llm, self.app.vault, self.data_dir),
         }
 
     def update_settings(self, data: dict[str, Any]) -> dict[str, Any]:
@@ -2246,10 +2484,11 @@ class MuseService:
             "version": __version__,
             "profile": self.profile.to_dict(),
             "status": self.ui.overall_status(),
-            "threads": [t.meta() for t in self.threads.values()],
+            # the signed-in account's conversations and the ownerless ones (C10)
+            "threads": [t.meta() for t in self.visible_threads()],
             "pending_approvals": [
                 ev
-                for t in self.threads.values()
+                for t in self.visible_threads()
                 for ev in t.timeline.events
                 if ev.get("type") == "approval" and ev.get("status") == "pending"
             ],
@@ -2263,6 +2502,11 @@ class MuseService:
             # this computer's own screen and hands
             "hands": self.hands_view(),
             "holds": self.holds_view(),
+            # the other devices' turns under way on synced chats (C9), for the line under
+            # a message written elsewhere; `working` frames keep it current
+            "working": self.sync.working_view(),
+            # the first conversation: where it is bound, which phase, the chips (C4)
+            "firstrun": self.firstrun_view(),
         }
 
 
@@ -2280,13 +2524,13 @@ def _tidy_summary(report: TidyReport, language: str = "auto") -> str:
         zh = language.lower().startswith(("中文", "zh", "chinese", "简体", "繁體"))
     if zh:
         parts = ([f"合并了 {n_m} 条"] if n_m else []) + ([f"删除了 {n_d} 条"] if n_d else [])
-        head = "我整理了一下记忆——" + "，".join(parts) + "："
+        head = "我整理了一下记忆，" + "，".join(parts) + "："
         tail = "每一处改动都可以在「记忆 → 最近的改动」里撤销。"
     else:
         parts = ([f"merged {n_m} line{'s' if n_m != 1 else ''}"] if n_m else []) + (
             [f"dropped {n_d}"] if n_d else []
         )
-        head = "I tidied your memory — " + " and ".join(parts) + ":"
+        head = "I tidied your memory: " + " and ".join(parts) + ":"
         tail = "Each change can be undone under Memory → Recent changes."
     body = "\n".join(f"- {line}" for line in report.lines(zh=zh))
     return f"{head}\n{body}\n\n{tail}"

@@ -10,6 +10,7 @@ import android.net.Uri
 import android.os.Build
 import android.util.Base64
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import com.openminis.app.MinisApp
 import com.openminis.app.R
 import com.openminis.app.accessibility.MinisAccessibilityService
@@ -17,6 +18,7 @@ import com.openminis.app.data.MemoryGlobalPrefs
 import com.openminis.app.debug.HeadlessChatRunner
 import com.openminis.app.logging.AppLogger
 import com.openminis.app.sandbox.PRootKernel
+import io.github.nanomuse.sandbox.SandboxPaths
 import com.openminis.app.sandbox.ShellExecutor
 import com.openminis.app.service.AgentForegroundService
 import io.github.nanomuse.guard.GateOutcome
@@ -63,6 +65,8 @@ object HubActions {
     private val GATED = setOf("shell", "files", "file.get", "file.put", "open", "screen")
     /** Cards of tasks running here that travelled to the device that asked (card id → device id). */
     private val relayed = java.util.concurrent.ConcurrentHashMap<String, String>()
+    /** Tasks running here for other devices, so `stop` can find them. */
+    private val running = HubTasks()
 
     fun handle(context: Context, call: IncomingCall) {
         if (call.action == "info") { call.result(info(context)); return }
@@ -83,7 +87,7 @@ object HubActions {
                 "notify" -> call.result(notify(context, call.args.optString("text"), call.args.optString("title").ifBlank { "nanoMuse" }, call.senderName))
                 "task" -> task(context, call)
                 "approve" -> approve(call)
-                "stop" -> call.result(JSONObject().put("stopped", false))
+                "stop" -> call.result(JSONObject().put("stopped", stop(context, call)))
                 else -> call.fail("unknown_action", "this phone does not do '${call.action}'")
             }
         } catch (e: Refused) {
@@ -166,7 +170,9 @@ object HubActions {
             !path.startsWith("/") -> "/root/$path"
             else -> path
         }
-        return PRootKernel.resolveHostPath(linux) ?: throw Refused("no_sandbox", "the phone's sandbox is not set up yet")
+        // Confined to the sandbox: `..` and symlinks out of the rootfs resolve to nothing.
+        return SandboxPaths.host(context, linux, null)
+            ?: throw Refused("not_found", "$path is not inside the phone's sandbox")
     }
 
     private fun files(context: Context, path: String): JSONObject {
@@ -260,6 +266,15 @@ object HubActions {
             .setAutoCancel(true)
             .apply { if (open != null) setContentIntent(open) }
             .build()
+        // Android 13+ asks the person before an app may notify, and a channel can be silenced
+        // on its own; `notify` would then drop the notice without a word, and the caller would
+        // tell the person it was shown.
+        val blocked = !NotificationManagerCompat.from(context).areNotificationsEnabled() ||
+            (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                nm.getNotificationChannel(CHANNEL)?.importance == NotificationManager.IMPORTANCE_NONE)
+        if (blocked) {
+            return JSONObject().put("ok", false).put("shown", false).put("message", "notifications are not allowed for nanoMuse on this phone")
+        }
         return try {
             nm.notify((System.currentTimeMillis() % 100_000).toInt() + 40_000, n)
             JSONObject().put("ok", true).put("shown", true)
@@ -275,20 +290,25 @@ object HubActions {
         if (text.isEmpty()) { call.fail("usage", "text is required"); return }
         val app = context.applicationContext as? MinisApp
         if (app == null || !app.subsystemsReady()) { call.fail("not_ready", "nanoMuse on the phone is still starting"); return }
-        val conversation = call.args.optString("conversation").ifBlank { "from-" + call.from.optString("id").ifBlank { "unknown" } }
+        val senderId = call.from.optString("id")
+        val conversation = running.conversationKey(senderId, call.args.optString("conversation"))
         val sessionId = runBlocking { sessionFor(app, conversation, call.senderName) }
         if (sessionId == null) { call.fail("no_model", "the phone has no model to think with; sign in to nanoMuse Cloud there"); return }
         call.event(JSONObject().put("stage", "thinking").put("session", sessionId))
         AgentForegroundService.startService(app, sessionCount = 1, toolStatus = context.getString(R.string.nm_hub_task_from, call.senderName))
         val prompt = if (call.senderKind == "web") text else context.getString(R.string.nm_hub_task_prefix, call.senderName) + "\n\n" + text
         val relay = relayApprovals(context, call, sessionId)
+        running.started(call.id, senderId, conversation, sessionId)
+        val stopped: Boolean
         val result = try {
             runBlocking {
                 HeadlessChatRunner.prompt(context = app, sessionId = sessionId, text = prompt, attachments = emptyList(), thinkingLevel = null, wait = true, timeoutMs = TASK_TIMEOUT_MS)
             }
         } finally {
             relay.cancel()
+            stopped = running.finished(call.id)
         }
+        if (stopped) { call.fail("cancelled", "${call.senderName} stopped this task"); return }
         val answer = result.responseText?.trim().orEmpty()
         if (result.timedOut) { call.fail("timeout", "the phone's agent did not finish within ten minutes"); return }
         if (result.status == "Error" && answer.isEmpty()) { call.fail("failed", "the phone's agent could not run this"); return }
@@ -336,6 +356,18 @@ object HubActions {
             }
         }
         return scope
+    }
+
+    /**
+     * `stop {call}` or `stop {conversation}` from the device that asked for a task: ends the run
+     * here after the step in flight, the way Stop in the chat does; the task then answers
+     * `cancelled`. Only the asker's own runs; `{stopped: false}` when there is nothing to end.
+     */
+    private fun stop(context: Context, call: IncomingCall): Boolean {
+        val sessionId = running.find(call.from.optString("id"), call.args.optString("call"), call.args.optString("conversation")) ?: return false
+        val ended = runBlocking { runCatching { HeadlessChatRunner.cancel(context, sessionId) }.getOrDefault(false) }
+        if (ended) running.markStopped(sessionId)
+        return ended
     }
 
     /**

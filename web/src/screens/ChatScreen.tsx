@@ -6,13 +6,16 @@ import { AvatarOptionsCard } from "../components/AvatarOptionsCard";
 import { BrowserViewer } from "../components/BrowserViewer";
 import { MicButton, useDictation } from "../components/Dictation";
 import { ApprovalCard, ArtifactCard, BrowserCard, HandsCard, HoldCard, Notice, QuestionCard, ToolChip } from "../components/Cards";
+import { IntroLines, NamingCard } from "../components/FirstConversation";
 import { Markdown, splitBlocks } from "../components/Markdown";
 import { MuseHeader, MuseRoundButton } from "../components/MuseHeader";
 import { MoreMenu } from "../components/TabHeader";
-import { localLabel, useT } from "../i18n";
+import { stripNamingFence } from "../fences";
+import { localLabel, useLocale, useT } from "../i18n";
 import { mentionSuggestions, mentionTarget } from "../mention";
+import { WORKING_TTL_MS } from "../presence";
 import { useStore } from "../store";
-import type { AttachmentInfo, HubDevice, SkillInfo, ThreadMeta, TimelineEvent, UserEvent } from "../types";
+import type { AttachmentInfo, HubDevice, SkillInfo, ThreadMeta, TimelineEvent, UserEvent, WorkingPresence } from "../types";
 import { cx, timeDivider, timeShort } from "../util";
 import { MuseSheet } from "./MuseSheet";
 import { countDay, countTask, StarNudgeOnce } from "../components/StarNudge";
@@ -34,27 +37,60 @@ export function ChatScreen() {
   const name = profile?.name ?? "nanoMuse";
   // a chat addressed to another device: is that device still on the hub?
   const deviceOnline = thread?.device ? (state.hub?.devices.find((d) => d.id === thread.device)?.online ?? null) : null;
+  // another device of the account is working on this chat (C9): the quiet line under its message
+  const working = useLiveWorking(state.working[activeThread]);
 
   const listRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
   const [showJump, setShowJump] = useState(false);
 
+  // The first conversation (contract C4), when it is bound to this chat: the runtime's state,
+  // the opening lines it speaks, the chooser. `fr` is null on an older runtime.
+  const fr = state.firstrun;
+  const bound = !!fr && fr.phase !== "none" && fr.session_id === activeThread;
+  const firstRunning = bound && fr.running;
+  const locale = useLocale();
+  const lang = locale === "zh-CN" ? "zh" : "en";
+  const [intro, setIntro] = useState<{ lang: string; lines: string[] } | null>(null);
+  useEffect(() => {
+    if (!bound || intro?.lang === lang) return;
+    let live = true;
+    api
+      .firstrun(lang)
+      .then((v) => live && v.intro && setIntro({ lang, lines: v.intro }))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [bound, lang, intro?.lang]);
+  const pickName = (picked: string) => {
+    api
+      .firstrunPick(picked)
+      .then(() => send(activeThread, picked))
+      .catch((e: Error) => toast(e.message || t("Could not send")));
+  };
+  const focusComposer = () => window.dispatchEvent(new Event("nanomuse:quick-chat"));
+
   // A task this browser saw through (contract C1): busy → idle, the turn started by the person
   // here (a `user` bubble, not a background notice or another device's ask) and ended with a
-  // reply. The first conversation never counts: tasks start once the first run is complete.
-  // The count reached is the moment for a word about a star when the policy names it.
+  // reply. The first conversation never counts: a turn that began while it was running is
+  // its, whatever the phase says by the time the reply lands. The count reached is the
+  // moment for a word about a star when the policy names it.
   const [taskCount, setTaskCount] = useState<number | null>(null);
   const onboarded = state.settings?.onboarded === true;
   const sawBusy = useRef(false);
+  const firstRunAtStart = useRef(false);
   useEffect(() => {
     if (thread?.busy) {
+      if (!sawBusy.current) firstRunAtStart.current = firstRunning;
       sawBusy.current = true;
       return;
     }
     if (!sawBusy.current) return;
     sawBusy.current = false;
-    if (onboarded && personStartedTurn(events)) setTaskCount(countTask());
-  }, [thread?.busy, events, onboarded]);
+    if (onboarded && !firstRunAtStart.current && !firstRunning && personStartedTurn(events)) setTaskCount(countTask());
+  }, [thread?.busy, events, onboarded, firstRunning]);
   // the app was opened today: the 7th and the 30th day are moments too
   const [dayCount, setDayCount] = useState<number | null>(null);
   useEffect(() => {
@@ -62,7 +98,20 @@ export function ChatScreen() {
     if (fresh) setDayCount(days);
   }, []);
 
-  const onScroll = useCallback(() => {
+  // Pinned to the bottom while the person is there (within 120px of it); the *Latest* pill
+  // only once they have scrolled more than 400px away. The pin is redone whenever the list
+  // or its content changes size (a bubble finding its height, an image or a code block
+  // arriving after the render, the window resized): the first version pinned once per
+  // event and left the gap that opened afterwards, so the view sat short of the bottom and
+  // the pill showed with nobody having scrolled.
+  const pin = useCallback(() => {
+    const el = listRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+    setShowJump(false);
+  }, []);
+
+  const measure = useCallback(() => {
     const el = listRef.current;
     if (!el) return;
     const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
@@ -70,14 +119,29 @@ export function ChatScreen() {
     setShowJump(gap > 400);
   }, []);
 
+  // a chat opens at its latest message whatever the previous chat's position was; the pill
+  // of the previous chat never carries over
+  const shownThread = useRef<string | null>(null);
   useLayoutEffect(() => {
-    const el = listRef.current;
-    if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
-  }, [events, stream?.text, activeThread]);
+    if (shownThread.current !== activeThread) {
+      shownThread.current = activeThread;
+      stickToBottom.current = true;
+    }
+    if (stickToBottom.current) pin();
+  }, [events, stream?.text, activeThread, pin]);
 
   useEffect(() => {
-    stickToBottom.current = true;
-  }, [activeThread]);
+    const el = listRef.current;
+    const content = contentRef.current;
+    if (!el || !content || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      if (stickToBottom.current) pin();
+      else measure();
+    });
+    ro.observe(el);
+    ro.observe(content);
+    return () => ro.disconnect();
+  }, [pin, measure]);
 
   const jumpToBottom = () => {
     const el = listRef.current;
@@ -149,47 +213,58 @@ export function ChatScreen() {
       />
 
       {/* Timeline */}
-      <div ref={listRef} onScroll={onScroll} className="relative flex-1 overflow-y-auto px-3 py-3 space-y-2.5">
-        {state.hasMore[activeThread] && events.length > 0 && (
-          <div className="flex justify-center">
-            <button
-              type="button"
-              className="text-[12.5px] text-accent px-3 py-1 rounded-full bg-surface-2"
-              onClick={() => void loadEvents(activeThread, events[0]?.id)}
-            >
-              {t("Load earlier messages")}
-            </button>
-          </div>
-        )}
-        {eventsLoaded && events.length === 0 && !stream && (
-          <EmptyChat
-            name={name}
-            device={thread?.device ? thread.device_name || thread.device : undefined}
-            onSend={(text) => send(activeThread, text).catch((e: Error) => toast(e.message || t("Could not send")))}
-          />
-        )}
-        {shown.map((ev, i) => (
-          <EventView
-            key={ev.id}
-            event={ev}
-            prev={shown[i - 1]}
-            name={name}
-            onDecide={(approved, scope) =>
-              decide(ev.id, approved, scope).catch((e: Error) => toast(e.message || t("Could not send decision")))
-            }
-            onOpenFile={openFile}
-            onOpenBrowser={setBrowserView}
-            files={files}
-          />
-        ))}
-        {stream && stream.text && (
-          <AssistantBubble text={stream.text} streaming files={files} onOpenFile={openFile} />
-        )}
-        {(thread?.busy || status.state !== "idle") && !stream?.text && status.state !== "waiting" && (
-          <TypingIndicator label={thread?.queued ? t("{n} queued", { n: thread.queued }) : undefined} />
-        )}
-        {!thread?.busy && status.state === "idle" && taskCount !== null && <StarNudgeOnce moment="tasks" n={taskCount} className="mx-1 my-2" />}
-        {!thread?.busy && status.state === "idle" && dayCount !== null && <StarNudgeOnce moment="days_used" n={dayCount} className="mx-1 my-2" />}
+      <div ref={listRef} onScroll={measure} className="relative flex-1 overflow-y-auto px-3 py-3">
+        <div ref={contentRef} className="space-y-2.5">
+          {state.hasMore[activeThread] && events.length > 0 && (
+            <div className="flex justify-center">
+              <button
+                type="button"
+                className="text-[12.5px] text-accent px-3 py-1 rounded-full bg-surface-2"
+                onClick={() => void loadEvents(activeThread, events[0]?.id)}
+              >
+                {t("Load earlier messages")}
+              </button>
+            </div>
+          )}
+          {/* The first conversation's opening, where the history begins: the app speaks first */}
+          {bound && eventsLoaded && !state.hasMore[activeThread] && intro && <IntroLines lines={intro.lines} />}
+          {eventsLoaded && events.length === 0 && !stream && !bound && (
+            <EmptyChat
+              name={name}
+              device={thread?.device ? thread.device_name || thread.device : undefined}
+              onSend={(text) => send(activeThread, text).catch((e: Error) => toast(e.message || t("Could not send")))}
+            />
+          )}
+          {shown.map((ev, i) => (
+            <EventView
+              key={ev.id}
+              event={ev}
+              prev={shown[i - 1]}
+              name={name}
+              onDecide={(approved, scope) =>
+                decide(ev.id, approved, scope).catch((e: Error) => toast(e.message || t("Could not send decision")))
+              }
+              onOpenFile={openFile}
+              onOpenBrowser={setBrowserView}
+              files={files}
+            />
+          ))}
+          {stream && stream.text && (
+            <AssistantBubble text={stream.text} streaming files={files} onOpenFile={openFile} />
+          )}
+          {(thread?.busy || status.state !== "idle") && !stream?.text && status.state !== "waiting" && (
+            <TypingIndicator label={thread?.queued ? t("{n} queued", { n: thread.queued }) : undefined} />
+          )}
+          {/* the chooser for the agent's name, under the latest reply, until a pick or a typed name */}
+          {bound && fr.phase === "ask_agent_name" && !thread?.busy && (
+            <NamingCard chips={fr.chips} chosen={fr.chosen} onPick={pickName} onElse={focusComposer} />
+          )}
+          {/* A message written on another device is never this device's unfinished turn (C9):
+              nothing here ever offers to continue it. While that device works, this says so. */}
+          {working && !thread?.busy && <WorkingLine who={working} />}
+          {!thread?.busy && status.state === "idle" && taskCount !== null && <StarNudgeOnce moment="tasks" n={taskCount} className="mx-1 my-2" />}
+          {!thread?.busy && status.state === "idle" && dayCount !== null && <StarNudgeOnce moment="days_used" n={dayCount} className="mx-1 my-2" />}
+        </div>
         {showJump && (
           <button
             type="button"
@@ -233,7 +308,7 @@ function EventView({
   event: TimelineEvent;
   prev?: TimelineEvent;
   name: string;
-  onDecide: (approved: boolean, scope: string) => void;
+  onDecide: (approved: boolean, scope: string) => void | Promise<void>;
   onOpenFile: (path: string) => void;
   onOpenBrowser: (id: string) => void;
   files: readonly string[];
@@ -403,7 +478,10 @@ function AssistantBubble({
 }) {
   const [showReasoning, setShowReasoning] = useState(false);
   const t = useT();
-  const blocks = useMemo(() => splitBlocks(text), [text]);
+  // the model's block for the app (the first conversation's names) is never shown — not even
+  // the half of it a stream has delivered so far
+  const blocks = useMemo(() => splitBlocks(stripNamingFence(text, !!streaming)), [text, streaming]);
+  if (blocks.length === 0 && !streaming && !reasoning) return null;
   return (
     <div className={cx("rise flex items-end gap-2 pr-10", continued && "-mt-1")}>
       <div className="min-w-0 max-w-full">
@@ -454,7 +532,7 @@ function QuietLine({ text, about, ts }: { text: string; about?: string; ts?: str
     <div className="rise flex justify-center px-6">
       <button type="button" onClick={() => setOpen((o) => !o)} className="max-w-full rounded-2xl px-3 py-1.5 text-[12px] text-muted text-center leading-snug">
         <span className="inline-flex items-center gap-1.5">
-          <Moon size={12} /> {t("Checked on {label} — nothing new", { label })}{ts ? ` · ${timeShort(ts)}` : ""}
+          <Moon size={12} /> {t("Checked on {label}: nothing new", { label })}{ts ? ` · ${timeShort(ts)}` : ""}
         </span>
         {open && <span className="block mt-1 text-left whitespace-pre-wrap text-[12.5px]">{text}</span>}
       </button>
@@ -475,13 +553,47 @@ function TypingIndicator({ label }: { label?: string }) {
   );
 }
 
+/**
+ * The presence line for this chat while it is worth showing (C9): the entry as the store
+ * holds it, or null once it is ten minutes old. Re-renders at the moment it expires, so the
+ * line goes on its own when the other device never said it was done.
+ */
+function useLiveWorking(who: WorkingPresence | undefined): WorkingPresence | null {
+  const expiresAt = who ? who.at * 1000 + WORKING_TTL_MS : 0;
+  // the moment this entry went stale (0 while it is live); set by the timer below
+  const [expired, setExpired] = useState(0);
+  useEffect(() => {
+    if (!expiresAt) return;
+    const left = expiresAt - Date.now();
+    if (left <= 0) {
+      setExpired(expiresAt);
+      return;
+    }
+    const timer = window.setTimeout(() => setExpired(expiresAt), left + 50);
+    return () => window.clearTimeout(timer);
+  }, [expiresAt]);
+  if (!who || expired === expiresAt) return null;
+  return who;
+}
+
+/** "Pixel 8 is working…" — quiet, under the message the other device is answering. */
+function WorkingLine({ who }: { who: WorkingPresence }) {
+  const t = useT();
+  return (
+    <div className="flex items-center gap-1.5 px-1 text-[12px] text-muted">
+      <Loader2 size={12} className="animate-spin" />
+      <span>{t("{device} is working…", { device: who.device_name || who.device })}</span>
+    </div>
+  );
+}
+
 function EmptyChat({ name, device, onSend }: { name: string; device?: string; onSend: (text: string) => void }) {
   const t = useT();
   const starters = device
     ? [t("What is on your screen right now?"), t("Which folder are you in, and what is in it?"), t("Check for updates and tell me what needs a restart")]
     : [
         t("What can you do for me?"),
-        t("Plan my week — ask me what's on my plate"),
+        t("Plan my week: ask me what's on my plate"),
         t("Research and compare two options for me"),
         t("Set up a long-term goal and track it"),
       ];
@@ -491,8 +603,8 @@ function EmptyChat({ name, device, onSend }: { name: string; device?: string; on
       <div className="text-[20px] font-semibold">{device ? t("This chat goes to {device}.", { device }) : t("Hi, I'm {name}.", { name })}</div>
       <p className="text-muted text-[14.5px] leading-snug max-w-sm">
         {device
-          ? t("Whatever you ask here, the {name} on {device} does where it is — its shell, its files, its screen. Every step shows up here, and anything that needs an approval asks you here.", { name, device })
-          : t("I don't just answer — I get things done: research, plans, files, code, email, long-running goals. Everything I do shows up here, and anything hard to undo waits for your approval.")}
+          ? t("Whatever you ask here, the {name} on {device} does where it is: its shell, its files, its screen. Every step shows up here, and anything that needs an approval asks you here.", { name, device })
+          : t("I don't just answer; I get things done: research, plans, files, code, email, long-running goals. Everything I do shows up here, and anything hard to undo waits for your approval.")}
       </p>
       <div className="mt-2 flex flex-wrap justify-center gap-2">
         {starters.map((s) => (
@@ -592,7 +704,7 @@ function Composer({
   };
   const remove = (key: string) => setPending((cur) => cur.filter((p) => p.key !== key));
   const uploading = pending.some((p) => !p.info && !p.error);
-  const attached = pending.filter((p) => p.info).map((p) => p.info!.path);
+  const attached = pending.flatMap((p) => (p.info ? [p.info.path] : []));
 
   useEffect(() => {
     const el = ref.current;
@@ -659,7 +771,7 @@ function Composer({
   return (
     <form onSubmit={submit} className="shrink-0 bg-bg px-3 pt-1.5 pb-1">
       {busy && !waiting && (
-        <div className="px-2 pb-1 text-[12px] text-muted">{t("{name} is working — anything you send now is picked up right away.", { name })}</div>
+        <div className="px-2 pb-1 text-[12px] text-muted">{t("{name} is working; anything you send now is picked up right away.", { name })}</div>
       )}
       {matches.length > 0 && (
         <ul className="mb-2 max-h-72 overflow-y-auto rounded-3xl border border-border/70 bg-surface shadow-lg divide-y divide-border/70" role="listbox" aria-label={t("Skills")}>

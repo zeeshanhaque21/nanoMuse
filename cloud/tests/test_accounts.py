@@ -198,9 +198,11 @@ async def test_admin_overview_and_account_detail():
     assert models == {"qwen3.8-27b", "qwen3.8-flash", "qwen-image-3.0"}
     assert ov["signals_today"]["sign_ins"] == 2 and ov["signals_today"]["sign_in_failures"] == 1
     assert ov["top_accounts"][0]["hint"] == "de***@example.com" and ov["top_accounts"][0]["requests"] == 2
-    # The overview never carries identifiers in clear — only the masked hints.
-    assert "13800138000" not in r.text and "dev-a@example.com" not in r.text
+    # 0.22: the console shows accounts in full — the identifier rides beside the masked hint
+    # (the hint stays for logs, mail and anything that leaves the console)
+    assert ov["top_accounts"][0]["identifier"] == "dev-a@example.com"
     assert ov["events"][0]["kind"] == "sign_in.failed" and ov["events"][0]["hint"] == "de***@example.com"
+    assert ov["events"][0]["identifier"] == "dev-a@example.com"
 
     r = await client.get(f"/v1/admin/accounts/{b['account']['id']}", headers=admin)
     assert r.status_code == 200, r.text
@@ -229,6 +231,55 @@ async def test_admin_overview_and_account_detail():
     byid = {x["id"]: x for x in accounts}
     assert byid[b["account"]["id"]]["has_password"] is True and byid[a["account"]["id"]]["has_password"] is False
     assert all("password_hash" not in x for x in accounts)
+
+
+async def test_the_accounts_list_is_one_grouped_query_with_the_old_numbers():
+    """0.23: `admin_accounts` joins grouped sums instead of seven correlated subqueries per
+    account. The numbers must be the ones the correlated form gave, row for row."""
+    app, client, sender, up, cloud, settings = make()
+    a = await sign_up(client, sender, "13800138000", "pixel")
+    b = await sign_up(client, sender, "dev-a@example.com", "mac")
+    c = await sign_up(client, sender, "dev-b@example.com", "pc")
+    ha, hb = auth(a["api_key"]), auth(b["api_key"])
+    for _ in range(3):
+        await client.post("/v1/chat/completions", json={"model": "qwen3.8-27b", "messages": [{"role": "user", "content": "hi"}]}, headers=ha)
+    await client.post("/v1/images/generations", json={"model": "qwen-image-3.0", "prompt": "a cat"}, headers=hb)
+    await client.post("/v1/auth/session-key", json={"device": "mac-2"}, headers=hb)
+    await client.delete("/v1/me/sessions/" + b["api_key"][:12], headers=hb)
+    day_start = cloud.s.day_start(int(cloud.clock()))
+    rows = {r["id"]: dict(r) for r in cloud.db.admin_accounts(day_start, limit=1000)}
+    assert set(rows) == {a["account"]["id"], b["account"]["id"], c["account"]["id"]}
+    old = cloud.db._conn.execute(
+        """SELECT a.id,
+                  (SELECT COALESCE(SUM(l.charged),0) FROM ledger l WHERE l.account_id=a.id AND l.ts>=? AND l.charged>0) AS used_today,
+                  (SELECT COALESCE(SUM(l.cost_uy),0) FROM ledger l WHERE l.account_id=a.id AND l.ts>=? AND l.cost_uy>0) AS spent_today_uy,
+                  (SELECT COALESCE(SUM(l.cost_uy),0) FROM ledger l WHERE l.account_id=a.id AND l.cost_uy>0) AS spent_uy,
+                  (SELECT COUNT(*) FROM ledger l WHERE l.account_id=a.id AND l.kind IN ('chat','image','video','realtime')) AS requests,
+                  (SELECT MAX(k.last_used_at) FROM api_keys k WHERE k.account_id=a.id) AS last_active_at,
+                  (SELECT COUNT(*) FROM api_keys k WHERE k.account_id=a.id AND k.revoked_at IS NULL) AS live_keys,
+                  (SELECT COUNT(*) FROM devices d WHERE d.account_id=a.id) AS device_count
+           FROM accounts a""",
+        (day_start, day_start),
+    ).fetchall()
+    fields = ("used_today", "spent_today_uy", "spent_uy", "requests", "last_active_at", "live_keys", "device_count")
+    for o in old:
+        assert {k: rows[o["id"]][k] for k in fields} == {k: o[k] for k in fields}, o["id"]
+    ra, rb, rc = rows[a["account"]["id"]], rows[b["account"]["id"]], rows[c["account"]["id"]]
+    assert ra["requests"] == 3 and ra["used_today"] > 0 and ra["spent_uy"] == ra["spent_today_uy"] > 0
+    assert rb["requests"] == 1 and rb["live_keys"] == 1  # the first key revoked, the session key live
+    assert rc["requests"] == 0 and rc["spent_uy"] == 0 and rc["live_keys"] == 1 and rc["last_active_at"] is None
+
+    # labels come from the ids a page shows, not from the newest N accounts
+    brief = {r["id"]: r for r in cloud.db.accounts_brief([a["account"]["id"], "no-such-account", ""])}
+    assert set(brief) == {a["account"]["id"]} and brief[a["account"]["id"]]["hint"] == "138****8000"
+    hints, idents = cloud._labels([a["account"]["id"], c["account"]["id"]])
+    assert hints[c["account"]["id"]] == "de***@example.com" and idents[a["account"]["id"]] == "+8613800138000"
+    assert cloud.db.accounts_brief([]) == []
+
+    # the allowance distribution reads four columns per account and the same spend
+    allowance = {r["id_hash"]: dict(r) for r in cloud.db.allowance_rows()}
+    assert len(allowance) == 3 and sorted(r["spent_uy"] for r in allowance.values()) == sorted(r["spent_uy"] for r in rows.values())
+    assert all(r["grant_uy"] == 25_000_000 and r["unlimited"] == 0 for r in allowance.values())
 
 
 VIDEO = "/api/v1/services/aigc/video-generation/video-synthesis"
@@ -398,7 +449,7 @@ async def test_admin_series_and_traffic(tmp_path):
                 "host": "relay.test",
                 "uri": uri,
                 "client_ip": "203.0.113.7",
-                "headers": {"User-Agent": [ua], "Referer": ["https://github.com/nano-muse/nanoMuse"]},
+                "headers": {"User-Agent": [ua], "Referer": ["https://github.com/zeeshanhaque21/nanoMuse"]},
             },
             "resp_headers": {"Content-Type": [ctype]},
         }
@@ -422,3 +473,50 @@ async def test_admin_series_and_traffic(tmp_path):
     assert tr["downloads"] == [{"name": "nanoMuse-0.1.22-arm64.apk", "hits": 1, "bytes": 1000}]
     assert tr["github"]["stars"] == 24 and tr["github"]["downloads"] == 188 and tr["github"]["days"][0]["stars"] == 24
     assert "203.0.113.7" not in r.text
+
+
+async def test_an_operator_zero_survives_a_restart_and_old_rows_still_get_seeded(tmp_path):
+    """seed_grants used to pick every account with grant_uy = 0, so an account the operator
+    had set to zero from the page got the allowance back at the next restart. Only rows no
+    0.15+ relay has seen (allowance_uy < 0) are seeded; the operator's zero stays."""
+    path = str(tmp_path / "relay.sqlite")
+    app, client, sender, up, cloud, settings = make(database=path, allowance_cny=0.6)
+    cloud.db.close()
+    cloud = Cloud(settings, Database(path), sender)
+    app = create_app(settings, cloud, upstream_transport=httpx.ASGITransport(app=up))
+    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://cloud.test")
+    a = await sign_up(client, sender, "dev-a@example.com", "pixel")
+    b = await sign_up(client, sender, "dev-b@example.com", "mac")
+    r = await client.post(
+        "/v1/admin/pool", headers={"X-Admin-Token": "admin"}, json={"account_id": a["account"]["id"], "grant_cny": 0, "note": "abuse"}
+    )
+    assert r.status_code == 200 and r.json()["grant_cny"] == 0
+    # a row from before 0.15 that never got its pool: the column default says so
+    with cloud.db.tx() as c:
+        c.execute("UPDATE accounts SET allowance_uy=-1, grant_uy=0 WHERE id=?", (b["account"]["id"],))
+    cloud.db.close()
+    again = Cloud(settings, Database(path), sender)
+    assert again.db.account(a["account"]["id"])["grant_uy"] == 0, "the operator's zero came back"
+    assert again.db.account(b["account"]["id"])["grant_uy"] == settings.allowance_uy
+    assert again.db.seed_grants(settings.allowance_uy) == 0  # idempotent
+    again.db.close()
+
+
+async def test_invite_earnings_are_what_the_ledger_says_not_todays_bonus_times_invites():
+    app, client, sender, up, cloud, settings = make(allowance_cny=0.6, invite_bonus_cny=3)
+    a = await sign_up(client, sender, "dev-a@example.com", "pixel")
+    code = (await client.get("/v1/me/invite", headers=auth(a["api_key"]))).json()["code"]
+
+    async def join(identifier: str) -> None:
+        await client.post("/v1/auth/code", json={"identifier": identifier})
+        _, c = sender.sent[-1]
+        r = await client.post("/v1/auth/verify", json={"identifier": identifier, "code": c, "device": "mac", "invite": code})
+        assert r.status_code == 200, r.text
+
+    await join("dev-b@example.com")
+    r = await client.post("/v1/admin/settings", headers={"X-Admin-Token": "admin"}, json={"invite_bonus_cny": 1})
+    assert r.status_code == 200, r.text
+    await join("dev-c@example.com")
+    inv = (await client.get("/v1/me/invite", headers=auth(a["api_key"]))).json()
+    assert inv["invites"] == 2 and inv["bonus_cny"] == 1
+    assert inv["earned_cny"] == 4, "3 for the first friend plus 1 for the second, as the ledger has it"

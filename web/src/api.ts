@@ -2,6 +2,8 @@ import type {
   ActivityData,
   AttachmentInfo,
   CalendarData,
+  ChatGptLogin,
+  ChatGptStatus,
   CloudAccount,
   CloudEvent,
   CloudConfig,
@@ -15,14 +17,17 @@ import type {
   FeedItem,
   FeedPostsData,
   FileInfo,
+  FirstRunView,
   Goal,
   HandsStatus,
   HoldEvent,
   HubView,
   IdeasData,
+  MediaSlotData,
   MemoryChange,
   MemoryItem,
   NudgesView,
+  ProvidersView,
   PushInfo,
   Reminder,
   ReminderKind,
@@ -46,6 +51,7 @@ import type {
   WsMessage,
 } from "./types";
 import { signedParams } from "./ticket";
+import { readStorage, writeStorage } from "./util";
 
 const TOKEN_KEY = "nanomuse_token";
 
@@ -80,15 +86,14 @@ export function getToken(): string {
   const url = new URL(window.location.href);
   const fromUrl = tokenFromLink(url);
   if (fromUrl) {
-    localStorage.setItem(TOKEN_KEY, fromUrl);
+    writeStorage(TOKEN_KEY, fromUrl);
     window.history.replaceState(null, "", url.pathname + url.search + url.hash);
   }
-  return localStorage.getItem(TOKEN_KEY) ?? "";
+  return readStorage(TOKEN_KEY) ?? "";
 }
 
 export function setToken(token: string): void {
-  if (token) localStorage.setItem(TOKEN_KEY, token);
-  else localStorage.removeItem(TOKEN_KEY);
+  writeStorage(TOKEN_KEY, token || null);
 }
 
 /** A workspace file for an `<img>`, `<video>`, `<iframe>` or a download link: signed with
@@ -119,7 +124,9 @@ export interface BrowserControl {
   url?: string;
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+/** One call to the runtime: the bearer token, JSON in and out, 401 as `AuthError`, the
+ *  server's `detail` as the error's text. `channels-api.ts` shares it. */
+export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = { ...(init.headers as Record<string, string>) };
   const token = getToken();
   if (token) headers["Authorization"] = `Bearer ${token}`;
@@ -133,7 +140,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
   if (res.status === 401) throw new AuthError();
   if (!res.ok) {
-    let detail = res.statusText;
+    let detail = res.statusText || `HTTP ${res.status}`;
     try {
       const data = await res.json();
       detail = data.detail ?? JSON.stringify(data);
@@ -155,6 +162,8 @@ export const api = {
   cloudVerify: (identifier: string, code: string, invite = "") =>
     request<CloudAccount>("/api/cloud/verify", json(invite ? { identifier, code, invite } : { identifier, code })),
   cloudSignOut: () => request<CloudAccount>("/api/cloud/sign-out", json({})),
+  /** *Use nanoMuse Cloud models*: the account's models as a source, on or off; `409 chat_on_cloud` while the chat model is the account's */
+  cloudModels: (on: boolean) => request<CloudAccount>("/api/cloud/models", json({ on })),
   cloudLogin: (identifier: string, password: string) => request<CloudAccount>("/api/cloud/login", json({ identifier, password })),
   /** set or change the password; "" with the current one removes it */
   cloudPassword: (password: string, current?: string) => request<CloudAccount>("/api/cloud/password", json({ password, current: current ?? null })),
@@ -173,6 +182,8 @@ export const api = {
   syncState: () => request<SyncState>("/api/sync/state"),
   /** off tells the relay, which deletes what it stores; on pushes this device's chats again */
   syncSetState: (enabled: boolean) => request<SyncState>("/api/sync/state", { method: "PUT", body: JSON.stringify({ enabled }) }),
+  /** C9: "Also sync side chats" — per device; on pulls the other devices' side chats once from the start */
+  syncSetSideChats: (side_chats: boolean) => request<SyncState>("/api/sync/state", { method: "PUT", body: JSON.stringify({ side_chats }) }),
   /** "Delete synced conversations": the relay's store emptied, the switch and the local chats kept */
   syncDelete: () => request<SyncState>("/api/sync/delete", json({})),
   syncPull: () => request<SyncState & { applied: number }>("/api/sync/pull", json({})),
@@ -186,7 +197,6 @@ export const api = {
   avatarCancel: (session: string) => request<StudioSession>("/api/avatar/cancel", json({ session })),
   /** the poses (and clips) of the face the profile wears, drawn again from its idle still */
   avatarMoods: () => request<StudioSession>("/api/avatar/moods", json({})),
-  // ---- calls (voice / video, in real time)
   // ---- coding agents, here or on another computer of yours
   coding: (device = "") => request<{ agents: CodingAgent[]; runs: CodingRun[]; device?: string }>(`/api/coding${device ? `?device=${encodeURIComponent(device)}` : ""}`),
   codingSessions: (q: { agent?: string; limit?: number; workspace?: string; device?: string } = {}) => {
@@ -230,10 +240,11 @@ export const api = {
   stopThread: (id: string) => request<{ ok: boolean }>(`/api/threads/${id}/stop`, { method: "POST" }),
   events: (thread: string, limit = 200, before?: string) =>
     request<{ thread: ThreadMeta; events: TimelineEvent[]; has_more: boolean }>(
-      `/api/threads/${thread}/events?limit=${limit}${before ? `&before=${before}` : ""}`,
+      `/api/threads/${thread}/events?limit=${limit}${before ? `&before=${encodeURIComponent(before)}` : ""}`,
     ),
-  send: (thread: string, text: string, files: string[] = []) =>
-    request<{ event: TimelineEvent; thread: ThreadMeta }>(`/api/threads/${thread}/send`, json({ text, files })),
+  /** `language` is the locale of this console's screens; the reply is written in it. */
+  send: (thread: string, text: string, files: string[] = [], language = "") =>
+    request<{ event: TimelineEvent; thread: ThreadMeta }>(`/api/threads/${thread}/send`, json({ text, files, language })),
   /** A file to attach: the bytes as the body, the name in the query. */
   upload: (file: File) =>
     request<AttachmentInfo>(`/api/files/upload?name=${encodeURIComponent(file.name || "photo.jpg")}`, {
@@ -293,7 +304,7 @@ export const api = {
     if (token) headers["Authorization"] = `Bearer ${token}`;
     const res = await fetch(`/api/files/${path.split("/").map(encodeURIComponent).join("/")}`, { headers });
     if (res.status === 401) throw new AuthError();
-    if (!res.ok) throw new Error(res.statusText);
+    if (!res.ok) throw new Error(res.statusText || `HTTP ${res.status}`);
     return res.text();
   },
   settings: () => request<SettingsView>("/api/settings"),
@@ -305,6 +316,20 @@ export const api = {
     request<SettingsView>("/api/settings", { method: "PUT", body: JSON.stringify(body) }),
   // connections: secrets go into the vault on the server; only names ever come back
   connections: () => request<ConnectionsData>("/api/connections"),
+  /** the own-key catalogue with what is configured and what that covers (contract C11) */
+  providers: (region?: string) => request<ProvidersView>(`/api/providers${region ? `?region=${encodeURIComponent(region)}` : ""}`),
+  /**
+   * The ChatGPT sign-in through the runtime (the Codex OAuth): `login` starts the PKCE flow
+   * and returns the page to open; `status` is polled until it is done; `logout` deletes the
+   * token store. The routes follow the shared brief; the runtime's CONTRACT-chatgpt.md
+   * fixes the CLI and `/api/providers` — a runtime without these routes answers 404, and
+   * the card then names the CLI (`nanomuse chatgpt login`).
+   */
+  chatgptLogin: () => request<ChatGptLogin>("/api/chatgpt/login", json({})),
+  chatgptStatus: () => request<ChatGptStatus>("/api/chatgpt/status"),
+  /** The address the browser landed on, pasted by hand when the runtime could not take the callback itself. */
+  chatgptCallback: (url: string) => request<{ ok: boolean }>("/api/chatgpt/callback", json({ url })),
+  chatgptLogout: () => request<{ ok: boolean; was_signed_in?: boolean }>("/api/chatgpt/logout", json({})),
   setLLM: (body: Record<string, unknown>) =>
     request<ConnectionsData["llm"]>("/api/connections/llm", { method: "PUT", body: JSON.stringify(body) }),
   testLLM: () => request<TestResult>("/api/connections/llm/test", { method: "POST" }),
@@ -386,6 +411,11 @@ export const api = {
   importSkill: (url: string) => request<SkillDetail>("/api/skills/import", json({ url })),
   setGui: (body: Record<string, unknown>) => request<ConnectionsData["gui"]>("/api/connections/gui", { method: "PUT", body: JSON.stringify(body) }),
   testGui: () => request<TestResult & { model?: string }>("/api/connections/gui/test", { method: "POST" }),
+  /** where pictures (`image`) or clips (`video`) come from: the slot as set and what it resolves to (0.1.41) */
+  media: (slot: "image" | "video") => request<MediaSlotData>(`/api/connections/${slot}`),
+  /** provider (a catalogue id), model, base_url, api_key; all "" clears the slot */
+  setMedia: (slot: "image" | "video", body: Record<string, unknown>) =>
+    request<MediaSlotData>(`/api/connections/${slot}`, { method: "PUT", body: JSON.stringify(body) }),
   setBrowser: (enabled: boolean) =>
     request<ConnectionsData["browser"]>("/api/connections/browser", { method: "PUT", body: JSON.stringify({ enabled }) }),
   addMCP: (body: Record<string, unknown>) => request<ConnectionsData>("/api/connections/mcp", json(body)),
@@ -395,6 +425,11 @@ export const api = {
     request<string[]>(`/api/vault/${encodeURIComponent(name)}`, { method: "PUT", body: JSON.stringify({ value }) }),
   vaultDelete: (name: string) => request<{ ok: boolean }>(`/api/vault/${encodeURIComponent(name)}`, { method: "DELETE" }),
   onboarded: (done = true) => request<{ onboarded: boolean; feed_started?: boolean }>("/api/onboarded", json({ done })),
+  // ---- the first conversation (contract C4): the runtime owns the state, the browser draws it
+  firstrun: (lang: string) => request<FirstRunView>(`/api/firstrun?lang=${encodeURIComponent(lang)}`),
+  firstrunStart: (lang: string) => request<FirstRunView>("/api/firstrun/start", json({ lang })),
+  firstrunPick: (name: string) => request<FirstRunView>("/api/firstrun/pick", json({ name })),
+  firstrunDismiss: () => request<FirstRunView>("/api/firstrun/dismiss", json({})),
   // browser view
   browserControl: (thread: string, body: BrowserControl) =>
     request<{ url: string; title: string; hold?: HoldEvent | null }>(`/api/browser/${encodeURIComponent(thread)}/control`, json(body)),

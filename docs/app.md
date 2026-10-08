@@ -40,13 +40,13 @@ The token is generated once and stored in `<data_dir>/server_token`; set `server
   <img src="screenshots/web/onboarding.png" width="24%" alt="First run: meet your nanoMuse">
 </p>
 
-On a fresh data directory the app opens with setup instead of the chat. First three points about what it is — it does things for you; it keeps working when the app is closed; it asks you first where it matters — then a checklist of three items, ticked as they are done:
+On a fresh data directory the app opens with setup instead of the chat. First three points about what it is — it does things for you; it keeps working when the app is closed; it asks you first where it matters — and a line saying there is no form to fill in: once it has a model, it introduces itself in the chat and asks what to call you. Then a checklist, ticked as it is done:
 
-1. **Meet your nanoMuse** — the name first (1–20 characters; six suggestions and a shuffle; empty means nanoMuse), the avatar, a one-line tagline, then how it talks: a *tone* (formal / casual / playful / concise), *how much it says* (short / detailed / bullet points), anything else in your own words, and what it should call you.
-2. **Add a model** — providers grouped by protocol (OpenAI-compatible Chat Completions · Responses API · local or your own endpoint) with vendor subtitles: DeepSeek, Kimi, Qwen, GLM, 豆包, MiniMax, OpenAI, OpenRouter, Ollama, or any OpenAI-compatible endpoint. The key is masked with a reveal toggle and each vendor has a *Get a key* link; it goes into the vault on the server and the model never sees it. A Base URL without a path gains `/v1`; Ollama and custom endpoints may have no key. The endpoint's own `/models` fills the list (a catalogue stands in when it cannot be reached); a model you typed is never replaced.
-3. **Connect mail, calendar, contacts** — optional.
+1. **Add a model** — providers grouped by protocol (OpenAI-compatible Chat Completions · Responses API · local or your own endpoint) with vendor subtitles: DeepSeek, Kimi, Qwen, GLM, 豆包, MiniMax, OpenAI, OpenRouter, Ollama, or any OpenAI-compatible endpoint. The key is masked with a reveal toggle and each vendor has a *Get a key* link; it goes into the vault on the server and the model never sees it. A Base URL without a path gains `/v1`; Ollama and custom endpoints may have no key. The endpoint's own `/models` fills the list (a catalogue stands in when it cannot be reached); a model you typed is never replaced.
+2. **Connect mail, calendar, contacts** — optional.
+3. **Start** — opens the chat, where the agent speaks first, asks your name and picks its own with you: the first conversation ([web.md](web.md#the-first-run-and-the-chats-opening)).
 
-*Start* stays locked until a model is saved; *Skip setup* is always there. A reload keeps the ticks. Everything here can be changed later under the avatar (*Settings* shows the same identity form). Setup does not reappear once finished, or once a conversation exists. When it finishes with a model there, the Feed's first day is written in the background (`POST /api/onboarded`), so the room is not empty the first time it opens; the Feed otherwise opens on its intro card and says when its daily routine runs.
+*Start* stays locked until a model is saved; *Skip setup* is always there and skips the first conversation too. A reload keeps the ticks. The name, face, tagline and tone can be changed later under the avatar (*Settings* has the identity form). Setup does not reappear once finished, or once a conversation exists. *Start* marks setup done (`POST /api/firstrun/start`, the same as `POST /api/onboarded`); when a conversation already exists at that point, or when the first conversation ends, the Feed's first day is written in the background, so the room is not empty the first time it opens; the Feed otherwise opens on its intro card and says when its daily routine runs.
 
 ## What is on the screen
 
@@ -89,7 +89,7 @@ The app speaks English and 简体中文. *Settings → App language* is a device
 
 ### Skills
 
-A skill is a recipe: a folder with a `SKILL.md` — a name and a one-line description up top, then the steps in Markdown — in the [Agent Skills](https://agentskills.io) format, so a skill written for another agent works here and yours work there. Five ship with the app (`weekly-review`, `trip-plan`, `inbox-triage`, `compare-options`, `meeting-prep`); yours live in `<data_dir>/skills/<name>/`, and one with the same name as a built-in replaces it.
+A skill is a recipe: a folder with a `SKILL.md` — a name and a one-line description up top, then the steps in Markdown — in the [Agent Skills](https://agentskills.io) format, so a skill written for another agent works here and yours work there. Eleven ship with the app (`weekly-review`, `trip-plan`, `inbox-triage`, `compare-options`, `meeting-prep`, `phone-messages`, and the service skills `feishu`, `tencent-meeting`, `amap`, `kuaidi100`, `train-tickets`); yours live in `<data_dir>/skills/<name>/`, and one with the same name as a built-in replaces it.
 
 The model sees the index — every enabled skill's name and description — in its system prompt and picks one when a request fits ("plan me a week in Kyoto" reaches for `trip-plan`), reading the full steps with the `skills` tool before it starts. You can also name one yourself: type `/` in the composer and the enabled skills come up (`Tab` completes the first match); `/trip-plan Kyoto, 5 days in November` sends the skill's instructions with your text as the task.
 
@@ -136,7 +136,7 @@ Everything the app does goes through this API, so another front-end (a Telegram 
 | PATCH / DELETE | `/api/threads/{id}` | rename / delete |
 | POST | `/api/threads/{id}/clear` | clear the conversation |
 | GET | `/api/threads/{id}/events?limit=&before=` | timeline events |
-| POST | `/api/threads/{id}/send` `{text, files?}` | queue a message; returns immediately. `files`: workspace paths from the upload below, ten at most; text may be empty when there are files |
+| POST | `/api/threads/{id}/send` `{text, files?, language?}` | queue a message; returns immediately. `files`: workspace paths from the upload below, ten at most; text may be empty when there are files. `language` (since 0.1.42): the BCP-47 tag of the client's screens (`en`, `zh-CN`); the reply is written in that language unless *Reply language* fixes one. Without it the script of the message decides, as before |
 | POST | `/api/threads/{id}/stop` | stop the run in that chat: the queue is dropped, pending approval and question cards there expire, the conversation stays usable. `{ok: false}` when nothing was running |
 | POST | `/api/files/upload?name=` (body: the bytes) | a file to attach: lands in `attachments/<date>/` under a safe version of `name`; returns `{path, name, size, kind, mime}` for `files`. 413 above `server.max_upload_mb` |
 | POST | `/api/approvals/{id}` `{approved, scope, reason}` | answer a card; `scope` is one of the card's `grant_options` (`once`, `task`, `session`, `24h`, `always`) |
@@ -218,16 +218,18 @@ The client's first frame is `{"kind": "auth", "token": "…"}` (within ten secon
 | `event` | a new timeline event (`user`, `assistant`, `tool`, `approval`, `question`, `artifact`, `browser`, `notice`). An `approval` carries `summary`, `purpose` (what you asked for), `target`, `grant_key`, `grant_options`, `risk`, `warnings`, `args`. A `browser` card carries `url`, `title`, `action`, `frame` (id of the latest picture), `frames`, `status` (`live` / `done`), `by_user`, `backend` (`playwright` or `device`) and the frame's `width` / `height` in CSS pixels. Events produced during a background pass carry `source: "background"` and `about` (the pass label). The `assistant` bubble that ends a run carries `final: true` (set on emit, or as an `update` when the bubble was already on screen); the step-by-step narration before it does not — a client that mirrors background results into notifications should key off that flag |
 | `update` | fields changed on an existing event (a tool finished, an approval was decided, a browser card got a new frame) |
 | `event_removed` | `{thread, id}` — an event left the timeline: a message deleted on another device of the account (conversation sync) |
+| `working` | `{thread, cid, device, device_name, working, at}` — another device of the account started (`true`) or finished (`false`) a turn in a synced conversation; the app shows *{device} is working…* under the last message while `true`, and drops it when the reply arrives or after ten minutes. The `hello` state lists the live ones under `working` |
 | `stream_start` / `delta` / `stream_end` | the assistant reply being generated; `stream_end` carries `discard: true` when what streamed turned out not to be a reply (a prompt-mode tool call, a quiet background pass) |
 | `status` | idle / working / waiting, with a short detail line |
 | `thread`, `thread_cleared`, `thread_deleted` | thread list changes |
+| `firstrun` | `{firstrun}` — the first conversation moved on (*Start*, the model's `nanomuse-naming` block, a pick, a dismissal): the same view as `GET /api/firstrun` without `intro`; the chat redraws its chooser. The `hello` state carries it under `firstrun` |
 | `goals`, `memory`, `ideas`, `feed_posts`, `profile`, `settings`, `connections`, `skills`, `approvals_reset` | refresh hints for the tabs |
 | `phone` | a phone connected or left: the `/api/phone` view |
 | `schedule` | `next_wake_at` changed (a reminder was set or fired, a goal's cadence moved, the quiet hours ended): `{next_wake_at}` or `null` when nothing is due. The Android runtime re-arms its alarm from it |
 | `device_ack`, `device_request` | to a connected phone: the answer to its announcement, and a request for its screen or an action ([gui.md](gui.md#the-device-protocol)) |
 | `error`, `pong` | replies to client messages |
 
-Client → server: `{"kind": "send", "thread": "main", "text": "…"}`, `{"kind": "approval", "id": "…", "approved": true, "scope": "once"}`, `{"kind": "ping"}`. A phone that lets the agent operate it also sends `{"kind": "device", …}` once and `{"kind": "device_result", …}` in answer to each request.
+Client → server: `{"kind": "send", "thread": "main", "text": "…", "language": "en"}` (`language` optional, as on `POST /api/threads/{id}/send`), `{"kind": "approval", "id": "…", "approved": true, "scope": "once"}`, `{"kind": "ping"}`. A phone that lets the agent operate it also sends `{"kind": "device", …}` once and `{"kind": "device_result", …}` in answer to each request.
 
 Timeline events are persisted per thread in `<data_dir>/threads/<id>.json`, so the history survives restarts.
 

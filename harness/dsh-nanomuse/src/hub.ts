@@ -22,6 +22,16 @@ export interface HubDevice {
   actions: string[]
 }
 
+/** The hub's `working` frame (contract C9): a device started or finished a turn on a synced conversation. */
+export interface HubWorking {
+  cid: string
+  from: string
+  device_name: string
+  working: boolean
+  /** Unix seconds, the relay's clock. */
+  at: number
+}
+
 /** What this device says about itself in `hello`. */
 export interface HelloDevice {
   id: string
@@ -101,6 +111,8 @@ interface Pending {
 }
 
 const OPEN = 1
+/** How long to wait after the relay closed with `hub_paused`: its operator switched the hub off for a while. */
+const PAUSED_RETRY_MS = 120_000
 
 export class HubClient {
   /** The relay's list, refreshed on every `devices` frame. */
@@ -114,6 +126,8 @@ export class HubClient {
   private socket: SocketLike | undefined
   private running = false
   private attempt = 0
+  /** Counts `connect()` attempts; an attempt that finds a newer one when its key arrives gives up. */
+  private generation = 0
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined
   private pingTimer: ReturnType<typeof setInterval> | undefined
   private readonly pending = new Map<string, Pending>()
@@ -123,6 +137,7 @@ export class HubClient {
     devices: new Set<Listener>(),
     profile: new Set<(rev: number, device: string) => void>(),
     sync: new Set<(cursor: number, device: string) => void>(),
+    working: new Set<(frame: HubWorking) => void>(),
     unauthorized: new Set<Listener>(),
   }
   private seq = 0
@@ -152,6 +167,12 @@ export class HubClient {
     if (!this.running) return this.start()
     this.clearReconnect()
     this.closeSocket(1000, 'restart')
+    // The old socket's close event is ignored once it is replaced, so its work ends here:
+    // calls in flight fail now rather than at their timeout, and `connected` is false
+    // until the new `welcome`, so a call made meanwhile is refused as offline instead of
+    // being written into a socket that is not open yet.
+    this.failPending(new HubError('disconnected', 'The hub connection is being restarted'))
+    this.setConnected(false)
     this.attempt = 0
     void this.connect()
   }
@@ -184,6 +205,12 @@ export class HubClient {
   onSync(listener: (cursor: number, device: string) => void): () => void {
     this.listeners.sync.add(listener)
     return () => this.listeners.sync.delete(listener)
+  }
+
+  /** Another device started or finished a turn on a synced conversation (contract C9). */
+  onWorking(listener: (frame: HubWorking) => void): () => void {
+    this.listeners.working.add(listener)
+    return () => this.listeners.working.delete(listener)
   }
 
   /** The relay refused the key (close 4001): the owner should forget the account. */
@@ -260,13 +287,16 @@ export class HubClient {
 
   private async connect(): Promise<void> {
     if (!this.running || this.socket) return
+    // `restart()` or `stop()` while the key is being read: this attempt lost its turn and
+    // must not open a second socket next to the one the newer attempt opens.
+    const generation = ++this.generation
     let key: string | undefined
     try {
       key = await this.options.key()
     } catch {
       key = undefined
     }
-    if (!this.running) return
+    if (!this.running || generation !== this.generation || this.socket) return
     if (!key) {
       // Not signed in: nothing to connect with. `restart()` is called at sign-in.
       return
@@ -309,10 +339,23 @@ export class HubClient {
         for (const listener of this.listeners.unauthorized) listener()
         return
       }
-      if (code === 4003) this.lastError = 'another connection of this device replaced this one'
+      if (code === 4002) {
+        // The relay would not take this device's hello (docs/hub.md): another try with the
+        // same device changes nothing, so stay closed; the UI shows why, the account stays.
+        this.lastError = 'the relay refused this device'
+        this.running = false
+        this.log('warn', 'hub: the relay refused this device; not reconnecting')
+        return
+      }
+      const paused = event.reason === 'hub_paused'
+      if (paused) this.lastError = 'the hub is paused on the relay'
+      else if (code === 4003) this.lastError = 'another connection of this device replaced this one'
       else if (code !== 1000) this.lastError = event.reason || `closed (${code})`
       if (wasConnected) this.log('info', `hub: disconnected (${code}${event.reason ? ` ${event.reason}` : ''})`)
-      this.scheduleReconnect(code === 4003 ? 30_000 : undefined)
+      // The relay said why (docs/hub.md): paused by its operator, so wait a good while;
+      // replaced by a newer connection of this device, so do not fight it; a hello it would
+      // not take or too many frames (4008), which a retry a second later would not change.
+      this.scheduleReconnect(paused ? PAUSED_RETRY_MS : code === 4003 ? 30_000 : code === 4000 || code === 4008 ? 60_000 : undefined)
     })
   }
 
@@ -347,6 +390,11 @@ export class HubClient {
       case 'sync':
         if (frame.what === 'conversations') for (const listener of this.listeners.sync) listener(Number(frame.cursor ?? 0), String(frame.from ?? ''))
         return
+      case 'working': {
+        const working: HubWorking = { cid: String(frame.cid ?? ''), from: String(frame.from ?? ''), device_name: String(frame.device_name ?? ''), working: frame.working === true, at: Number(frame.at ?? 0) }
+        for (const listener of this.listeners.working) listener(working)
+        return
+      }
       case 'pong':
         return
       case 'event': {

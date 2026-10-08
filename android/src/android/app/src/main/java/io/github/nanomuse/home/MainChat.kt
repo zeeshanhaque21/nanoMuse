@@ -33,25 +33,50 @@ object MainChat {
     /**
      * Picks the main chat: the persisted one if it still exists, else the first-conversation
      * session, else the most recently updated session (so a 0.1.2 user's current chat becomes
-     * home), else a fresh draft that becomes real on first send.
+     * home), else a fresh draft that becomes real on first send. A chat synced under another
+     * account (contract C10, [io.github.nanomuse.sync.ConversationSync.hidden]) is never it.
      */
     suspend fun resolve(context: Context, chatRepository: ChatRepository): String {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val hidden = io.github.nanomuse.sync.ConversationSync.hidden.value
         prefs.getString(KEY_SESSION, null)?.let { id ->
-            if (chatRepository.getSession(id) != null) return publish(id)
+            if (id !in hidden && chatRepository.getSession(id) != null) return publish(id)
         }
         prefs.getString(KEY_FIRST_CONVERSATION_SESSION, null)?.let { id ->
-            if (!isDraftId(id) && chatRepository.getSession(id) != null) {
+            if (!isDraftId(id) && id !in hidden && chatRepository.getSession(id) != null) {
                 prefs.edit().putString(KEY_SESSION, id).apply()
                 return publish(id)
             }
         }
-        chatRepository.dao.listSessions().firstOrNull()?.let { latest ->
+        chatRepository.dao.listSessions().firstOrNull { it.id !in hidden }?.let { latest ->
             prefs.edit().putString(KEY_SESSION, latest.id).apply()
             return publish(latest.id)
         }
         val d = draft ?: "__new__${UUID.randomUUID()}".also { draft = it }
         return publish(d)
+    }
+
+    /**
+     * No home conversation any more (contract C10: the one there was belongs to another
+     * account): the home is a fresh draft until the person writes, when [onPromoted] pins it.
+     */
+    fun clear(context: Context) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(KEY_SESSION).apply()
+        val d = "__new__${UUID.randomUUID()}"
+        draft = d
+        promotedDraft = null
+        _sessionId.value = d
+    }
+
+    /**
+     * The account changed (contract C12): whatever was resolved is forgotten and the next
+     * [resolve] starts from the preferences as they are now — the returning account's own main
+     * chat if it was kept, else the newest of its chats, else a draft.
+     */
+    fun reset() {
+        draft = null
+        promotedDraft = null
+        _sessionId.value = null
     }
 
     /** Called by ChatViewModel.ensureSession when a draft gets its database row. */

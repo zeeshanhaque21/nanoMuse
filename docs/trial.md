@@ -88,40 +88,34 @@ item / systemd user service / Task Scheduler if you want it always on).
 On the phone: 「在 mac 上列一下下载文件夹」 「让 desk 把 ~/proj 编译一遍，把最后二十行日志发我」
 「电脑截个图给我看」 「给电脑发个通知：该睡了」
 
-On the computer: "on the phone, take a screenshot", "tell pixel's Muse to read
-me the last notification", "send pixel a notification: build finished".
+On the computer: "on the phone, take a screenshot", "tell pixel's Muse to read me the last
+notification", "send pixel a notification: build finished".
 
-In the console: pick a device, type; approvals show as cards.
+In the console: pick a device, type.
 
-Anything that deletes, sends, pays or touches the system asks first — on the
-device where you typed it. A remote Muse's approval question comes back to you
-the same way.
+A whole job in words ("compile the project and send me the log") runs as a task in the
+other device's own Muse, in a conversation of its own, and may take minutes; the steps
+show in your chat as they happen.
 
-## 5. Operating
+## 5. Approvals
 
-```bash
-# accounts (hints only, never identifiers) and allowance
-curl -H "X-Admin-Token: $CLOUD_ADMIN_TOKEN" https://cloud.example.com/v1/admin/accounts
-# top up
-curl -H "X-Admin-Token: $CLOUD_ADMIN_TOKEN" -X POST https://cloud.example.com/v1/admin/grant \
-     -H 'content-type: application/json' -d '{"identifier":"139…","tokens":1000000}'
-# who is on the hub (with a device's own key)
-curl -H "Authorization: Bearer nm_…" https://cloud.example.com/v1/devices
-```
+Anything that deletes, sends, pays or touches the system asks first, on the device where
+you typed it, and a remote Muse's approval question travels back to you the same way.
+Operating a device from another one is a second question, asked of the person holding that
+device (section 1 and 2 above). Nobody there, and the caller hears that it was not allowed.
 
-Letting someone else in: `SIGNUP_OPEN=1` and `docker compose up -d` again lets
-anyone register with the daily cap; *设为成员* on the admin page, or a line in
-`ALLOWED_IDENTIFIERS`, lifts the cap for one person.
+## 6. What follows you
 
-## 6. Where it stands
+Signed in, the main conversation and the side chats follow you to your other devices; *Data
+controls* on each device switches that off ([sync.md](sync.md)). The agent's name and face
+are the account's. A connector signed in on one device shows on the others as *Connected
+on 〈device〉*, one tap to sign in there too ([hub.md](hub.md)). Models are chosen per device:
+each one's *Settings → Models* is its own.
 
-Verified on the development machine: relay + hub, Linux desktop, Android
-emulator and the web console on one account — phone→PC (`devices`, `run`,
-`ls`, `notify`, `task`), PC→phone (`info`, `notify`, `task`, natural-language
-notify + delegate), web→phone and web→PC (tasks, approval cards), rename and
-forget (also from the console). The macOS and Windows packages come out of CI
-(the `desktop` workflow, all four targets green) and were not run on real
-machines here. The iOS side — sign-in and the hub client — is written without
-a Mac; the `ios-check` workflow is the compile test, the `ios-testflight`
-workflow the delivery. Shell and files on the phone use the Linux sandbox,
-which exists on arm64 phones (the emulator build has none).
+## 7. Your own relay
+
+[self-hosting.md](self-hosting.md) runs the same relay on a small VPS. The phones take its
+address under *Use a different server* on the sign-in screen; nanoMuse Desktop takes it in
+the desktop profile's `cordis.patch.yml`; the console is whatever relay serves it at `/app/`.
+Every device of one account must point at the same relay, since the devices and the
+conversations live there.

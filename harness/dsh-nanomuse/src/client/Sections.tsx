@@ -11,7 +11,7 @@ import { createElement as h, Fragment, useCallback, useEffect, useState, type Re
 import { call, type Translate } from './api.ts'
 import { acceleratorOf, bridge, gatedPermissions, keyLabel, openLink, type DesktopPrefs, type PermissionKind } from './bridge.ts'
 import { RelaunchNotice } from './Onboarding.tsx'
-import { BlackScreenNotice, HandsTryRows, RuntimeRow, type ScreenshotResult } from './HandsCheck.tsx'
+import { BlackScreenNotice, DisplayRows, HandsTryRows, RuntimeRow, type ScreenshotResult } from './HandsCheck.tsx'
 import { usePermissions } from './permissions.ts'
 import { settingsBus } from './bus.ts'
 import { IconBug, IconCheck, IconChevronRight, IconFile, IconHeart, IconLink, IconList, IconPlay, IconScale, IconShield } from './icons.tsx'
@@ -21,9 +21,8 @@ import { setPrefs, usePrefs } from './prefs.ts'
 
 const SITE_URL = 'https://github.com/zeeshanhaque21/nanoMuse'
 const DOCS_URL = 'https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/harness.md'
-const DISCUSS_URL = 'https://github.com/zeeshanhaque21/nanoMuse/discussions'
+const DISCUSS_URL = 'https://github.com/zeeshanhaque21/nanoMuse'
 const PRIVACY_URL = 'https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/privacy.md'
-const TERMS_URL = 'https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/terms.md'
 const LICENSE_URL = 'https://github.com/zeeshanhaque21/nanoMuse/blob/main/LICENSE'
 
 function Switch({ checked, onChange, label, disabled }: { checked: boolean; onChange(next: boolean): void; label: string; disabled?: boolean }): ReactNode {
@@ -75,7 +74,7 @@ export function makeComputerSection(t: Translate) {
             row('screen', t('obScreen'), t('obScreenSub')),
             h(RelaunchNotice, { t, perms }),
             h('div', { className: 'nm-row' },
-              h('span', { className: 'nm-row-sub nm-wrap' }, t('pmOnlyDesktop'), ' ', t('pmMonthly'))),
+              h('span', { className: 'nm-row-sub nm-wrap' }, t(perms.helper ? 'pmOnlyHelper' : 'pmOnlyDesktop'), ' ', t('pmMonthly'))),
             h('div', { className: 'nm-row' },
               h('div', { className: 'nm-row-main' },
                 h('span', { className: 'nm-row-title' }, t('pmWindowMode')),
@@ -84,7 +83,7 @@ export function makeComputerSection(t: Translate) {
             h('div', { className: 'nm-row', style: { gap: 12, flexWrap: 'wrap' } },
               h('button', { type: 'button', className: 'nm-ob-link', style: { padding: 0 }, onClick: () => { void bridge()?.openPermissionSettings('accessibility') } }, t('cuOpenSettingsAccessibility')),
               h('button', { type: 'button', className: 'nm-ob-link', style: { padding: 0 }, onClick: () => { void bridge()?.openPermissionSettings('screen') } }, t('cuOpenSettingsScreen'))))
-        : h('p', null, t('cuNotGated')),
+        : h(DisplayRows, { t, name }),
       // "try it": a test screenshot and a small mouse move through the runtime, the way the hands do it
       h('h2', null, t('pmTry')),
       h(HandsTryRows, { t, perms, onScreenshot: onShot }),
@@ -148,7 +147,6 @@ export function makeLegalSection(t: Translate) {
             h('span', { className: 'nm-row-sub nm-wrap' }, t('legalThanksText'))))),
       h('div', { className: 'nm-card' },
         h(LinkRow, { icon: h(IconFile, { size: 18 }), title: t('legalPrivacy'), onClick: () => openLink(PRIVACY_URL) }),
-        h(LinkRow, { icon: h(IconFile, { size: 18 }), title: t('legalTerms'), onClick: () => openLink(TERMS_URL) }),
         h(LinkRow, { icon: h(IconScale, { size: 18 }), title: 'GPL-3.0-or-later', onClick: () => openLink(LICENSE_URL) })))
   }
 }
@@ -186,7 +184,9 @@ function publishDesktopPrefs(p: DesktopPrefs): void {
   desktopPrefsCache = p
   for (const l of desktopPrefsListeners) l(p)
 }
-export function useDesktopPrefs(): { prefs: DesktopPrefs | undefined; set: (patch: Partial<Pick<DesktopPrefs, 'openAtLogin' | 'menuBar' | 'quickChat' | 'quickChatKey'>>) => void } {
+/** What `setPrefs` takes: the switches, the quick-chat key, the proxy and the relay hosts it must never cover. */
+export type DesktopPrefsPatch = Partial<Pick<DesktopPrefs, 'openAtLogin' | 'menuBar' | 'quickChat' | 'quickChatKey' | 'proxy'> & { relayHosts: string[] }>
+export function useDesktopPrefs(): { prefs: DesktopPrefs | undefined; set: (patch: DesktopPrefsPatch) => void } {
   const b = bridge()
   const [prefs, setLocal] = useState<DesktopPrefs | undefined>(desktopPrefsCache)
   useEffect(() => {
@@ -194,7 +194,7 @@ export function useDesktopPrefs(): { prefs: DesktopPrefs | undefined; set: (patc
     void b?.prefs?.().then(publishDesktopPrefs).catch(() => undefined)
     return () => { desktopPrefsListeners.delete(setLocal) }
   }, [b])
-  const set = useCallback((patch: Partial<Pick<DesktopPrefs, 'openAtLogin' | 'menuBar' | 'quickChat' | 'quickChatKey'>>) => {
+  const set = useCallback((patch: DesktopPrefsPatch) => {
     if (desktopPrefsCache) publishDesktopPrefs({ ...desktopPrefsCache, ...patch })
     void b?.setPrefs?.(patch).then(publishDesktopPrefs).catch(() => undefined)
   }, [b])

@@ -1,6 +1,7 @@
 package io.github.nanomuse.sync
 
 import android.content.Context
+import androidx.room.withTransaction
 import com.openminis.app.MinisApp
 import com.openminis.app.R
 import com.openminis.app.data.db.AppDatabase
@@ -21,6 +22,12 @@ interface LocalChats {
     suspend fun messages(sessionId: String): List<LocalMessage>
     /** The main chat's persisted id; null while the home is still an unsaved draft. */
     suspend fun mainSessionId(): String?
+    /**
+     * The home conversation changes (contract C10: it follows the account): [id] becomes the
+     * main chat; null leaves the home on an unsaved draft until the person writes. In tests,
+     * the field.
+     */
+    suspend fun setMainSession(id: String?)
     /** A chat that arrived from another device; with [main] it becomes the home conversation. Returns its id. */
     suspend fun createSession(title: String?, createdAt: Long, updatedAt: Long, main: Boolean): String
     suspend fun renameSession(id: String, title: String?, updatedAt: Long)
@@ -36,6 +43,11 @@ interface LocalChats {
      * ids must be the same on every call, since they are mapped to mids like rows.
      */
     suspend fun prelude(sessionId: String): List<TranscriptItem> = emptyList()
+    /**
+     * Runs [block] as one write to the chats' database, so a pulled page — three hundred rows
+     * on a fresh device (C9) — lands at once instead of three hundred times. In tests, just the block.
+     */
+    suspend fun <T> transaction(block: suspend () -> T): T = block()
 }
 
 /** The OpenMinis database, read and written through its own DAO — no schema change, no upstream call that would push again. */
@@ -45,8 +57,12 @@ class RoomChats(private val context: Context, private val repo: ChatRepository) 
 
     // The person's own chats. What the phone started on its own — routines, goals, the feed, work for
     // another device, all `source = "scheduled"` — stays here, as on the iPhone and the desktop.
-    override suspend fun sessions(): List<LocalSession> =
-        dao.listSessions().filter { it.source != "scheduled" }.map { it.local() }
+    // Contract C12: a chat another account owns, or one made while signed out, is not this account's to push.
+    override suspend fun sessions(): List<LocalSession> {
+        val account = io.github.nanomuse.account.AccountData.key(context)
+        val others = SyncDatabase.get(context).dao().owners().filter { it.owner != account }.map { it.sessionId }.toSet()
+        return dao.listSessions().filter { it.source != "scheduled" && it.id !in others }.map { it.local() }
+    }
 
     override suspend fun session(id: String): LocalSession? = dao.getSession(id)?.local()
 
@@ -57,6 +73,10 @@ class RoomChats(private val context: Context, private val repo: ChatRepository) 
     }
 
     override suspend fun mainSessionId(): String? = MainChat.persisted(context)?.takeIf { dao.getSession(it) != null }
+
+    override suspend fun setMainSession(id: String?) {
+        if (id == null) MainChat.clear(context) else MainChat.set(context, id)
+    }
 
     override suspend fun createSession(title: String?, createdAt: Long, updatedAt: Long, main: Boolean): String {
         // a model for the row: the one the newest chat uses, else the first the person has
@@ -72,6 +92,7 @@ class RoomChats(private val context: Context, private val repo: ChatRepository) 
             source = "sync",
         )
         dao.insertSession(session)
+        io.github.nanomuse.account.AccountData.claimNow(context, session.id) // C12: the account's, from its first row
         if (main) MainChat.set(context, session.id)
         return session.id
     }
@@ -124,6 +145,9 @@ class RoomChats(private val context: Context, private val repo: ChatRepository) 
     override suspend fun deleteMessage(id: String) {
         db.execSQL("DELETE FROM messages WHERE id = ?", arrayOf(id))
     }
+
+    override suspend fun <T> transaction(block: suspend () -> T): T =
+        AppDatabase.getInstance(context).withTransaction { block() }
 
     // the first conversation's opening ("what should I call you?") lives in the view model only;
     // it goes out as one assistant line dated just before the chat, under a fixed id

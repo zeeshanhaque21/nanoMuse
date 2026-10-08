@@ -6,7 +6,7 @@ from typing import Any
 
 from nanomuse.memory import MemoryStore
 from nanomuse.schema import RiskLevel, ToolResult
-from nanomuse.tools.base import BaseTool, CallAssessment
+from nanomuse.tools.base import BaseTool, CallAssessment, int_arg
 
 
 def _short(value: Any, limit: int = 80) -> str:
@@ -88,7 +88,7 @@ class Remember(BaseTool):
             note = (
                 " Similar memories: "
                 + "; ".join(f"[{m.id}] {m.content}" for _, m in similar)
-                + " — if this replaces one of them, call remember again with replaces=<id>."
+                + "; if this replaces one of them, call remember again with replaces=<id>."
             )
         return ToolResult(output=f"Remembered {item.id}: {item.content}.{note}")
 
@@ -111,7 +111,7 @@ class Recall(BaseTool):
         return a
 
     async def execute(self, query: str = "", limit: int = 10, **_: Any) -> ToolResult:
-        items = await self.store.search_async(query, limit=max(1, min(int(limit or 10), 50)))
+        items = await self.store.search_async(query, limit=int_arg(limit, 10, 1, 50))
         if not items:
             return ToolResult(output="No matching memories.")
         return ToolResult(output="\n".join(i.render() for i in items))

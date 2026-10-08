@@ -164,6 +164,8 @@ def test_chat_request_becomes_a_card_and_the_agent_stays_out(studio_server) -> N
     client, service, fake = studio_server
     assert client.get("/api/avatar").json() == {
         "available": True,
+        "unavailable": "",
+        "unavailable_zh": "",
         "image_model": "draw-1",
         "video_model": "",
         "cloud": False,
@@ -327,7 +329,7 @@ def test_a_busy_provider_is_waited_out_two_pictures_at_a_time(studio_server, mon
     fake.busy = 99
     client.post("/api/avatar/start", json={"session": ev["session"]})
     ev = _wait(lambda: (e := _avatar_event(client))["stage"] == "failed" and e)
-    assert ev["message"] == "The image provider is busy right now — try again in a minute."
+    assert ev["message"] == "The image provider is busy right now; try again in a minute."
     fake.busy = 0
 
 

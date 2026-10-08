@@ -24,25 +24,52 @@ class SyncClient:
         """Off deletes everything the relay stores for the account; on starts empty."""
         return await self.cloud._request("PUT", "/v1/sync/state", {"enabled": bool(enabled)})
 
-    async def changes(self, since: int = 0, limit: int = DEFAULT_PAGE) -> dict[str, Any]:
-        """Everything after ``since`` in seq order: ``{cursor, more, conversations[], messages[]}``."""
-        return await self.cloud._request(
-            "GET", f"/v1/sync/changes?since={int(since)}&limit={int(limit)}"
+    async def changes(
+        self,
+        since: int = 0,
+        limit: int = DEFAULT_PAGE,
+        scope: str = "all",
+        tail: int = 0,
+        token: str | None = None,
+    ) -> dict[str, Any]:
+        """Everything after ``since`` in seq order: ``{cursor, more, conversations[], messages[]}``.
+        ``scope="main"`` is the main conversation only; ``tail=K`` with ``since=0`` asks for
+        the newest K messages and their conversations (plus ``skipped``) — relay 0.20, C9."""
+        query = f"since={int(since)}&limit={int(limit)}"
+        if scope != "all":
+            query += f"&scope={scope}"
+        if tail:
+            query += f"&tail={int(tail)}"
+        return await self.cloud._request("GET", f"/v1/sync/changes?{query}", token=token)
+
+    async def working(self, cid: str, working: bool, device: str, token: str | None = None) -> None:
+        """Presence (C9): a turn started (``True``) or ended (``False``) on that conversation
+        here. The relay tells the account's other devices; 204, nothing to read."""
+        await self.cloud._request(
+            "POST",
+            "/v1/sync/working",
+            {"cid": cid, "working": bool(working), "device": device},
+            token=token,
         )
 
     async def push(
-        self, device: str, conversations: list[dict[str, Any]], messages: list[dict[str, Any]]
+        self,
+        device: str,
+        conversations: list[dict[str, Any]],
+        messages: list[dict[str, Any]],
+        token: str | None = None,
     ) -> dict[str, Any]:
         """``{cursor, accepted, rejected[{cid|mid, reason, cid_main?}]}``; at most 200 messages."""
         return await self.cloud._request(
             "POST",
             "/v1/sync/changes",
             {"device": device, "conversations": conversations, "messages": messages},
+            token=token,
         )
 
-    async def delete_conversation(self, cid: str) -> dict[str, Any]:
+    async def delete_conversation(self, cid: str, token: str | None = None) -> dict[str, Any]:
         """Tombstone one chat for every device; the relay drops its texts at once."""
-        return await self.cloud._request("DELETE", f"/v1/sync/conversations/{cid}")
+        return await self.cloud._request("DELETE", f"/v1/sync/conversations/{cid}", token=token)
 
     async def wipe(self) -> dict[str, Any]:
         """Empty the account's store; the switch stays where it is."""

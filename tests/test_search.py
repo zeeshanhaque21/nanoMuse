@@ -20,7 +20,11 @@ from nanomuse.tools import WebSearch
 from nanomuse.vault import CredentialVault
 
 DDG_ROWS = [
-    {"title": "nanoMuse", "href": "https://github.com/nano-muse/nanoMuse", "body": "An agent."},
+    {
+        "title": "nanoMuse",
+        "href": "https://github.com/zeeshanhaque21/nanoMuse",
+        "body": "An agent.",
+    },
     {"title": "Muse", "href": "https://example.com/muse", "body": "Something else."},
 ]
 
@@ -160,8 +164,7 @@ async def test_failures_fall_back_to_duckduckgo_with_a_note(
     wire.status = 429
     results, note = await p.search("nanomuse", 2, "")
     assert (
-        results
-        and note == "Brave Search failed (rate limited (HTTP 429)) — results from DuckDuckGo"
+        results and note == "Brave Search failed (rate limited (HTTP 429)); results from DuckDuckGo"
     )
     wire.status = 401
     _, note = await p.search("nanomuse", 2, "")
@@ -181,7 +184,7 @@ async def test_failures_fall_back_to_duckduckgo_with_a_note(
     _, note = await p.search("nanomuse", 2, "")
     assert (
         note
-        == "Brave Search failed (could not reach api.search.brave.com) — results from DuckDuckGo"
+        == "Brave Search failed (could not reach api.search.brave.com); results from DuckDuckGo"
     )
     wire.install(monkeypatch)
     # the probe (the test button) does not fall back
@@ -189,18 +192,26 @@ async def test_failures_fall_back_to_duckduckgo_with_a_note(
     wire.text = None
     r = await p.probe()
     assert r["ok"] is False and "rate limited" in r["error"] and len(ddg) == 4
+    # fallback = false: the query never reaches DuckDuckGo's host
+    strict = WebSearchProvider(SearchSettings(provider="brave", api_key="k", fallback=False))
+    with pytest.raises(RuntimeError, match="rate limited"):
+        await strict.search("nanomuse", 2, "")
+    unset = WebSearchProvider(SearchSettings(provider="brave", fallback=False))
+    with pytest.raises(RuntimeError, match="no API key"):
+        await unset.search("nanomuse", 2, "")
+    assert len(ddg) == 4
 
 
 async def test_unconfigured_provider_uses_duckduckgo_and_says_so(wire: Wire, ddg):
     p = WebSearchProvider(SearchSettings(provider="brave"))
     assert not p.configured and p.describe() == "Brave Search (no key)"
     results, note = await p.search("nanomuse", 2, "")
-    assert results and note == "Brave Search: no API key — results from DuckDuckGo"
+    assert results and note == "Brave Search: no API key; results from DuckDuckGo"
     assert wire.requests == []
     p = WebSearchProvider(SearchSettings(provider="searxng"))
     assert not p.configured
     _, note = await p.search("nanomuse", 2, "")
-    assert note == "SearXNG: no instance URL — results from DuckDuckGo"
+    assert note == "SearXNG: no instance URL; results from DuckDuckGo"
 
 
 async def test_key_from_the_vault(tmp_path, wire: Wire):

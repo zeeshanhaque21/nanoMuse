@@ -18,7 +18,7 @@ These win over the file. They cover the settings people change most often and wh
 
 | Variable | Setting |
 |---|---|
-| `NANOMUSE_LLM_PROVIDER`, `NANOMUSE_LLM_MODEL`, `NANOMUSE_LLM_BASE_URL`, `NANOMUSE_LLM_API_KEY`, `NANOMUSE_LLM_TOOL_MODE`, `NANOMUSE_LLM_IMAGE_MODEL`, `NANOMUSE_LLM_VIDEO_MODEL`, `NANOMUSE_LLM_VIDEO_BASE_URL` | `[llm]` (`video_base_url`: the asynchronous video API on another host than the chat model's — a relaying host such as the showcase gateway names itself here) |
+| `NANOMUSE_LLM_PROVIDER`, `NANOMUSE_LLM_MODEL`, `NANOMUSE_LLM_BASE_URL`, `NANOMUSE_LLM_API_KEY`, `NANOMUSE_LLM_TOOL_MODE`, `NANOMUSE_LLM_VISION`, `NANOMUSE_LLM_IMAGE_MODEL`, `NANOMUSE_LLM_VIDEO_MODEL`, `NANOMUSE_LLM_VIDEO_BASE_URL` | `[llm]` (`video_base_url`: the asynchronous video API on another host than the chat model's — a relaying host such as the showcase gateway names itself here) |
 | `DEEPSEEK_API_KEY`, `OPENAI_API_KEY` | used as `llm.api_key` when it is empty — DeepSeek's for a `*.deepseek.com` `base_url`, OpenAI's for every other host (OpenAI itself, OpenRouter, a gateway, vLLM) |
 | `NANOMUSE_DATA_DIR` | `data_dir` (default `~/.nanomuse`) |
 | `NANOMUSE_WORKSPACE` | `agent.workspace` (default: `./workspace` when the current directory has one, else `<data_dir>/workspace`) |
@@ -28,6 +28,7 @@ These win over the file. They cover the settings people change most often and wh
 | `NANOMUSE_BROWSER_ENABLED=1` | `browser.enabled = true` (only ever turns it on; the browser Docker image sets it; the phone sets it through `NANOMUSE_DEVICE`) |
 | `NANOMUSE_BROWSER_BACKEND` | `browser.backend`: `auto`, `playwright` or `device` |
 | `NANOMUSE_GUI_ENABLED=1`, `NANOMUSE_GUI_PROVIDER`, `NANOMUSE_GUI_MODEL`, `NANOMUSE_GUI_BASE_URL`, `NANOMUSE_GUI_API_KEY` | `[gui]` — operating the phone, and the model that does it |
+| `NANOMUSE_IMAGE_PROVIDER`, `NANOMUSE_IMAGE_MODEL`, `NANOMUSE_IMAGE_BASE_URL`, `NANOMUSE_IMAGE_API_KEY`; the same with `VIDEO` | the [`[image]` and `[video]` slots](#image-and-video) — where pictures and clips come from |
 | `NANOMUSE_VAULT_KEY` | Fernet key for the vault (default: `<data_dir>/vault.key`) |
 | `NANOMUSE_CLOUD_BASE_URL`, `NANOMUSE_CLOUD_REQUIRED`, `NANOMUSE_CLOUD_SYNC` | `[cloud]` — the relay a hosted runtime signs in against, whether a nanoMuse Cloud account is required, and the default for *Sync conversations between my devices* (`sync`, on unless set to `0`; the person's switch in *Settings → Data controls*, once touched, is what counts — [every-device.md](every-device.md#the-same-conversations-everywhere)) ([cloud.md](cloud.md); the relay's own variables are in [cloud/README.md](../cloud/README.md)) |
 | `NANOMUSE_HUB_NAME` | `hub.name`, what this device is called on the other devices |
@@ -38,7 +39,8 @@ These win over the file. They cover the settings people change most often and wh
 
 ```toml
 [llm]
-provider      = "openai"           # "openai" = Chat Completions, "openai_responses" = Responses API
+provider      = "openai"           # "openai" = Chat Completions, "openai_responses" = Responses API;
+                                   # "chatgpt" = a ChatGPT plan (below); or a catalogue id such as "bailian"
 model         = "deepseek-flash"
 base_url      = "https://api.deepseek.com"
 api_key       = "${DEEPSEEK_API_KEY}"
@@ -52,7 +54,10 @@ vision        = "auto"             # pictures attached in chat go to the model: 
 pass_reasoning = false             # send reasoning_content back with assistant turns (some DeepSeek endpoints)
 extra_headers = {}                 # e.g. { "X-End-User-Id" = "nanomuse" }
 extra_body    = {}                 # e.g. { "thinking" = { "type" = "enabled" } }
+proxy         = ""                 # an HTTP(S) or SOCKS proxy for this slot only, e.g. "http://127.0.0.1:7890"
 ```
+
+`proxy` sends this slot's requests — and, for a `chatgpt` slot, the sign-in's token refresh — through that proxy and ignores the environment's `HTTPS_PROXY` for them; empty, the environment decides. It never applies to nanoMuse Cloud or the hub. (The phones have the same switch under *Settings → Network*; [own-key.md](own-key.md#when-the-provider-cannot-be-reached).)
 
 Provider recipes:
 
@@ -70,7 +75,29 @@ Provider recipes:
 | vLLM / LM Studio | your served name | `http://localhost:8000/v1` | set `tool_mode = "prompt"` if the server ignores `tools` |
 | Company gateway | as required | as required | use `extra_headers` / `extra_body`; pick the provider by the API shape the gateway speaks |
 
-The same presets are offered in the app (*Connections → Model*, and on first run), each with a link to where its key comes from; the exact hostnames live in `PROVIDERS` in `nanomuse/server/connections.py`. A `base_url` saved from the app that has no path gains `/v1` (`http://host:8000` → `http://host:8000/v1`); the presets' own hosts are kept as they are. Ollama and custom endpoints may have no key.
+The same presets are offered in the web console (*Connections → Chat model*, and on first run), each with a link to where its key comes from; the exact hostnames live in `PROVIDERS` in `nanomuse/server/connections.py`. A `base_url` saved from the app that has no path gains `/v1` (`http://host:8000` → `http://host:8000/v1`); the presets' own hosts are kept as they are. Ollama and custom endpoints may have no key.
+
+`provider` may also be an id from the provider catalogue, [`nanomuse/llm/providers.json`](../nanomuse/llm/providers.json) — `bailian`, `deepseek`, `moonshot`, `zhipu`, `openrouter`, `openai`, `gemini`, … — in which case `base_url` and, when empty, `model` fill in from the catalogue and only `api_key` is yours. The catalogue also says what each provider's key covers (chat, the hands, pictures, clips); `GET /api/providers` on the server reports which slots use which provider and what that leaves uncovered, and the app shows one sentence for a feature nothing covers ([own-key.md](own-key.md)).
+
+### A ChatGPT plan instead of a key
+
+```toml
+[llm]
+provider = "chatgpt"     # the sign-in from `nanomuse chatgpt login`; no base_url, no api_key
+model    = ""            # empty → gpt-5.6-sol (also gpt-5.4, gpt-5.4-mini)
+```
+
+A person with a ChatGPT plan (Plus, Pro, Team) can let nanoMuse use it for chat and for the hands, the way OpenAI's own Codex CLI does: `nanomuse chatgpt login` opens OpenAI's sign-in page in the browser (PKCE, the same client id, scopes and redirect as Codex), waits for the callback on port 1455 of the machine the runtime runs on, and stores the tokens in `<data_dir>/chatgpt.json` (mode 0600), refreshed before they expire. `nanomuse chatgpt status` says who is signed in and until when (never the tokens); `nanomuse chatgpt logout` deletes the store. The same three steps are on the web console's *Connections* screen (*Or sign in with a ChatGPT plan*), which calls `POST /api/chatgpt/login`, `GET /api/chatgpt/status` and `POST /api/chatgpt/logout` on the runtime ([web.md](web.md)). After a sign-in nothing switches by itself: set `provider = "chatgpt"` here, pick *Use it for the chat* on the web, or `PUT /api/connections/llm {"provider": "chatgpt"}`. `[gui] provider = "chatgpt"` works the same way for the hands.
+
+What it covers: chat and vision (the hands read screenshots). The Codex backend has no image or video endpoints, so pictures and clips still want a key — an `[image]` or `[video]` slot below, or a chat provider whose host draws. `base_url` and `api_key` in a `chatgpt` slot are ignored, with a warning in the log.
+
+**The honest line**, printed on every login: *OpenAI's terms cover using a ChatGPT plan inside OpenAI's own Codex; other apps have had this access cut off before (OpenCode, January 2026). If it stops working, an API key does.*
+
+**The callback has to reach the runtime.** OpenAI sends the browser back to `http://localhost:1455/auth/callback`, so the browser must be on the machine the runtime runs on (or forward that port to it). When it is not — a runtime on a server, the console open on a laptop — the sign-in page still works; the browser then lands on an address that does not answer. Copy that whole address (`http://localhost:1455/auth/callback?code=…&state=…`) out of the address bar and give it to the runtime: the CLI asks for it when the port is busy or nothing arrives in time; with `--json` it reads one line from stdin; the web console's card has a box for it; the server takes `POST /api/chatgpt/callback {"url": "<the address>"}` while a login started from `/api/chatgpt/login` is waiting. A `state` that is not the pending login's is refused (400 `state_mismatch`) and nothing is exchanged. `nanomuse chatgpt proxy` serves the sign-in as a loopback OpenAI-compatible endpoint (`GET /v1/models`, `POST /v1/chat/completions`, `GET /v1/usage`, a local bearer token) for other programs on the same machine; `--proxy` (or `[llm] proxy`) sends its upstream calls through a proxy.
+
+**What is left of the plan.** OpenAI counts a plan's use in two windows — a few hours and a week — and says so in the response headers of every Codex call (`x-codex-primary-used-percent`, `…-window-minutes`, `…-reset-after-seconds`, the same for `secondary`) and on `GET https://chatgpt.com/backend-api/wham/usage`, the endpoint Codex CLI's `/status` reads. `nanomuse chatgpt usage` prints both windows (`--json` for the raw `{label, plan, limits}`), the runtime serves them at `GET /api/chatgpt/usage` for the console, and the loopback proxy at `GET /v1/usage`; the runtime also keeps the headers of the last call (`CodexClient.limits`). Nothing is cached longer than a minute.
+
+**When it fails.** A Codex call that cannot get through is one of a few sentences, never the socket's text: *chatgpt.com cannot be reached from this network* (DNS, connect, TLS, a timeout, or an HTML page where JSON was due — an interception page), *OpenAI does not serve this region* (HTTP 403 `unsupported_country_region_territory`), *The ChatGPT sign-in is no longer valid. Sign in again* (401), *The ChatGPT plan has nothing left for now* (a 429 that names a usage limit, with OpenAI's own words and `Retry-After` after it) and *Too many requests at once* (any other 429). The loopback proxy returns them with a machine code in `error.code` — `unreachable`, `region_blocked`, `not_signed_in`, `quota`, `rate_limited`, `upstream` — so a client can act on them; the phones show the same sentences as a card ([own-key.md](own-key.md#when-the-provider-cannot-be-reached)).
 
 ### Tool calling modes
 
@@ -101,6 +128,28 @@ Set `max_tokens` to what the model can produce in one turn (4096 is fine for the
 
 Models that emit `<think>…</think>` inside the content are handled: the reasoning is separated and shown only with `agent.show_thinking = true`.
 
+## `[image]` and `[video]`
+
+Where the avatar studio's pictures and the avatar's clips come from when it is not the chat model's host. Both slots empty (the default) follows one order (the Models contract, 0.1.41): the chat provider's own picture model when it has one — the account's relay, Alibaba Cloud Bailian, and any catalogue provider with `image` (its `defaults.image`; `[llm] image_model` / `video_model` still name another) — else the account's relay when you are signed in to nanoMuse Cloud, even while the chat model is elsewhere, else nothing. Clips the same way: the picture host when it speaks the video API, else the relay under the account key when signed in. Set a slot to draw somewhere else, or to draw at all when the chat model is DeepSeek, a ChatGPT plan or a local model and you are not signed in:
+
+```toml
+[image]
+provider = "zhipu"                    # a catalogue id: bailian | zhipu | siliconflow | volcengine | openai | gemini | openrouter | xai
+model    = ""                         # empty → the catalogue's default for that provider
+api_key  = "{{vault:IMAGE_API_KEY}}"  # empty → the chat model's key when the host is the same
+```
+
+```toml
+[video]
+provider = "bailian"                  # clips speak Bailian's video API this round; the other vendors' video models are behind task APIs not wired yet
+model    = ""                         # empty → the catalogue's default (wan2.2-i2v-flash)
+api_key  = "{{vault:VIDEO_API_KEY}}"
+```
+
+`base_url` may be given instead of `provider` for a host the catalogue does not list; `api_key` goes to that host (a `[video]` host of its own gets the `[video]` key, not the picture host's). A capability nothing configured covers is unavailable with one sentence that names who could — *Pictures need a provider with image models: Alibaba Cloud Bailian, Zhipu GLM, SiliconFlow or Volcengine Ark (how: docs/own-key.md)* on the mainland, OpenRouter, OpenAI, Google Gemini or xAI Grok elsewhere, in English or Chinese after `[agent] language` — in the avatar studio, under *Making pictures* and *Making clips* in Connections, and in `GET /api/providers`. The sentences and the capabilities come from the catalogue, so they change when it does.
+
+The app layer sets the same slots: `PUT /api/connections/image` and `PUT /api/connections/video` take `provider` (a catalogue id, or `openai` / `openai_responses` with a `base_url`), `model` (empty: the catalogue's default), `base_url` and `api_key` (into the vault as `IMAGE_API_KEY` / `VIDEO_API_KEY`, or a `{{vault:NAME}}` reference kept as written; `""` removes it), write the `image` / `video` objects of `app-settings.json` with the same four keys, layered over this file like the rest, and answer the slot as set plus what it resolves to (`effective_provider`, `effective_model`, `effective_source`: `app`, `config`, `chat` or `cloud`); `GET /api/connections/image` and `/video` answer the same, and `GET /api/connections` carries both. All four empty clears the slot. A provider the catalogue lists without the capability is refused with 400 and the one sentence (`DeepSeek has no image models; Pictures need …`), as is the ChatGPT sign-in; a local server or a host the catalogue does not know passes, since it has what you installed. The web console's *Making pictures* and *Making clips* rows are these routes ([web.md](web.md)).
+
 ## `[agent]`
 
 ```toml
@@ -110,12 +159,43 @@ max_steps            = 30              # tool calls per turn before it must wrap
 # workspace          = "./workspace"   # the only directory the files tool can touch; default ./workspace if present here, else <data_dir>/workspace
 language             = "auto"          # or a fixed language: "English", "中文", ...
 max_context_messages = 80
+max_context_images   = 4               # screenshots kept in the request: the newest N; 0 keeps all
 show_thinking        = false
 user_profile         = ""              # free text injected into the system prompt
 instructions         = ""              # extra rules appended to the system prompt
 ```
 
-With `language = "auto"` the system prompt names the language of the latest user message (detected by script) and tells the model to answer in it. A generic "reply in the user's language" instruction turned out to be unreliable with some models; naming it works.
+With `language = "auto"` the system prompt names the reply language and tells the model to answer in it: the language of the client's screens when the client sends one with the message (the web console does, as `language` on `POST /api/threads/{id}/send`; a `task` over the hub may), else the language of the latest user message, detected by script. A generic "reply in the user's language" instruction turned out to be unreliable with some models; naming it works. A fixed `language` wins over both.
+
+`max_context_images` is for the hands. A run on a screen appends a screenshot per step and the whole conversation goes up again on every step, so a dozen full-size pictures had passed the relay's body limit (413 `too_large`, 0.1.37). Only the newest four travel now, each downscaled to at most two megapixels; the older ones are replaced by a one-line note so the model still knows a screenshot was there. The desktop app's harness keeps the same budget on its side.
+
+## `[sync]`
+
+```toml
+[sync]
+side_chats = false   # off: only the main conversation travels between devices
+```
+
+The account-wide sync switch is in the app (*Data controls → Sync*); this is the per-device default for *Also sync side chats*. Off, only the main conversation is pushed and pulled; side chats stay on the device that made them and no other device's arrive. On, this device's side chats go to the account and the other devices' come here. The person's choice in the app is kept in `sync.json` and wins over this file. [every-device.md](every-device.md#the-same-conversations-everywhere) has the whole picture.
+
+## `[cloud]` and `[hub]`
+
+```toml
+[cloud]
+base_url = ""   # a relay you run yourself goes here; empty runs with no relay
+required = true
+sync = true
+models = true        # the account's models as a source; the console's "Use nanoMuse Cloud models"
+
+[hub]
+enabled = true
+remote_control = true
+name = ""            # empty: the host name
+```
+
+`[cloud]` is the relay this runtime signs in to ([cloud.md](cloud.md)): `base_url` is its public address (your own relay's, after [self-hosting.md](self-hosting.md)); `required = false` lets the first run finish without an account, for a runtime that uses no relay at all; `sync` is the default of the account-wide *Data controls → Sync* switch, and the person's choice, once made, is what counts; `models = false` (the console's *Use nanoMuse Cloud models* switch, kept in app-settings) takes the account's models out of the automatic order of the hands, pictures and clips and out of the providers' listing while the sign-in stays, so nothing spends the allowance but an explicit *Use nanoMuse Cloud this time*. The account key itself is `NANOMUSE_CLOUD_KEY` in the vault.
+
+`[hub]` is this computer as one of the account's devices ([hub.md](hub.md)): `enabled` joins the hub whenever the account is signed in; `remote_control = false` answers other devices with `info` and nothing else; `name` is what the other devices call this one (empty: the host name). `device_id` is per installation and written by the app.
 
 ## `[sentinel]`
 
@@ -244,9 +324,10 @@ Who answers `web_search`. DuckDuckGo needs nothing and is the default, but it is
 provider = "duckduckgo"          # duckduckgo | brave | tavily | searxng
 api_key  = "{{vault:SEARCH_API_KEY}}"   # brave / tavily: nanomuse vault set SEARCH_API_KEY
 base_url = ""                    # searxng: your instance, e.g. "http://127.0.0.1:8080"
+fallback = true                  # false: a failed search fails instead of going to DuckDuckGo
 ```
 
-Whichever is picked, a search that fails — a lapsed key, a rate limit, an instance that is down — is answered by DuckDuckGo instead, once, with a note on top of the results saying so, so the task goes on; `nanomuse doctor` reports a provider that is missing what it needs. The `region` argument of the tool (`cn-zh`, `us-en`) is passed to every provider in its own terms. The provider's host is a destination you chose, so a search after private data was read does not need approval the way an unknown host would (see [taint tracking](sentinel.md#taint-tracking)); `web_fetch` of a result still does.
+Whichever is picked, a search that fails — a lapsed key, a rate limit, an instance that is down — is answered by DuckDuckGo instead, once, with a note on top of the results saying so, so the task goes on (the query then reaches DuckDuckGo's host as well as the one you chose; set `fallback = false` under `[connectors.search]` if that must not happen); `nanomuse doctor` reports a provider that is missing what it needs. The `region` argument of the tool (`cn-zh`, `us-en`) is passed to every provider in its own terms. The provider's host is a destination you chose, so a search after private data was read does not need approval the way an unknown host would (see [taint tracking](sentinel.md#taint-tracking)); `web_fetch` of a result still does.
 
 ## `[triggers]`
 
@@ -296,16 +377,19 @@ With this on, the agent can look at a connected phone's screen and tap, type and
 ```toml
 [gui]
 enabled          = false
-provider         = "openai"          # the operator's own model; openai | openai_responses
+provider         = "openai"          # the operator's own model; openai | openai_responses | chatgpt | a catalogue id
 model            = ""                # empty: the main [llm] model does it — it must take images, the screen is a picture
 base_url         = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 api_key          = "{{vault:GUI_API_KEY}}"
-max_steps        = 30                # the most one phone_task may take
+max_steps        = 0                 # the most one phone_task may take; 0 = no cap
 device_timeout_s = 20.0              # how long to wait for the phone to answer
-sensitive_words  = ["确认支付", "立即付款", "转账", "提交订单", "发送", "删除", "pay now", "place order", "send", "delete"]  # a tap on these asks first
+reconnect_grace_s = 30.0             # how long a running task waits for a phone whose connection dropped; 0 = give up at once
+sensitive_words  = ["确认支付", "立即付款", "转账", "提交订单", "发送", "删除", "pay now", "place order", "send", "delete"]  # a tap on these asks first; a shortened sample, the default has 22 words
 ```
 
-`model`, `base_url` and `api_key` fall back to `[llm]` when empty — with one exception: signed in to nanoMuse Cloud with the relay as the model, an empty `model` means the relay's hands model (`qwen3.8-27b` unless `/v1/models` names another), not the chat model: the chat default (`deepseek-v4.1-flash`) reads pictures, but the hands want the model trained to point at things on a screen. A key is only needed when the operator's `base_url` is a different service. Traces of every phone task go to `<data_dir>/phone-traces/` (the last 200 are kept; `nanomuse phone traces`).
+`base_url` and `api_key` fall back to `[llm]` when empty. An empty `model` follows one order (the Models contract, 0.1.41): with the relay as the chat model, the relay's hands model (`qwen3.8-27b` unless `/v1/models` names another), not the chat model — the chat default reads pictures, but the hands want the model trained to point at things on a screen; with an own provider the catalogue lists with `vision`, that provider's own hands model (`defaults.hands`, `qwen3.8-27b` on Bailian, `glm-4.6v` on Zhipu) on the chat key; with a provider that cannot see (a local server by its catalogue id or host) and an account signed in, the relay's hands model under the account key, the chat model staying where it is; else the chat model, as on a host the catalogue does not list. An explicit `model` always wins. A key is only needed when the operator's `base_url` is a different service. Traces of every phone task go to `<data_dir>/phone-traces/` (the last 200 are kept; `nanomuse phone traces`).
+
+The app layer sets this slot through `PUT /api/connections/gui`, which takes `provider` as `PUT /api/connections/llm` does: a protocol (`openai`, `openai_responses`), `chatgpt`, or a catalogue id such as `bailian`, which brings its endpoint along (`base_url` may stay empty); an id the catalogue lacks, or one whose protocol the runtime does not speak, is 400 with the choices. The answer (and `GET /api/connections` → `gui`) carries `provider` as set, `provider_id` (the catalogue entry a protocol plus URL stands for), `effective_model` and `effective_source` (`gui`, `chat` or `cloud`).
 
 ### MCP servers
 
@@ -367,6 +451,7 @@ web session (a runtime started with `NANOMUSE_CLOUD_KEY`) never checks — its o
 | `audit.jsonl` | append-only audit log |
 | `approvals.json` | permissions you granted for 24 hours or always (tool + target, scope, expiry) |
 | `app-settings.json` | what was changed in the app's Connections screen, layered over `config.toml` (no secrets, only `{{vault:NAME}}` references) |
+| `chatgpt.json` | the ChatGPT sign-in's tokens (mode 0600; `nanomuse chatgpt logout` removes it) |
 | `sessions/` | CLI conversation history |
 | `skills/<name>/SKILL.md` | your skills (the Agent Skills format); a name that matches a built-in replaces it |
 | `threads/`, `profile.json`, `ideas.json`, `server_token`, `logs/` | app state |

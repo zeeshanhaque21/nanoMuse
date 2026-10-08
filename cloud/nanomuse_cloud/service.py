@@ -18,6 +18,7 @@ import re
 import secrets
 import sqlite3
 import time
+from collections.abc import Callable
 from contextlib import closing
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -26,6 +27,7 @@ from typing import Any
 from . import __version__
 from .client import client_version, platform_of
 from .config import ModelSpec, Settings, menu_warnings
+from .controls import Controls
 from .crypto import IdentifierCrypto
 from .db import Database, now
 from .geo import Place
@@ -34,6 +36,8 @@ from .nudges import BadNudges
 from .nudges import defaults as nudges_defaults
 from .nudges import merge as nudges_merge
 from .nudges import validate as nudges_validate
+from .providers import exhausted_key_line, guidance
+from .providers import provider as catalogue_provider
 from .senders import CodeSender, SendError, make_sender
 
 log = logging.getLogger("nanomuse_cloud")
@@ -158,13 +162,15 @@ def _training_view(messages: list) -> list:
 
 def _fit_messages(messages: list, max_chars: int) -> tuple[str, bool]:
     """The messages as JSON within ``max_chars`` — whole messages dropped from the middle
-    (the system prompt and the last exchange kept), then the longest text cut — so that what
-    is stored always parses. Returns the JSON and whether anything was left out."""
+    (the first message and the last exchange kept), then the longest text cut — so that what
+    is stored always parses. Returns the JSON and whether anything was left out. The caller
+    passes the training view (``_training_view``), so the first message is the person's
+    opening turn, not a system prompt."""
     text = json.dumps(messages, ensure_ascii=False)
     if len(text) <= max_chars:
         return text, False
     msgs = [dict(m) for m in messages if isinstance(m, dict)]
-    # 1. drop from the middle, oldest first, keeping the first (system) and the last two
+    # 1. drop from the middle, oldest first, keeping the first message and the last two
     while len(text) > max_chars and len(msgs) > 3:
         del msgs[1]
         text = json.dumps(msgs, ensure_ascii=False)
@@ -341,6 +347,10 @@ RUNTIME_SETTINGS: dict[str, tuple[type, float, float]] = {
 
 
 class Cloud:
+    # The clock a charge is priced by (a model with idle hours); the tests pin it to a known
+    # hour, so a suite run at night costs the same as one by day.
+    clock: Callable[[], int] = staticmethod(now)
+
     def __init__(self, settings: Settings, db: Database | None = None, sender: CodeSender | None = None):
         self.env = settings  # what the environment said; `s` has the page's overrides on top
         self.db = db or Database(settings.database)
@@ -349,6 +359,8 @@ class Cloud:
         self.in_flight = InFlight(settings.max_in_flight, ttl_s=settings.upstream_timeout_s + 120)
         self.sender = sender or make_sender(settings)
         self.crypto = IdentifierCrypto(settings.identifier_key)
+        # 0.22: the operator's switches and thresholds (settings table, applied at once)
+        self.controls = Controls(self.db, settings)
         self._login_failures: dict[str, list[int]] = {}
         if settings.dev_mode:
             log.warning("CLOUD_SECRET is not set: development mode, identifiers hashed with a fixed key")
@@ -359,6 +371,11 @@ class Cloud:
         # The members' identifiers, hashed once so a request can be matched
         # against the list without ever seeing the plaintext.
         self.member_hashes: frozenset[str] = frozenset(i.hash(settings.hmac_key) for i in self._listed_identifiers())
+        # The reviewer's addresses (REVIEW_ADDRESSES), hashed the same way; empty — and so
+        # the whole feature off — unless REVIEW_CODE is six digits as well.
+        self.review_hashes: frozenset[str] = frozenset(i.hash(settings.hmac_key) for i in self._review_identifiers())
+        if self.review_hashes:
+            log.warning("review sign-in is on for %d address(es): a fixed code, nothing sent", len(self.review_hashes))
         if settings.signup_open:
             log.info(
                 "sign-up is open: %d member(s) without a limit, everyone else ¥%.2f in all (+¥%.2f an invite, to both sides); "
@@ -371,10 +388,10 @@ class Cloud:
         else:
             log.warning("SIGNUP_OPEN=0: private relay, only the %d listed identifier(s) may sign in", len(self.member_hashes))
         if settings.allowance_uy > 0:
-            # A database from before 0.5 (or from a spell with ALLOWANCE_CNY=0): every account
-            # without a pool starts the lifetime model with the allowance on top of what it has
-            # spent, plus any 0.4 credit an invite had earned it. Idempotent: an account with a
-            # pool is left alone, so a restart between the column and this line loses nothing.
+            # A database from before 0.5: every account without a pool that no 0.15+ relay has
+            # seen starts the lifetime model with the allowance on top of what it has spent,
+            # plus any 0.4 credit an invite had earned it. Idempotent, and it never touches an
+            # account the operator set to zero: that one keeps its zero across a restart.
             n = self.db.seed_grants(settings.allowance_uy)
             if n:
                 log.warning("0.5: %d account(s) moved to the lifetime allowance (¥%.2f + what was spent)", n, settings.allowance_cny)
@@ -565,7 +582,9 @@ class Cloud:
         once and no app carries a number of its own. Nothing here is a secret."""
         return {
             "version": __version__,
-            "signup_open": self.s.signup_open,
+            "signup_open": self.s.signup_open and self.controls.on("signups"),
+            # 0.22: which of the operator's switches are off, so a sign-in page can say so
+            "paused": [k for k, v in self.controls.paused().items() if v],
             "allowance_cny": self.s.allowance_cny,
             "allowance_usd": self.s.cny_to_usd(self.s.allowance_cny),
             "invite_bonus_cny": self.s.invite_bonus_cny,
@@ -592,16 +611,58 @@ class Cloud:
                 log.warning("ALLOWED_IDENTIFIERS has an entry that is neither a number nor an address; ignored")
         return out
 
+    def _review_identifiers(self) -> list[Identifier]:
+        """The reviewer's addresses (REVIEW_ADDRESSES) — only when REVIEW_CODE is six digits
+        too; an entry that is not an e-mail address is ignored (a reviewer has no mainland
+        number, and a fixed code on a number is not something to offer)."""
+        code = self.s.review_code.strip()
+        if not (len(code) == 6 and code.isdigit()):
+            if self.s.review_addresses.strip():
+                log.warning("REVIEW_ADDRESSES is set but REVIEW_CODE is not six digits; review sign-in is off")
+            return []
+        out = []
+        for item in self.s.review_addresses.split(","):
+            if not item.strip():
+                continue
+            try:
+                ident = parse(item)
+            except BadIdentifier:
+                log.warning("REVIEW_ADDRESSES has an entry that is not an address; ignored")
+                continue
+            if ident.channel != "email":
+                log.warning("REVIEW_ADDRESSES has a phone number; only e-mail addresses are taken")
+                continue
+            out.append(ident)
+        return out
+
     def listed(self, ident: Identifier) -> bool:
         """On the operator's list (ALLOWED_IDENTIFIERS)."""
         return ident.hash(self.s.hmac_key) in self.member_hashes
 
+    def is_review(self, ident: Identifier) -> bool:
+        """The reviewer's address (REVIEW_ADDRESSES, with REVIEW_CODE set)."""
+        return bool(self.review_hashes) and ident.hash(self.s.hmac_key) in self.review_hashes
+
     def allowed(self, ident: Identifier) -> bool:
-        """May this identifier sign in? Anyone when sign-up is open; else members only."""
-        return self.s.signup_open or self.listed(ident)
+        """May this identifier sign in? Anyone when sign-up is open; else members only — and
+        the reviewer's address either way, since the operator named it."""
+        return self.s.signup_open or self.listed(ident) or self.is_review(ident)
+
+    def _refuse_if_signups_closed(self, ident: Identifier) -> None:
+        """0.22: the *Sign-ups* switch is off — an identifier without an account is turned
+        away (`signup_closed`); everyone who already has one carries on, and so does the
+        reviewer's address (a review must not fail on a paused switch)."""
+        if self.controls.on("signups") or self.is_review(ident) or self.db.account_by_hash(ident.hash(self.s.hmac_key)) is not None:
+            return
+        raise CloudError(
+            403,
+            "signup_closed",
+            "New sign-ups are paused on this relay for now; existing accounts keep working. Try again later.",
+        )
 
     def request_code(self, ident: Identifier, ip: str) -> None:
-        if not self.sender.accepts(ident):
+        review = self.is_review(ident)
+        if not review and not self.sender.accepts(ident):
             # the honest answer up front: a Hong Kong or overseas number gets no SMS from
             # 号码认证, so the person should not wait for one — e-mail works everywhere
             if ident.channel == "phone" and not ident.value.startswith("+86"):
@@ -617,13 +678,19 @@ class Cloud:
             )
         if not self.allowed(ident):
             raise CloudError(403, "not_invited", "This relay is private; that address is not on its list")
+        self._refuse_if_signups_closed(ident)
         t = now()
         if self.db.codes_recent_for(ident.hash(self.s.hmac_key), t - 600) >= self.s.code_per_identifier_10m:
             raise CloudError(429, "code_too_often", "Too many codes for this address; wait a few minutes")
         if ip and self.db.codes_recent_for_ip(ip, t - 3600) >= self.s.code_per_ip_hour:
             raise CloudError(429, "code_too_often", "Too many codes from this network; wait an hour")
-        code = f"{secrets.randbelow(1_000_000):06d}"
+        # The reviewer's code is the fixed one and goes nowhere: the row is written like
+        # anyone's, so the lifetime, the attempt limit and the rate limits are the same.
+        code = self.s.review_code.strip() if review else f"{secrets.randbelow(1_000_000):06d}"
         self.db.insert_code(ident.hash(self.s.hmac_key), _sha256(code), ip, self.s.code_ttl_s)
+        if review:
+            log.info("review sign-in: a code request for the reviewer's address; nothing sent")
+            return
         try:
             self.sender.send(ident, code)
         except SendError as e:
@@ -657,6 +724,7 @@ class Cloud:
         account = self.db.account_by_hash(id_hash)
         created = account is None
         if account is None:
+            self._refuse_if_signups_closed(ident)
             account_id = self.db.new_account_id()
             enc = self.crypto.encrypt(account_id, ident.value)
             account = self.db.create_account(
@@ -674,7 +742,35 @@ class Cloud:
 
         key, caller = self._issue_key(account["id"], device, via=via)
         self.db.add_event(account["id"], f"sign_in.{via}", device)
+        if created:
+            # the switches flip now; a notify rule's e-mail goes on its own thread, so this
+            # sign-in does not wait on SMTP
+            self.evaluate_thresholds(defer_mail=True)
         return key, caller, created
+
+    def evaluate_thresholds(self, *, defer_mail: bool = False) -> list[dict[str, Any]]:
+        """0.22: the operator's "when accounts reach N" rules, against the count right now.
+        Called after an account is made (``defer_mail``: the e-mail leaves on a thread of
+        its own) and once a minute from the server; a failure here must not break a
+        sign-in."""
+        try:
+            fired = self.controls.evaluate(self.db.account_counts()["total"], defer_mail=defer_mail)
+            if defer_mail:
+                self.controls.flush_notices_later()
+            return fired
+        except Exception as e:  # noqa: BLE001 — a rule misfiring must not cost a sign-in
+            log.warning("thresholds: could not evaluate: %s", e)
+            return []
+
+    def rules_tick(self) -> list[dict[str, Any]]:
+        """The minute timer's call: evaluate, then send any notice a sign-in queued whose
+        thread did not get to it."""
+        fired = self.evaluate_thresholds()
+        try:
+            self.controls.flush_notices()
+        except Exception as e:  # noqa: BLE001
+            log.warning("thresholds: could not send a queued notice: %s", e)
+        return fired
 
     # -- invitations ------------------------------------------------------------------
 
@@ -715,7 +811,9 @@ class Cloud:
 
     def invite_view(self, caller: Caller) -> dict:
         code = self.invite_code_for(caller)
-        earned = self.s.uy_to_cny(caller.invites * self.s.cny_to_uy(self.s.invite_bonus_cny))
+        # from the ledger, not invites × today's bonus: the bonus may have been another
+        # figure when some of these friends signed up
+        earned = self.s.uy_to_cny(self.db.invite_earned_uy(caller.account_id))
         return {
             "code": code,
             "url": self.s.invite_url + code if self.s.invite_url else "",
@@ -751,7 +849,12 @@ class Cloud:
         """A key that stops working on its own after `ttl_s` (at most 90 days), for a place
         that should not hold a standing one — nanoMuse Web's container gets one at start and
         the gateway keeps nothing. Issued to the account of the key making the request; the
-        requesting key is untouched (the caller revokes it if it has no further use for it)."""
+        requesting key is untouched (the caller revokes it if it has no further use for it).
+        A session key cannot mint another: otherwise a key that lapses in an hour could
+        hand itself 90 more days, and a container that leaked one would hold the account
+        for as long as it liked."""
+        if caller.via == "session":
+            raise CloudError(403, "session_from_session", "A session key cannot issue another session key; use the device's own key")
         ttl = max(60, min(int(ttl_s), self.SESSION_KEY_MAX_S))
         expires_at = now() + ttl
         key, _ = self._issue_key(caller.account_id, device or "session", via="session", expires_at=expires_at)
@@ -894,10 +997,18 @@ class Cloud:
     def authenticate(self, bearer: str | None) -> Caller:
         if not bearer or not bearer.startswith(KEY_PREFIX):
             raise CloudError(401, "bad_key", "Sign in again in the app")
-        caller = self._caller(_sha256(bearer))
+        key_hash = _sha256(bearer)
+        caller = self._caller(key_hash)
         if caller is None:
+            # 0.1.40: a key of an account that no longer exists is told apart from one that
+            # was merely revoked or reset — the device keeps the account's data on `bad_key`
+            # (contract C12) and may delete it only on `account_deleted`
+            if self.db.key_deleted(key_hash):
+                raise CloudError(401, "account_deleted", "This account was deleted; sign in again to start a new one")
             raise CloudError(401, "bad_key", "This key is no longer valid; sign in again in the app")
         self.db.touch_key(caller.key_hash, caller.account_id)
+        # 0.22: "active today" = any authenticated call; one row per account and UTC day
+        self.db.daily_add("active", caller.account_id)
         return caller
 
     def sign_out(self, caller: Caller) -> None:
@@ -1014,9 +1125,13 @@ class Cloud:
         """Where to go when the allowance is out, in the order the apps should show them:
         the mainland to Bailian first, everyone else to OpenRouter first (Bailian only signs
         up mainland accounts), the invitation last. Each has an `id` the apps have copy for,
-        a `url`, and the figures that belong to it."""
-        bailian = {"id": "bailian", "url": self.s.own_key_docs, "mainland_only": True}
-        openrouter = {"id": "openrouter", "url": self.s.openrouter_url, "mainland_only": False}
+        a `url`, and the figures that belong to it. Since 0.21 the two key ways also carry
+        the catalogue's facts (`name`, `key_url`, `covers`, `auth`), and the fuller list —
+        every provider for the region, the plans an app can sign in with — is `guidance`
+        (contract C11; providers.py) next to this list, so a client from before keeps its
+        two rows and a new one draws the whole card."""
+        bailian = {"id": "bailian", "url": self.s.own_key_docs, "mainland_only": True, **self._way_facts("bailian")}
+        openrouter = {"id": "openrouter", "url": self.s.openrouter_url, "mainland_only": False, **self._way_facts("openrouter")}
         invite = {
             "id": "invite",
             "url": (self.s.invite_url + self.invite_code_for(caller)) if self.s.invite_url else "",
@@ -1025,18 +1140,24 @@ class Cloud:
         keys = [bailian, openrouter] if region == "cn" else [openrouter, bailian]
         return [*keys, invite]
 
+    @staticmethod
+    def _way_facts(pid: str) -> dict:
+        """The catalogue's facts for one of the two 0.17 ways: additive fields only."""
+        p = catalogue_provider(pid)
+        if p is None:
+            return {}
+        return {"name": p["name"], "name_zh": p["name_zh"], "key_url": p["key_url"], "covers": list(p["capabilities"]), "auth": list(p["auth"])}
+
+    def guidance(self, region: str) -> dict:
+        """The own-key guidance for this person (0.21, contract C11): the providers for the
+        region in order with what each covers, the plans an app can sign in with, the
+        local servers, the guide's URL and the ChatGPT caveat."""
+        return guidance(region, self.s.own_key_docs)
+
     def _exhausted(self, caller: Caller, a: dict, region: str = "unknown") -> CloudError:
         grant = f"¥{self.s.uy_to_cny(a['grant_uy']):g}"
         bonus = f"+¥{self.s.invite_bonus_cny:g} for each of you"
-        if region == "cn":
-            key = "add your own model key (Alibaba Cloud Bailian, 阿里云百炼, has a free tier for mainland China accounts)"
-        elif region == "intl":
-            key = (
-                "add your own model key — OpenRouter is the easy way outside mainland China: one account, one key, pay as you go "
-                "(Alibaba Cloud Bailian only signs up accounts from the mainland)"
-            )
-        else:
-            key = "add your own model key (OpenRouter outside mainland China, Alibaba Cloud Bailian inside)"
+        key = exhausted_key_line(region)
         message = (
             f"Your free allowance ({grant}) is used up. Two ways on: {key}, or invite a friend ({bonus}). "
             "Your sign-in and your devices keep working either way."
@@ -1050,6 +1171,9 @@ class Cloud:
                 "grant": self.s.uy_to_cny(a["grant_uy"]),
                 "region": region,
                 "ways": self.ways_on(caller, region),
+                # 0.21: every provider for the region with what each covers, the plans an
+                # app can sign in with (contract C11)
+                "guidance": self.guidance(region),
                 "invite_url": (self.s.invite_url + self.invite_code_for(caller)) if self.s.invite_url else "",
                 "invite_bonus_cny": self.s.invite_bonus_cny,
                 "invitee_bonus_cny": self.s.invite_bonus_cny,
@@ -1060,6 +1184,18 @@ class Cloud:
                 "openrouter_url": self.s.openrouter_url,
             },
         )
+
+    def _paused_allowance(self, caller: Caller, a: dict, region: str = "unknown") -> CloudError:
+        """0.22: the *Free allowance* switch is off. Built on `_exhausted` so the extra keys
+        (ways, guidance, invite link) are the same ones; only the words and two flags differ."""
+        err = self._exhausted(caller, a, region)
+        key = exhausted_key_line(region)
+        err.message = (
+            f"The free allowance is paused on this relay for now, so the shared models are not answering. "
+            f"To keep going: {key}. Your sign-in, your devices and anything you have left stay as they are."
+        )
+        err.extra = {**err.extra, "paused": True, "reason": "allowance_paused"}
+        return err
 
     def me(self, caller: Caller, place: Place | None = None) -> dict:
         t = now()
@@ -1074,6 +1210,9 @@ class Cloud:
             # 0.17: where the person seems to be — the apps order the "ways on" by it
             # (REGIONS: cn | intl | unknown) when the allowance runs low or out
             "region": region,
+            # 0.22: the operator's switches that are off right now, by name — an app may say
+            # so on the account page before a request is refused
+            "paused": [k for k, v in self.controls.paused().items() if v],
             "account": {
                 # an opaque id (not the identifier): what nanoMuse Web keys a person's kept
                 # Muse to, so a sign-in from another browser lands in the same one
@@ -1128,6 +1267,9 @@ class Cloud:
                 # 0.17: the ways on, in the order for this person (region above) — what the
                 # 80 % heads-up and the "used up" card list
                 "ways": self.ways_on(caller, region),
+                # 0.21: the whole own-key card — providers for the region with what each
+                # covers, the plans an app can sign in with, the ChatGPT caveat (C11)
+                "guidance": self.guidance(region),
                 # 0.4 names, one more version: apps from before 0.5 draw a "today / cap" bar;
                 # with the pool in `daily_cap` and the total in `today` that bar is the right
                 # one, and with no `resets_at` they print no midnight.
@@ -1202,6 +1344,9 @@ class Cloud:
             f"v{policy['version']}: {'on' if star['enabled'] else 'off'}, tasks {star['moments']['tasks']}, "
             f"days {star['moments']['days_used']}, cooldown {star['cooldown_days']}d, max {star['max_asks']}"
         )
+        texts = [name for name in ("text", "text_zh") if star.get(name)]
+        if texts:
+            said += ", card " + "/".join(texts)
         log.warning("nudges policy changed from the page: %s", said)
         self.db.add_event("", "nudges.changed", said[:200])
         return self.admin_nudges()
@@ -1302,11 +1447,17 @@ class Cloud:
         if self.s.daily_cap_tokens > 0 and self.db.used_since(caller.account_id, self.s.day_start(t)) >= self.s.daily_cap_tokens:
             raise CloudError(429, "daily_cap", "Today's share of the grant is used up; it resets at midnight")
         if self.limited(caller):
+            a = self.allowance(caller)
+            if not self.controls.on("free_allowance"):
+                # 0.22: the operator paused the free allowance. The same shape as "used up"
+                # (code `allowance_exhausted`, the ways on, the invite link) so every app of
+                # today shows its usual screen; `paused: true` and `reason` tell a newer one
+                # the difference, and the message says it in words.
+                raise self._paused_allowance(caller, a, self.region(caller, place))
             # the one pool: what the ledger has, plus what the requests under way and the
             # clips still being made are expected to cost. A chat (priced after the fact)
             # starts while anything is left beyond that; a picture or a clip only when its
             # known price fits on top of it.
-            a = self.allowance(caller)
             spent, grant = a["spent_uy"], a["grant_uy"]
             held = self.in_flight.reserved(caller.account_id) + self.db.pending_video_cost(caller.account_id)
             if spent + held >= grant or (cost_uy > 0 and spent + held + cost_uy > grant):
@@ -1316,15 +1467,45 @@ class Cloud:
         """What a chat on `model` is held at while it runs."""
         return model.chat_cost_uy(CHAT_RESERVE_PROMPT_TOKENS, CHAT_RESERVE_COMPLETION_TOKENS)
 
-    def charge_chat(self, caller: Caller, model: ModelSpec, prompt_tokens: int, completion_tokens: int, request_id: str) -> int:
+    def charge_chat(
+        self,
+        caller: Caller,
+        model: ModelSpec,
+        prompt_tokens: int,
+        completion_tokens: int,
+        request_id: str,
+        cached_tokens: int = 0,
+        at: int | None = None,
+    ) -> int:
+        """One chat turn in the ledger: the tokens as the provider counted them, the money at
+        the model's price in force when the reply came in (`at`, now by default) — the
+        cached part of the prompt at its cached rate, the idle hours at the idle price. The
+        ledger line's `extra` says when either applied, so a statement can be checked."""
+        at = self.clock() if at is None else at
         charged = math.ceil(prompt_tokens * model.in_mult + completion_tokens * model.out_mult)
-        cost = model.chat_cost_uy(prompt_tokens, completion_tokens)
-        self.db.charge(caller.account_id, "chat", model.id, prompt_tokens, completion_tokens, charged, request_id, cost_uy=cost)
+        cost = model.chat_cost_uy(prompt_tokens, completion_tokens, cached_tokens, at)
+        detail: dict[str, Any] = {}
+        if cached_tokens > 0:
+            detail["cached_tokens"] = min(max(0, cached_tokens), max(0, prompt_tokens))
+        if model.idle_at(at):
+            detail["idle"] = True
+        self.db.charge(
+            caller.account_id,
+            "chat",
+            model.id,
+            prompt_tokens,
+            completion_tokens,
+            charged,
+            request_id,
+            cost_uy=cost,
+            extra=json.dumps(detail) if detail else "",
+        )
         return charged
 
-    def charge_image(self, caller: Caller, model: ModelSpec, n: int, request_id: str, size: str | None = None) -> int:
+    def charge_image(self, caller: Caller, model: ModelSpec, n: int, request_id: str, size: str | None = None, inputs: int = 0) -> int:
+        """`n` pictures out at the tier `size` falls in; `inputs` pictures sent in (an edit)."""
         charged = model.per_image * max(1, n)
-        cost = model.image_cost_uy(size) * max(1, n)
+        cost = model.image_cost_uy(size, inputs) * max(1, n)
         self.db.charge(caller.account_id, "image", model.id, 0, 0, charged, request_id, cost_uy=cost)
         return charged
 
@@ -1647,8 +1828,9 @@ class Cloud:
         for r in self.db.samples_meta(since):
             name = _platform_of(_load_meta(r["meta"]).get("ua", ""))
             platforms[name] = platforms.get(name, 0) + int(r["n"])
-        hints = {r["id"]: r["hint"] for r in self.db.list_accounts(limit=5000)}
-        recent = [{**smp, "hint": hints.get(smp["account_id"], "?")} for smp in self.admin_samples(None, 0, 30)]
+        samples = self.admin_samples(None, 0, 30)
+        hints, _ = self._labels([smp["account_id"] for smp in samples], decrypt=False)
+        recent = [{**smp, "hint": hints.get(smp["account_id"], "?")} for smp in samples]
         # every account with turns kept, as the way in to each one's data (the drawer pages
         # through all of them)
         by_account = [
@@ -1734,9 +1916,11 @@ class Cloud:
             json.dumps(meta, ensure_ascii=False),
         )
 
-    def admin_samples(self, account_id: str | None = None, since: int = 0, limit: int = 100, before: int = 0) -> list[dict]:
+    def admin_samples(
+        self, account_id: str | None = None, since: int = 0, limit: int = 100, before: int = 0, before_id: str = ""
+    ) -> list[dict]:
         out = []
-        for r in self.db.samples(account_id, since, limit, before):
+        for r in self.db.samples(account_id, since, limit, before, before_id):
             d = dict(r)
             d["request"], cut = _load_messages(d["request"])
             d["meta"] = _load_meta(d["meta"])
@@ -1750,9 +1934,10 @@ class Cloud:
         """Every contributed conversation as JSON lines, without the account id: the
         training set is about what was said, not who said it. With ``account_id``, one
         account's turns only (the operator reading one person's data in full)."""
-        before = 0
+        before, before_id = 0, ""
         while True:
-            rows = self.db.samples(account_id, since, 1000, before)
+            # keyset paging on (ts, id): a page ending inside a busy second continues there
+            rows = self.db.samples(account_id, since, 1000, before, before_id)
             if not rows:
                 return
             for r in rows:
@@ -1772,7 +1957,7 @@ class Cloud:
                     "meta": meta,
                 }
                 yield json.dumps(d, ensure_ascii=False) + "\n"
-            before = int(rows[-1]["ts"])
+            before, before_id = int(rows[-1]["ts"]), str(rows[-1]["id"])
             if len(rows) < 1000:
                 return
 
@@ -1871,7 +2056,7 @@ class Cloud:
         whether the account escapes the daily cap, and why."""
         t = now()
         out = []
-        for r in self.db.admin_accounts(self.s.day_start(t)):
+        for r in self.db.admin_accounts(self.s.day_start(t), limit=100_000):
             d = dict(r)
             d["identifier"] = self.crypto.decrypt(d["id"], d.pop("identifier_enc", "")) or ""
             id_hash = d.pop("id_hash", None)
@@ -1883,6 +2068,7 @@ class Cloud:
             d["unlimited"] = bool(d.get("unlimited"))
             d["listed"] = id_hash in self.member_hashes
             d["member"] = d["unlimited"] or d["listed"]
+            d["review"] = id_hash in self.review_hashes
             d["spent_today_cny"] = self.s.uy_to_cny(int(d.pop("spent_today_uy", 0) or 0))
             d["spent_cny"] = self.s.uy_to_cny(int(d.pop("spent_uy", 0) or 0))
             self._pool_fields(d, spent_cny=d["spent_cny"])
@@ -1930,8 +2116,8 @@ class Cloud:
     def admin_overview(self, days: int = 30) -> dict:
         """The operator's dashboard in one call: how many people, how active,
         what it costs — today, this week, over `days` — split by kind and by
-        model, plus the last sign-ins and refusals. Identifiers appear only as
-        the masked hint; the detail endpoint decrypts one account at a time."""
+        model, plus the last sign-ins and refusals. Since 0.22 the identifier comes in
+        full beside the masked hint (the console is the operator's; logs and mail keep the hint)."""
         t = now()
         day_start = self.s.day_start(t)
         week_start = day_start - 6 * 86400
@@ -1946,27 +2132,36 @@ class Cloud:
                 "completion_tokens": int(r["completion_tokens"] or 0),
                 "cost_cny": self.s.uy_to_cny(int(r["cost_uy"] or 0)),
                 "active_accounts": self.db.active_accounts_since(s),
-                "new_accounts": self.db.accounts_created_since(s),
+                "new_accounts": self.db.accounts_created_since(s, self.review_hashes),
                 "by_kind": self._rows_cny(self.db.usage_by_kind(s)),
             }
 
         counts = self.db.event_counts(day_start)
-        hints = {r["id"]: r["hint"] for r in self.db.list_accounts(limit=5000)}
+        top_rows = self.db.top_accounts_since(since, limit=20)
+        event_rows = self.db.events_recent(60)
+        # 0.22: the console shows accounts in full (decrypted for the admin token only);
+        # the hint stays beside it for anything that leaves the console. Only the accounts
+        # on this page are read and decrypted, not every account the relay has.
+        hints, idents = self._labels(
+            [r["account_id"] for r in top_rows] + [r["account_id"] for r in event_rows if r["account_id"]]
+        )
         top = []
-        for r in self.db.top_accounts_since(since):
+        for r in top_rows:
             top.append(
                 {
                     "account_id": r["account_id"],
                     "hint": hints.get(r["account_id"], "?"),
+                    "identifier": idents.get(r["account_id"], ""),
                     "requests": int(r["requests"] or 0),
                     "charged": int(r["charged"] or 0),
                     "cost_cny": self.s.uy_to_cny(int(r["cost_uy"] or 0)),
                 }
             )
         events = []
-        for r in self.db.events_recent(60):
+        for r in event_rows:
             d = dict(r)
             d["hint"] = hints.get(d["account_id"], "") if d["account_id"] else ""
+            d["identifier"] = idents.get(d["account_id"], "") if d["account_id"] else ""
             events.append(d)
         return {
             "generated_at": t,
@@ -2000,7 +2195,7 @@ class Cloud:
         by_day: dict[int, dict[str, int]] = {}
         for r in self.db.events_by_day(since, off):
             by_day.setdefault(int(r["day"]), {})[str(r["kind"])] = int(r["n"])
-        new = {int(r["day"]): int(r["n"]) for r in self.db.accounts_by_day(since, off)}
+        new = {int(r["day"]): int(r["n"]) for r in self.db.accounts_by_day(since, off, self.review_hashes)}
         active = {int(r["day"]): int(r["n"]) for r in self.db.active_by_day(since, off)}
         rows = []
         for i in range(days):
@@ -2127,6 +2322,7 @@ class Cloud:
         a["unlimited"] = bool(a.get("unlimited"))
         a["listed"] = id_hash in self.member_hashes
         a["member"] = a["unlimited"] or a["listed"]
+        a["review"] = id_hash in self.review_hashes
         a["locked"] = bool(row["locked_until"] and int(row["locked_until"]) > t)
         spent_total = self.db.spent_since(account_id, 0)
         self._pool_fields(a, spent_cny=self.s.uy_to_cny(spent_total))
@@ -2226,18 +2422,34 @@ class Cloud:
         return {"ip": ip, "accounts": rows}
 
     def admin_events(self, limit: int = 200, kinds: tuple[str, ...] | None = None) -> list[dict]:
-        hints = {r["id"]: r["hint"] for r in self.db.list_accounts(limit=5000)}
+        rows = self.db.events_recent(max(1, min(limit, 1000)), kinds)
+        hints, _ = self._labels([r["account_id"] for r in rows if r["account_id"]], decrypt=False)
         out = []
-        for r in self.db.events_recent(max(1, min(limit, 1000)), kinds):
+        for r in rows:
             d = dict(r)
             d["hint"] = hints.get(d["account_id"], "") if d["account_id"] else ""
             out.append(d)
         return out
 
+    def _labels(self, ids: list[str], decrypt: bool = True) -> tuple[dict[str, str], dict[str, str]]:
+        """`{id: hint}` and `{id: identifier}` for these accounts only (the identifier
+        decrypted for the admin token; empty dict when `decrypt` is False). Reading the
+        newest N accounts for this used to leave an older account's rows labelled `?`."""
+        hints: dict[str, str] = {}
+        idents: dict[str, str] = {}
+        for r in self.db.accounts_brief(ids):
+            hints[r["id"]] = r["hint"]
+            if decrypt:
+                idents[r["id"]] = self.crypto.decrypt(r["id"], r["identifier_enc"] or "") or ""
+        return hints, idents
+
     def admin_settings(self) -> dict:
         return {
             # 0.15: what the page may change, with the environment's figure beside each
             "runtime": self.runtime_settings(),
+            # 0.22: the switches (the Controls page has the rules and the audit log)
+            "controls": self.controls.state(),
+            "paused": [k for k, v in self.controls.paused().items() if v],
             "repo_url": self.s.repo_url,
             "unlimited": self.s.unlimited,
             "signup_tokens": self.s.signup_tokens,
@@ -2311,28 +2523,54 @@ def prompt_chars(messages: list) -> int:
     return total
 
 
-def usage_from_json(obj: dict) -> tuple[int, int] | None:
-    """The prompt and completion tokens a reply says it used — reasoning counted as
-    completion. OpenAI's shape has the reasoning inside `completion_tokens` with the
-    breakdown under `completion_tokens_details.reasoning_tokens` (DashScope's native name is
+@dataclass(frozen=True)
+class Usage:
+    """What a reply says it used: prompt and completion tokens (the reasoning counted as
+    completion) and how many of the prompt tokens the provider served from its cache."""
+
+    prompt: int
+    completion: int
+    cached: int = 0
+
+
+def usage_from_json(obj: dict) -> Usage | None:
+    """The tokens a reply says it used, or None when it says nothing usable (no `usage`, an
+    empty one, a count that is not a number) — the caller then estimates. OpenAI's shape has
+    the reasoning inside `completion_tokens` with the breakdown under
+    `completion_tokens_details.reasoning_tokens` (DashScope's native name is
     `output_tokens_details`); a provider that counts the reasoning *apart* reports more
     reasoning than completion, and then the two are added, so a thinking model's turn is
-    never billed for its answer alone."""
+    never billed for its answer alone. The cached part of the prompt is
+    `prompt_tokens_details.cached_tokens` (a part of `prompt_tokens`, as the provider
+    reports it); the Anthropic-shaped `cache_read_input_tokens` is counted *beside*
+    `input_tokens` and is added to the prompt here."""
     u = obj.get("usage") if isinstance(obj, dict) else None
     if not isinstance(u, dict):
         return None
     try:
-        prompt, completion = int(u.get("prompt_tokens") or 0), int(u.get("completion_tokens") or 0)
+        prompt = int(u.get("prompt_tokens") or u.get("input_tokens") or 0)
+        completion = int(u.get("completion_tokens") or u.get("output_tokens") or 0)
         reasoning = 0
         for key in ("completion_tokens_details", "output_tokens_details"):
             details = u.get(key)
             if isinstance(details, dict) and details.get("reasoning_tokens") is not None:
                 reasoning = max(reasoning, int(details.get("reasoning_tokens") or 0))
+        cached = 0
+        for key in ("prompt_tokens_details", "input_tokens_details"):
+            details = u.get(key)
+            if isinstance(details, dict) and details.get("cached_tokens") is not None:
+                cached = max(cached, int(details.get("cached_tokens") or 0))
+        if u.get("cache_read_input_tokens") is not None:
+            read = int(u.get("cache_read_input_tokens") or 0)
+            prompt += read
+            cached = max(cached, read)
     except (TypeError, ValueError):
+        return None
+    if prompt <= 0 and completion <= 0:
         return None
     if reasoning > completion:
         completion += reasoning
-    return prompt, completion
+    return Usage(max(0, prompt), max(0, completion), min(max(0, cached), max(0, prompt)))
 
 
 def dumps(obj) -> str:

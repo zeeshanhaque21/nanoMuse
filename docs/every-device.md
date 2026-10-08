@@ -10,7 +10,7 @@ this page is about the product shape and the code around it.
 ## One Muse per device, one shape
 
 Every device runs its own Muse — the phone its OpenMinis-based agent, the
-computer the Python runtime — and every one of them shows the same app. The
+computer nanoMuse Desktop with the Python runtime for the hands — and every one of them shows the same app. The
 Android app is the reference; the others follow its shape, not its pixels:
 
 | On every device | Android today | Computer (this stage) |
@@ -116,6 +116,21 @@ soon as it is sent, the reply when the turn ends; signing in sends the device's
 whole history, oldest first. Rename the muse anywhere — the first
 conversation's naming included — and the name follows on the next pull.
 
+Since 0.1.38 it is **main first**. Only the main conversation travels unless a
+device asks for more: side chats stay on the device that made them, and no other
+device's side chats arrive. *Also sync side chats* (同时同步旁聊), under the sync
+switch in *Data controls*, is per device and off by default — *Off: side chats
+stay on this device. On: this device's side chats go to the account and the
+other devices' side chats come here.* Turning it on sends this device's side
+chats up and pulls the others' down once from the start. A fresh sign-in pulls
+the newest 300 messages first so a long history is readable at once instead of
+arriving oldest-first. While another device is answering, the chat shows *kwai
+is working…* (kwai 正在处理…) under the last message — a presence note the relay
+passes on and never stores; it goes when the reply lands, when the device says
+it is done, or after ten minutes. A message that arrived from another device is
+never shown as interrupted and never offers *Continue* — only the device that
+ran the turn knows how it ended.
+
 The switch is *Settings → Data controls → Sync conversations between my
 devices*, on by default; off tells the relay to delete the account's store, and
 every other device's switch follows. *Delete synced conversations* empties the
@@ -133,7 +148,18 @@ conversation pulled from the relay gets its dsh session at once (listed in
 account's main conversation lives in, and the first conversation starts in it
 when the account already has one. The harness has no delete and a log forgets
 nothing: a message deleted elsewhere is hidden here, a chat deleted elsewhere
-is archived here. Code: the runtime's [`nanomuse/sync/`](../nanomuse/sync/)
+is archived here. Since 0.1.38 the plugin keeps *Also sync side chats* with its
+own state (off by default; off, a side chat here is neither listed nor read for
+the push, and a side row that still arrives makes no session), asks the relay
+for `scope=main` and, on the first pull and when the side switch goes on, for
+the tail; the other device's *kwai is working…* line is drawn under its last
+bubble from the hub's `working` frame and cleared by its reply, by
+`working: false` or after ten minutes — the remote rows are never in the
+session log, so the harness cannot take one for an unfinished turn. The host
+reads a session's log once per change (title, lines and prompt positions are
+kept until the session's next event) and turns a burst of `sync` frames into
+one pull a second, so a big account costs the chat nothing while idle.
+Code: the runtime's [`nanomuse/sync/`](../nanomuse/sync/)
 (`ConversationSync`, `/api/sync/*` in [app.md](app.md#api)), the web app's
 `SyncControls` and the message captions in `web/src/`, the plugin's
 `src/sync.ts`, `client/RemoteBubbles.ts` and `tests/sync.test.mjs`, the relay's
@@ -156,6 +182,45 @@ in the app and neither keeps it in the background. A device that is not online
 is offered as a target all the same on the web and the desktop and answers
 `device_offline`; the web console is never one. The session a device runs for
 another is kept on that device and is not synced.
+
+## Whose conversations a device shows
+
+A device can be signed in as one account today and another tomorrow — a
+family's tablet, a work laptop with a personal account on it, a phone handed
+on. Since 0.1.39 every conversation on a device remembers **whose** it is: the
+account that was signed in when it first went up to the relay or first arrived
+from it. The rule is then the same on the phone, the computer, the desktop app
+and the web console:
+
+- **Signed in as B, you see B's conversations** — and the ones that belong to
+  nobody: chats made while signed out, before anyone had signed in on this
+  device. A's chats are not in the list.
+- **A's chats are hidden, not deleted.** They stay on the device, with their
+  files and images, and are back the moment A signs in again. Signing out on
+  its own hides nothing; deleting a chat still deletes it.
+- **Nothing crosses accounts.** A conversation of A's is never sent up to B's
+  account, and B's conversations never land in A's — not by sync, not by a
+  turn run on this device for another device of the account.
+- **A different account starts fresh.** When the signed-in account changes, the
+  device forgets where it was in the other account's sync (the next pull is
+  the newest 300 lines, as on a first sign-in), clears what it kept of the
+  other devices' bubbles and presence, and reads the new account's device
+  list anew. Switching back to A picks up A's chats and A's place in the sync.
+- **The relay is not involved.** It keeps each account's store apart as it
+  always did; the sorting is done on the device, so an older relay behaves the
+  same.
+
+The muse's name and look follow the account as before. Since 0.1.40 the phones
+go further (contract C12): every chat has an owner — a chat that was never
+synced included — and a sign-out takes the account's chats, memory, feed, goals,
+routines and face off the phone unless *Keep this account's chats on this
+device* is turned on; deleting the account removes all of it; a key the relay
+refuses keeps it aside for the account's return. The table of every piece of
+state is [sync.md](sync.md). On the desktop and the web console
+the 0.1.39 rule above still holds, and the memory files are per device.
+Code: the runtime's `nanomuse/sync/engine.py` and the session list in
+`nanomuse/server/api.py`, the desktop's `harness/dsh-nanomuse/src/{sync,cloud}.ts`,
+Android's `io.github.nanomuse.sync.*`, the iPhone's `NanoMuse/NanoMuseSync.swift`.
 
 ## The computer: nanoMuse Desktop
 
@@ -197,10 +262,9 @@ adds the hub, the Cloud account and the hands to it.
   computer* — is retired; those come back on the harness's seams
   ([harness.md](harness.md), phase 7). The web app still lays itself out the
   Muse way on a wide window for anyone who opens `nanomuse serve` in a browser.
-- **The standard-library binary** (`desktop/nanomuse_desktop`) stays as the
-  zero-install fallback for a machine without Python; its hub code is the
-  origin of `nanomuse/hub`. In time its terminal becomes a client of the
-  service like the other two doors.
+- **The standard-library binary** (`desktop/nanomuse_desktop`) was the
+  zero-install fallback for a machine without Python and the origin of
+  `nanomuse/hub`; dropped in 0.1.39, since nanoMuse Desktop carries the runtime.
 
 ### Hands on this computer
 
@@ -221,8 +285,10 @@ report, the same Stop. What differs is the dialect and the device:
   `GetForegroundWindow`) so the card and the log say *in Firefox*, not *on the
   screen*.
 - **Permissions.** macOS asks for Screen Recording and Accessibility once;
-  Settings → Hands says so and opens the panes. They are granted to the
-  runtime binary the desktop app bundles, so a reinstall may ask again. Linux
+  Settings → Hands says so and opens the panes. Under the desktop app both
+  belong to its helper *nanoMuse Computer Use*
+  ([desktop.md](desktop.md#macos-permissions)); a runtime run on its own is
+  attributed to whatever started it (the terminal, say). Linux
   needs X11 (Wayland has no portable way to move the pointer yet; the page
   says so). Windows needs nothing.
 - **Per app.** The first action in an application in a conversation asks:
@@ -240,9 +306,12 @@ On a Mac the hands can work in **one application's window** instead of the
 whole screen (`[hands] mode`, and *Where* on the Hands card: *Auto* / *One
 window* / *Whole screen*; `nanomuse/computer/mac_window.py`):
 
-- the picture the model sees is that window only (`CGWindowListCreateImage`
-  by window id), scaled for the model; coordinates are pixels of that picture
-  and are mapped back to the window's place on the screen;
+- the picture the model sees is that window only — taken by the desktop app's
+  helper *nanoMuse Computer Use* with ScreenCaptureKit on macOS 14 and later
+  (`POST /window` of the operator, [gui.md](gui.md#hands-on-the-computer-the-picture-is-the-unit));
+  by the runtime's own `CGWindowListCreateImage` when there is no helper —
+  scaled for the model; coordinates are pixels of that picture and are mapped
+  back to the window's place on the screen;
 - clicks, drags, scrolls and keys are delivered to the application's process
   (`CGEventPostToPid`), not to the system cursor — the person keeps the mouse
   and can work in another window meanwhile; text goes in as unicode keyboard
@@ -257,10 +326,10 @@ window* / *Whole screen*; `nanomuse/computer/mac_window.py`):
 What the person sees: the Hands card says *Working in Safari's window; the
 mouse stays yours*, the desktop stage draws the cursor where the click lands
 (the hands' events carry `x`/`y` in screen pixels), and the approval cards
-name the application. A window that cannot be found, captured (no Screen
-Recording — the capture comes back empty) or driven drops back to the whole
-screen with a note in the observation; nothing stops. When the Quartz layer
-itself fails (pyobjc, the window server) *Auto* parks the hands on the whole
+name the application. A window that cannot be found, captured (the helper's
+Screen Recording row off — the operator's `403`, in its words) or driven drops
+back to the whole screen with a note in the observation; nothing stops. When
+the layer itself fails (the helper not there, pyobjc, the window server) *Auto* parks the hands on the whole
 screen for the rest of that target, says so once, and tries the window again
 when the next application is named; *One window* keeps trying, as asked —
 the Hands card's *Where* line shows the reason either way. Linux and Windows stay
@@ -271,10 +340,10 @@ frameworks on macOS only.
 
 Already both roles since 0.1.12/0.1.13/0.1.17: the sandbox shell and Hands
 locally, `nanomuse-pc` and the hub outward, `task` inward through the headless
-chat runner. Left for this stage's Android pass, in order: the hub `approve`
-reaching the RiskGate card (today a task the desk delegates is approved on the
-phone's screen only), the desk's Hands events shown while it works, a
-*Devices* entry in the drawer. None of it blocks the desktop work.
+chat runner. This stage's Android pass, in order: the hub `approve`
+reaching the RiskGate card, a *Devices* entry in the drawer (both done in
+0.1.19, see [The phone, in 0.1.19](#the-phone-in-0-1-19)), and the desk's
+Hands events shown while it works. None of it blocks the desktop work.
 
 ## The browser: a demo on a simulated phone
 
@@ -288,7 +357,12 @@ signs in to nanoMuse Cloud first (a code to a phone or an inbox, or the
 account's password; `demo/showcase/gateway/showcase_gateway/visitors.py`), so
 the project knows who is trying it and the same account is there on the day
 the app is installed. The page says so plainly: this is a demo, a long way from
-the Android app, and where the apps are.
+the Android app, and where the apps are. The homepage at
+Upstream's own site (not hosted by this fork) shows the same page in a frame (`?embed=1`,
+no header of its own). The phone turns itself on; the Muse behind it is started
+once the page has reason to think a person is looking (a few seconds in view,
+or a pointer, key or wheel), never for a scripted browser, and never before the
+sign-in the showcase asks for.
 
 The earlier shape of the web — a kept Muse per Cloud account, with named
 volumes and a seat on the hub like any other device (`accounts.py`,
@@ -298,8 +372,8 @@ the project's server since 0.1.26. Details and the settings in
 
 ## iOS, the web console, glasses
 
-iOS speaks the hub (`info`, `open`, `notify`) and gets the shape later
-([ios.md](ios.md)). The cloud console (`/app/`) is a front door with no hands
+iOS speaks the hub (`info`, `open`, `notify`, `task`) and has had the shape
+since 0.1.34 ([ios.md](ios.md)). The cloud console (`/app/`) is a front door with no hands
 of its own and stays that way. Glasses are a sentence in and a sentence back,
 the hands elsewhere — the hub is already enough for them.
 
@@ -328,8 +402,8 @@ the hands elsewhere — the hub is already enough for them.
 | Local shell / files / browser | yes | yes (runtime) | yes, inside its container | no hands | no |
 | Screen as a hand | Hands (0.1.12) | `computer_*` (0.1.19) | — | — | — |
 | Drives other devices | `nanomuse-pc`, hub | `device_*`, `delegate` (0.1.19) | the same runtime | picks a device, sends a task | — |
-| Answers other devices | yes | in a visible side chat (0.1.19) | yes | — | info / open / notify |
-| GUI in the Android shape | reference | web app (sidebar on wide screens) + window (0.1.19) | the web app | console | later |
+| Answers other devices | yes | in a visible side chat (0.1.19) | yes | — | info / open / notify / task |
+| GUI in the Android shape | reference | web app (sidebar on wide screens) + window (0.1.19) | the web app | console | since 0.1.34 |
 | Stage while the hands work | `HandsStage` | Hands card; the stage overlay in the window | — | — | — |
 
 Released with 0.1.19: the APK, the desktop installers (`nanoMuse-Desktop-…`,

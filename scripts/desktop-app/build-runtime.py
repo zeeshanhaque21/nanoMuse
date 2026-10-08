@@ -57,7 +57,7 @@ def build(target: Path) -> Path:
     if not exe.exists():
         raise SystemExit(f"PyInstaller produced nothing at {exe}")
     shutil.rmtree(target, ignore_errors=True)
-    shutil.copytree(built, target)
+    shutil.copytree(built, target, symlinks=True)
     playwright = importlib.util.find_spec("playwright")
     if playwright is not None and playwright.origin:
         browsers = Path(playwright.origin).parent / "driver" / "package" / ".local-browsers"

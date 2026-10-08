@@ -15,7 +15,7 @@ from typing import Any
 
 from nanomuse.calendar import CalendarFeeds, GoogleError, make_ics
 from nanomuse.schema import RiskLevel, ToolResult
-from nanomuse.tools.base import BaseTool, CallAssessment
+from nanomuse.tools.base import BaseTool, CallAssessment, int_arg
 
 
 def _parse_day(value: str | None, today: date) -> date:
@@ -46,17 +46,17 @@ def _slug(text: str) -> str:
 class Calendar(BaseTool):
     name: str = "calendar"
     description: str = (
-        "The user's calendar. Actions: `agenda` — the events on a `day` ('today', "
-        "'tomorrow' or 'YYYY-MM-DD') and the `days` after it (default 1, max 31); `search` — "
+        "The user's calendar. Actions: `agenda` , the events on a `day` ('today', "
+        "'tomorrow' or 'YYYY-MM-DD') and the `days` after it (default 1, max 31); `search` , "
         "events whose title, place or notes contain `query` (past 90 and next 180 days); "
-        "`free` — gaps of at least `minutes` in the working hours of `day`; `draft` — write an "
+        "`free` , gaps of at least `minutes` in the working hours of `day`; `draft` , write an "
         "event as an .ics file the user can add with a tap (`title`, `start` 'YYYY-MM-DD HH:MM' "
         "or 'YYYY-MM-DD' for all-day, `end` likewise or `duration_minutes`, optional "
         "`location`, `notes`). When Google Calendar is connected the tool also writes directly: "
-        "`create` — add an event (`title`, `start`, `end`/`duration_minutes`, optional "
-        "`location`, `notes`, `calendar`); `update` — change an event by `event_id` (needs "
-        "`calendar`); `delete` — remove an event by `event_id` (needs `calendar`); `calendars` "
-        "— list the Google calendars the account can write to. An agenda or search entry for a "
+        "`create` , add an event (`title`, `start`, `end`/`duration_minutes`, optional "
+        "`location`, `notes`, `calendar`); `update` , change an event by `event_id` (needs "
+        "`calendar`); `delete` , remove an event by `event_id` (needs `calendar`); `calendars` "
+        ", list the Google calendars the account can write to. An agenda or search entry for a "
         "Google event shows its `event_id` in parentheses. Times are the user's local time."
     )
     parameters: dict[str, Any] = {
@@ -143,8 +143,7 @@ class Calendar(BaseTool):
             if action == "refresh":
                 status = await feeds.refresh(force=True)
                 lines = [
-                    f"{f['name']}: {f['events']} events"
-                    + (f" — {f['error']}" if f["error"] else "")
+                    f"{f['name']}: {f['events']} events" + (f": {f['error']}" if f["error"] else "")
                     for f in status["feeds"]
                 ]
                 return ToolResult(output="Refreshed.\n" + "\n".join(lines))
@@ -164,13 +163,13 @@ class Calendar(BaseTool):
                 return ToolResult(output=head + ("\n" + feeds.render(hits, today) if hits else ""))
             day = _parse_day(args.get("day"), today)
             if action == "free":
-                minutes = int(args.get("minutes") or 30)
+                minutes = int_arg(args.get("minutes"), 30, 1, 24 * 60)
                 s = feeds.settings
                 slots = feeds.free_slots(day, minutes, s.day_start, s.day_end)
                 # All-day events do not block hours, but the user may well be away: say so.
                 all_day = [o.summary for o in feeds.agenda(day) if o.all_day]
                 note = (
-                    f"\nAll-day that day: {', '.join(all_day)} — the gaps assume it leaves the hours free; check with the user."
+                    f"\nAll-day that day: {', '.join(all_day)}; the gaps assume it leaves the hours free; check with the user."
                     if all_day
                     else ""
                 )
@@ -185,7 +184,7 @@ class Calendar(BaseTool):
                     + "\n".join(lines)
                     + note
                 )
-            days = max(1, min(31, int(args.get("days") or 1)))
+            days = int_arg(args.get("days"), 1, 1, 31)
             items = feeds.agenda(day, days)
             note = self._errors_note()
             return ToolResult(output=feeds.render(items, today) + note)
@@ -323,7 +322,9 @@ class Calendar(BaseTool):
         elif all_day:
             end = start + timedelta(days=1)
         else:
-            end = start + timedelta(minutes=int(args.get("duration_minutes") or 60))
+            end = start + timedelta(
+                minutes=int_arg(args.get("duration_minutes"), 60, 1, 14 * 24 * 60)
+            )
         if end <= start:
             return ToolResult.fail("the end must be after the start")
         ics = make_ics(

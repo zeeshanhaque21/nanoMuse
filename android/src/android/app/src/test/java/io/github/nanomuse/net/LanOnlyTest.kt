@@ -26,6 +26,16 @@ class LanOnlyTest {
         assertEquals(true, LanOnly.problem("http://api.example.com")!!.contains("https://"))
     }
 
+    @Test fun `the refused host is handed to the screens for the localized footer`() {
+        assertEquals("api.example.com", LanOnly.refusedHost("http://API.example.com/v1"))
+        assertEquals("8.8.8.8", LanOnly.refusedHost("http://8.8.8.8:80"))
+        assertEquals("2001:db8::1", LanOnly.refusedHost("http://[2001:db8::1]"))
+        assertEquals("", LanOnly.refusedHost("http:/v1"))
+        assertNull(LanOnly.refusedHost("http://192.168.1.20:1234/v1"))
+        assertNull(LanOnly.refusedHost("https://api.example.com/v1"))
+        assertNull(LanOnly.refusedHost("   "))
+    }
+
     @Test fun `the host test on its own`() {
         assertTrue(LanOnly.isLocal("192.168.0.1"))
         assertTrue(LanOnly.isLocal("printer"))
@@ -33,5 +43,12 @@ class LanOnlyTest {
         assertFalse(LanOnly.isLocal("example.com"))
         assertFalse(LanOnly.isLocal("192.168.0.300"))
         assertFalse(LanOnly.isLocal("1.1.1.1"))
+        // a public name that starts like a private address is a name, not an address
+        assertFalse(LanOnly.isLocal("10.foo.example.com"))
+        assertFalse(LanOnly.isLocal("127.example.org"))
+        // Tailscale's MagicDNS names, as the sign-in screen already allowed them
+        assertTrue(LanOnly.isLocal("box.tail1234.ts.net"))
+        assertFalse(LanOnly.isLocal("ts.net.example.org"))
+        assertNull(LanOnly.problem("http://box.tail1234.ts.net:11434/v1"))
     }
 }

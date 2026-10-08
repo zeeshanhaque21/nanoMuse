@@ -28,7 +28,7 @@ Everything else is the same web app, served by your `nanomuse serve`.
 
 ## Install
 
-Download [`nanomuse.apk`](https://github.com/nano-muse/nanoMuse/releases/latest/download/nanomuse.apk) (always the current release; the same file is also there as `nanomuse-<version>.apk`; the connect-only build is [`nanomuse-connect.apk`](https://github.com/nano-muse/nanoMuse/releases/latest/download/nanomuse-connect.apk)) and open it on the phone. Android asks once to allow installs from your browser or file manager. Android 8.0 (API 26) or newer. Every release is signed with the same key, so a newer APK installs over the old one and keeps its connection and data.
+Download [`nanomuse.apk`](https://github.com/zeeshanhaque21/nanoMuse/releases/latest/download/nanomuse.apk) (always the current release; the same file is also there as `nanomuse-<version>.apk`; the connect-only build is [`nanomuse-connect.apk`](https://github.com/zeeshanhaque21/nanoMuse/releases/latest/download/nanomuse-connect.apk)) and open it on the phone. Android asks once to allow installs from your browser or file manager. Android 8.0 (API 26) or newer. Every release is signed with the same key, so a newer APK installs over the old one and keeps its connection and data.
 
 **Run on this phone**: tap it, wait for the unpack (about a minute; ~330 MB of storage), and the app opens on the onboarding: give the agent a name, paste a model API key. That is all; there is no computer involved. The runtime shows a quiet *Running on this phone* notification while it is up, comes back after a reboot, and can be stopped from that notification.
 
@@ -75,7 +75,7 @@ cd android
 ./gradlew assembleConnectRelease  # app/build/outputs/apk/connect/release/app-connect-release.apk
 ```
 
-The `local` flavour also needs the root file system and PRoot in place first — `scripts/rootfs/build.sh` (Docker + QEMU) and `android/native/build-proot.sh` (the NDK) put them under `android/app/src/local/`; see [local-runtime.md](../local-runtime.md#building-the-pieces). Then `./gradlew assembleLocalDebug`.
+The `local` flavour also needs the root file system and PRoot in place first — `scripts/rootfs/build.sh` (Docker + QEMU) and `android/native/build-proot.sh` (the NDK), both in the history at the tag `pre-openminis`, put them under `android/app/src/local/`; see [local-runtime.md](../local-runtime.md#building-the-pieces). Then `./gradlew assembleLocalDebug`.
 
 Without a signing key the release build is signed with the debug key, which installs fine but cannot update a build signed with a different key. To sign properly, create a key once and keep it outside the repository:
 

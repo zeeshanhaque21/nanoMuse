@@ -18,6 +18,9 @@ logs/
 __pycache__/
 *.py[cod]
 *.egg-info/
+
+# typescript incremental build state (web/, harness/)
+*.tsbuildinfo
 .eggs/
 build/
 dist/
@@ -39,6 +42,8 @@ npm-debug.log*
 
 # website: generated from web/ and docs/ by `npm run site:mascot` (see site/README.md)
 site/assets/
+# the docs site, built by pages.yml from website/ into site/docs/
+site/docs/
 
 # nanoMuse on DeepSeek Harness (harness/README.md): built by `pnpm build`, not committed
 harness/dsh-nanomuse/node_modules/
@@ -51,10 +56,6 @@ android/app/build/
 android/local.properties
 android/keystore.properties
 android/.kotlin/
-# built, not committed: the root file system (scripts/rootfs/build.sh) and PRoot (android/native/build-proot.sh)
-android/app/src/local/assets/rootfs.tar.xz
-android/app/src/local/assets/rootfs.json
-android/app/src/local/jniLibs/
 android/native/build/
 *.jks
 *.keystore
@@ -75,3 +76,9 @@ cloud/data/
 
 # Release signing passwords - consolidated copy, never commit (2026-10-04)
 android/SIGNING-PASSWORDS.md
+
+# Reviewer scratch (untracked evidence, logs, snapshots): never commit
+.maintenance-review/
+
+# Operator-local iOS build configuration (the .example is tracked; the real file is not)
+android/src/ios/Configs/ProviderCustomization.xcconfig

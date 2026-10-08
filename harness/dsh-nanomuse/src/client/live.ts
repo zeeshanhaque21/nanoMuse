@@ -83,7 +83,7 @@ export interface LiveAsk {
   at: number
 }
 
-/** The last thing the hands did, for the stage's caption and cursor marker. */
+/** The last thing the hands did, for the capsule's caption, the glow's marker and the trajectory. */
 export interface LiveStageAction {
   kind: string
   label: string
@@ -91,10 +91,15 @@ export interface LiveStageAction {
   /** Pixels of the frame; -1 when the step had no point. */
   x: number
   y: number
+  /** A drag's far end (0.1.40); -1 or absent otherwise. */
+  x2?: number | undefined
+  y2?: number | undefined
+  /** A scroll's amount in pixels, negative = up (0.1.40); 0 or absent otherwise. */
+  dy?: number | undefined
   at: number
 }
 
-/** The Live stage: the latest screenshot of a screen the agent is working on. */
+/** The stage: the latest screenshot of a screen the agent is working on, and what it did on it. */
 export interface LiveStage {
   /** 0 before any frame; grows with each new one (the frame URL's cache key). */
   seq: number
@@ -135,8 +140,22 @@ export interface Live {
   blackScreenAt: number
   /** Conversation sync (C8): `rev` moves with every change; the session that is the account's main conversation. Absent on an older host. */
   sync?: { rev: number; mainSession: string } | undefined
+  /** Own keys and the ChatGPT sign-in (C11): how many rows, what everything configured can do, where the sign-in stands. Absent on an older host. */
+  ownKeys?: LiveOwnKeys | undefined
+  /** The hands' trajectory (0.1.40): `rev` moves with every step; the sessions with a run to look back at. Absent on an older host. */
+  trajectory?: { rev: number; sessions: string[] } | undefined
+  /** The 80 % heads-up (C12) while it is due: what is left of the pool, the pool, what an invitation adds (yuan). Null or absent otherwise. */
+  headsUp?: { left: number; grant: number; bonus: number } | null | undefined
   /** Whether the stream is open; false before the first snapshot and while reconnecting. */
   streaming: boolean
+}
+
+export type Capability = 'chat' | 'vision' | 'image' | 'video'
+
+export interface LiveOwnKeys {
+  count: number
+  capabilities: Capability[]
+  chatgpt: { signedIn: boolean; label: string; proxy: boolean; login: { status: 'idle' | 'waiting' | 'done' | 'error'; url: string; label: string; error: string } }
 }
 
 export type MotionMood = 'idle' | 'working' | 'waiting' | 'happy'
@@ -149,6 +168,8 @@ export interface LiveMotionProgress {
   current?: MotionMood
   stage?: { kind: 'uploading' | 'submitted' | 'running' | 'downloading'; elapsedSec?: number }
   error?: string
+  /** Where the run drew (0.1.41): `nanomuse` for the account, else an own row's id. Absent on an older host. */
+  source?: string
 }
 
 export interface LiveMotion {
@@ -210,7 +231,10 @@ function open(): void {
     // EventSource reconnects on its own; a closed one (readyState 2) is reopened.
     if (es.readyState === 2) {
       source = undefined
-      setTimeout(open, 3000)
+      // only while someone still listens: the last unsubscribe may land inside these 3 s
+      setTimeout(() => {
+        if (listeners.size > 0) open()
+      }, 3000)
     }
   }
 }

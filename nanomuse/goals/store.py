@@ -79,7 +79,7 @@ def next_check_in(spec: str, after: datetime | None = None) -> datetime | None:
         anchor = now.weekday()  # "weekly" alone: same weekday as today
     day = now.date()
     for _ in range(62):  # two months is enough to hit any monthly anchor
-        candidate = datetime(day.year, day.month, day.day, hour, minute, tzinfo=now.tzinfo)
+        candidate = datetime(day.year, day.month, day.day, hour, minute).astimezone()
         fits = (
             cadence == "daily"
             or (cadence == "weekdays" and day.weekday() < 5)
@@ -166,7 +166,7 @@ class Goal:
         if self.description:
             lines.append(f"  {self.description}")
         for s in self.steps:
-            extra = f"  — {s.note}" if s.note else ""
+            extra = f"  · {s.note}" if s.note else ""
             lines.append(f"  {icons.get(s.status, '[ ]')} {s.idx}. {s.title}{extra}")
         if self.proposal:
             lines.append(

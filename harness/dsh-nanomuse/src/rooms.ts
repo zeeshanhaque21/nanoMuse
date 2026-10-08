@@ -28,7 +28,7 @@
 import { avatarFence, avatarMemoryLine } from './avatar-flow.ts'
 import { FENCE_FEED, FENCE_GOAL, FENCE_GOAL_UPDATE, findFences, goalCategory, goalCheckPrompt, goalCreationNote, goalHomeNote, goalOpener, parseFeedDraft, parseGoalBlock, parseGoalUpdate, parseIdeas, type GoalBlock, type GoalUpdateBlock, type IdeaKind, type StaticIdea } from './fences.ts'
 import { afterTurn, boundTo, currentSuggestions, dismissChooser, FIRST_RUN_EMPTY, pickName, promptAddendum, readFirstRun, startConversation, type FirstRunState } from './firstrun.ts'
-import { DEFAULT_NUDGES, dueAsk, LEDGER_EMPTY, NUDGES_EVERY_MS, NUDGES_ORIGIN, NUDGES_TIMEOUT_MS, readLedger, readNudges, recordAsk, recordDay, recordStarred, recordTask, type Ask, type Moment, type NudgeLedger, type NudgesPolicy, type NudgesView } from './nudges.ts'
+import { DEFAULT_NUDGES, dueAsk, fetchNudgesPolicy, LEDGER_EMPTY, NUDGES_EVERY_MS, NUDGES_ORIGIN, readLedger, readNudges, recordAsk, recordDay, recordStarred, recordTask, type Ask, type Moment, type NudgeLedger, type NudgesPolicy, type NudgesView } from './nudges.ts'
 import { packageAssetsDir } from './profile.ts'
 import { randomBytes } from 'node:crypto'
 import { createReadStream, readFileSync } from 'node:fs'
@@ -64,7 +64,6 @@ const RUN_TIMEOUT_MS = 8 * 60_000
 export const ASSETS_DIR = packageAssetsDir(import.meta.url)
 /** A new feed batch is due this long after the last one. */
 const FEED_EVERY_MS = 20 * 3600_000
-/** Ideas go stale after a week. */
 /** A failed batch is not retried before this. */
 const RETRY_AFTER_MS = 2 * 3600_000
 const FEED_KEEP = 120
@@ -613,17 +612,8 @@ export default class NanomuseRooms extends Service {
     try {
       const status = await this.ctx.nanomuseCloud.status().catch(() => undefined)
       const origin = (status?.baseURL || NUDGES_ORIGIN).replace(/\/+$/, '')
-      const controller = new AbortController()
-      const timer = setTimeout(() => controller.abort(), NUDGES_TIMEOUT_MS)
-      try {
-        const res = await fetch(`${origin}/v1/nudges`, { signal: controller.signal })
-        if (res.ok) {
-          const policy = readNudges(await res.json().catch(() => null))
-          if (policy) this.nudges.policy = policy
-        }
-      } finally {
-        clearTimeout(timer)
-      }
+      const policy = readNudges(await fetchNudgesPolicy(origin))
+      if (policy) this.nudges.policy = policy
       // a miss is remembered too: one try a day, quietly
       this.nudges.fetchedAt = Date.now()
       await this.saveNudges()
@@ -2305,7 +2295,6 @@ function parseArgs(raw: string): Record<string, unknown> {
   }
 }
 
-/** The step's title as the Activity view shows it: the tool's verb and its object, from the arguments. */
 /** The model's own words for a step, where the tool takes them: dsh's bash, pwsh and run_code
  * (`description`), the runtime's tools over MCP (`step`). Empty when it gave none. */
 export function ownWords(raw: string): string {

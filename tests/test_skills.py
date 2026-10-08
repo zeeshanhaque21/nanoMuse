@@ -85,6 +85,17 @@ def test_front_matter_variants():
     assert 'version: "1"' in out and 'ok: "yes"' in out and "n: Sam" in out
 
 
+def test_skill_files_are_listed_under_a_dot_directory(tmp_path: Path):
+    """A skill kept under a dot-named folder (``~/.nanomuse``, a checkout's ``.worktree``)
+    still lists its scripts: only hidden entries inside the skill count as hidden."""
+    folder = tmp_path / ".nanomuse" / "skills" / "expense-report"
+    (folder / "scripts").mkdir(parents=True)
+    (folder / "SKILL.md").write_text(APPLE_STYLE)
+    (folder / "scripts" / "total.py").write_text("print(1)")
+    (folder / "scripts" / ".hidden").write_text("")
+    assert load_skill(folder).files == [Path("scripts/total.py")]
+
+
 def test_load_skill_checks_the_folder(tmp_path: Path):
     folder = tmp_path / "expense-report"
     folder.mkdir()
@@ -273,6 +284,8 @@ async def test_fetch_skill_text(monkeypatch: pytest.MonkeyPatch):
             return httpx.Response(200, text=APPLE_STYLE)
         if request.url.path.endswith("page/SKILL.md"):
             return httpx.Response(200, text="<html>not a skill</html>")
+        if request.url.path.endswith("huge/SKILL.md"):
+            return httpx.Response(200, content=b"---\n" + b"x" * (70 * 1024))
         return httpx.Response(404)
 
     real = httpx.AsyncClient
@@ -290,6 +303,8 @@ async def test_fetch_skill_text(monkeypatch: pytest.MonkeyPatch):
         await fetch_skill_text("https://x.example/missing/SKILL.md")
     with pytest.raises(ValueError, match="https://"):
         await fetch_skill_text("http://x.example/good/SKILL.md")
+    with pytest.raises(ValueError, match="larger than a SKILL.md"):
+        await fetch_skill_text("https://x.example/huge/SKILL.md")
 
 
 # ----------------------------------------------------------------------------- the tool

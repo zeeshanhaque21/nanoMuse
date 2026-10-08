@@ -25,13 +25,30 @@
  * reaches the sessions here), then the whole eligible history of this computer goes
  * up, oldest first, 200 messages a POST.
  *
+ * **Main first** (C9). Only the main conversation syncs unless this device's "Also sync
+ * side chats" is on (`state.sideChats`): off, side chats are neither pushed nor pulled
+ * (`scope=main`), and a side row that still arrives makes no session. The first pull of an
+ * account asks for the newest 300 messages (`tail=300`); the switch going on pulls the
+ * account's side chats the same way, once. While a turn runs here on a synced conversation
+ * the relay is told (`POST /v1/sync/working`, best-effort), and the other devices' `working`
+ * frames put a quiet "kwai is working…" line under their last prompt here (`workingOf`).
+ *
+ * **Whose conversations** (C10). Every mapping entry carries the `owner` — the `account.id` of
+ * the account the session was first pushed to or pulled from; a conversation written while
+ * signed out and never synced has none. Signed in as B, the column shows B's and the
+ * ownerless (`view().foreign` names the rest, hidden, not deleted), the push loop takes B's
+ * and the ownerless — which become B's on their first push — and never A's; a different
+ * `account.id` than the last one starts the pull over (cursor 0) and drops what was pulled
+ * for A (the relay's rows, the kept turns, presence), keeping A's mapping so switching back
+ * works. Signed out, everything local is shown and nothing moves.
+ *
  * Never a key in a log, never a file: attachments travel as names and sizes.
  */
 import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { mkdir, rename, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import { RelayError } from './relay.ts'
+import { RELAY_TIMEOUT_MS, RelayError, relayFetch, type TimedFetch } from './relay.ts'
 
 declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap {
@@ -54,7 +71,26 @@ export interface SyncRelayState {
   enabled: boolean
   cursor: number
   counts: { conversations: number; messages: number }
+  /** Devices working on a conversation right now (C9), unexpired. */
+  working: WireWorking[]
 }
+
+/** The hub's `working` frame and the rows of `/v1/sync/state`'s `working` (C9). */
+export interface WireWorking {
+  cid: string
+  from: string
+  device_name: string
+  working: boolean
+  /** Unix seconds, the relay's clock. */
+  at: number
+}
+
+/** The newest messages a first pull asks for (C9): `since=0&tail=300`. */
+export const TAIL = 300
+/** A `working` presence is over this long after its `at` (C9). */
+export const WORKING_TTL_MS = 10 * 60_000
+/** The hub's `sync` frames arriving together become one pull. */
+export const FRAME_COALESCE_MS = 1000
 
 export interface WireConversation {
   cid: string
@@ -94,12 +130,14 @@ export interface PushResult {
   rejected: Array<{ cid?: string; mid?: string; reason: string; cid_main?: string }>
 }
 
-/** `/v1/sync/*` as the engine needs them; `fetchImpl` is swapped in tests. */
+/** `/v1/sync/*` as the engine needs them; `fetchImpl` is swapped in tests. Every call has a deadline (relay.ts `withTimeout`), so a hung connection does not stall the sync for good. */
 export class SyncRelay {
   readonly origin: string
+  private readonly fetchImpl: TimedFetch
 
-  constructor(origin: string, private readonly fetchImpl: typeof fetch = fetch) {
+  constructor(origin: string, fetchImpl: typeof fetch = fetch, timeoutMs = RELAY_TIMEOUT_MS) {
     this.origin = origin.replace(/\/+$/, '')
+    this.fetchImpl = relayFetch(this.origin, fetchImpl, timeoutMs)
   }
 
   async state(apiKey: string): Promise<SyncRelayState> {
@@ -114,8 +152,13 @@ export class SyncRelay {
     return toState(await res.json())
   }
 
-  async changes(apiKey: string, since: number, limit = PAGE): Promise<SyncChanges> {
-    const res = await this.fetchImpl(`${this.origin}/v1/sync/changes?since=${since}&limit=${limit}`, { headers: this.auth(apiKey) })
+  /**
+   * The changes since a cursor (C7); `scope: 'main'` asks for the main conversation only, `tail`
+   * (with `since=0`) for the newest `tail` messages of the scope and their conversations' rows (C9).
+   */
+  async changes(apiKey: string, since: number, limit = PAGE, scope: 'all' | 'main' = 'all', tail = 0): Promise<SyncChanges> {
+    const query = `since=${since}&limit=${limit}${scope === 'main' ? '&scope=main' : ''}${tail > 0 && since === 0 ? `&tail=${tail}` : ''}`
+    const res = await this.fetchImpl(`${this.origin}/v1/sync/changes?${query}`, { headers: this.auth(apiKey) })
     if (!res.ok) await fail(res)
     const body = (await res.json()) as Record<string, unknown>
     return {
@@ -124,6 +167,16 @@ export class SyncRelay {
       conversations: Array.isArray(body.conversations) ? body.conversations.map(toConversation) : [],
       messages: Array.isArray(body.messages) ? body.messages.map(toMessage) : [],
     }
+  }
+
+  /** Presence (C9): this device started or finished a turn on a conversation. Best-effort: the caller never retries. */
+  async working(apiKey: string, device: string, cid: string, working: boolean): Promise<void> {
+    const res = await this.fetchImpl(`${this.origin}/v1/sync/working`, {
+      method: 'POST',
+      headers: { ...this.auth(apiKey), ...JSON_HEADERS },
+      body: JSON.stringify({ cid, working, device }),
+    })
+    if (!res.ok) await fail(res)
   }
 
   async push(apiKey: string, device: string, conversations: Record<string, unknown>[], messages: Record<string, unknown>[]): Promise<PushResult> {
@@ -174,7 +227,17 @@ async function fail(res: Response): Promise<never> {
 function toState(value: unknown): SyncRelayState {
   const b = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>
   const counts = (b.counts && typeof b.counts === 'object' ? b.counts : {}) as Record<string, unknown>
-  return { enabled: b.enabled !== false, cursor: Number(b.cursor ?? 0), counts: { conversations: Number(counts.conversations ?? 0), messages: Number(counts.messages ?? 0) } }
+  return {
+    enabled: b.enabled !== false,
+    cursor: Number(b.cursor ?? 0),
+    counts: { conversations: Number(counts.conversations ?? 0), messages: Number(counts.messages ?? 0) },
+    working: Array.isArray(b.working) ? b.working.map((w) => toWorking(w, true)) : [],
+  }
+}
+
+export function toWorking(value: unknown, working?: boolean): WireWorking {
+  const w = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>
+  return { cid: String(w.cid ?? ''), from: String(w.from ?? ''), device_name: String(w.device_name ?? ''), working: working ?? w.working === true, at: Number(w.at ?? 0) }
 }
 
 function toConversation(value: unknown): WireConversation {
@@ -254,6 +317,8 @@ export interface SyncSessions {
   keep(sessionId: string, line: RemoteLine): Promise<void>
   /** A kept turn deleted elsewhere. */
   forget(sessionId: string, mid: string): Promise<void>
+  /** Every kept turn dropped (C10: another account signed in). */
+  forgetAll?(): Promise<void>
   /** Model-facing context for the session's next step (`agent.inject`): what the other devices said; never shown as the person's words. */
   inject(sessionId: string, text: string): Promise<void>
 }
@@ -327,6 +392,14 @@ export class RemoteStore {
     await rename(tmp, this.path)
   }
 
+  /** Everything forgotten (C10: another account signed in; its turns are pulled afresh). */
+  clear(): void {
+    this.load()
+    if (this.lines.size === 0) return
+    this.lines.clear()
+    this.saveSoon()
+  }
+
   /** Written now (the host stopping). */
   async flush(): Promise<void> {
     if (this.timer) {
@@ -369,13 +442,18 @@ export interface KnownConversation {
 }
 
 export interface SyncState {
+  /** The last signed-in account (`/v1/me` → `account.id`, opaque); kept through a sign-out so a change is known (C10). */
   accountId: string
   cursor: number
   enabled: boolean
   /** The session that is the main chat here: the account's one main conversation. */
   mainSession: string
+  /** "Also sync side chats" (C9), per device, off by default: off → only the main conversation goes up and comes down. */
+  sideChats: boolean
   /** dsh session id → conversation id. */
   cids: Record<string, string>
+  /** dsh session id → the account it was first pushed to or pulled from (C10); absent = never synced. */
+  owners: Record<string, string>
   /** dsh message id → the mid it was pushed as. */
   mids: Record<string, string>
   /** session id → the title last pushed (or pulled: not pushed back). */
@@ -393,17 +471,19 @@ export interface SyncState {
 }
 
 export function emptyState(): SyncState {
-  return { accountId: '', cursor: 0, enabled: true, mainSession: '', cids: {}, mids: {}, titles: {}, conversations: {}, pulled: {}, hidden: [], toArchive: [] }
+  return { accountId: '', cursor: 0, enabled: true, mainSession: '', sideChats: false, cids: {}, owners: {}, mids: {}, titles: {}, conversations: {}, pulled: {}, hidden: [], toArchive: [] }
 }
 
 /**
  * A 0.1.36 state (mirrors, no `conversations`) starts the pull over from zero: what the
  * mirrors held becomes sessions and log rows on that pull; the ids of what this device
  * pushed stay, so nothing goes up twice, and our own rows coming back are known by device.
+ * A 0.1.38 state (no `owners`) gives every mapped session to the account it was synced with
+ * (C10): a mapping exists only because the session was pushed to or pulled from that account.
  */
 export function migrate(state: SyncState | undefined): SyncState {
   if (!state) return emptyState()
-  const next: SyncState = { ...emptyState(), ...state }
+  const next: SyncState = { ...emptyState(), ...state, sideChats: state.sideChats === true, owners: { ...(state.owners ?? {}) } }
   if ('mirrors' in next || !state.conversations) {
     delete next.mirrors
     next.cursor = 0
@@ -412,6 +492,22 @@ export function migrate(state: SyncState | undefined): SyncState {
     next.hidden = []
     next.toArchive = []
   }
+  if (!state.owners && state.accountId) {
+    for (const sessionId of Object.keys(next.cids)) next.owners[sessionId] = state.accountId
+  }
+  return next
+}
+
+/**
+ * The account-scoped part of a state, started over for another account (C10, rule 4): the
+ * cursor at 0 (a fresh `tail=300` pull), the relay's rows and what was pulled forgotten, the
+ * mapping — every account's — kept; a main chat that belongs to another account is no
+ * longer the main chat here.
+ */
+export function forAccount(state: SyncState, accountId: string): SyncState {
+  const next: SyncState = { ...state, accountId, cursor: 0, conversations: {}, pulled: {}, hidden: [], toArchive: [] }
+  const mainOwner = state.owners[state.mainSession]
+  if (mainOwner && mainOwner !== accountId) next.mainSession = ''
   return next
 }
 
@@ -430,11 +526,14 @@ export interface SyncEngineOptions {
   log?(level: 'info' | 'warn' | 'debug', text: string): void
   pushDelayMs?: number
   pullEveryMs?: number
+  frameCoalesceMs?: number
 }
 
 /** What the browser half reads: Data controls, the chats column and the bubbles from elsewhere. */
 export interface SyncView {
   enabled: boolean
+  /** "Also sync side chats" (C9), this device's setting. */
+  sideChats: boolean
   available: boolean
   paused: boolean
   cursor: number
@@ -445,10 +544,20 @@ export interface SyncView {
   mainSession: string
   /** Sessions that hold a synced conversation: listed in the chats column even before a turn ran here. */
   sessions: string[]
+  /** Sessions that belong to another account than the one signed in (C10): hidden by the browser half, not deleted; empty when signed out. */
+  foreign: string[]
   /** mids of rows deleted elsewhere: hidden in the transcript. */
   hidden: string[]
   /** Sessions whose conversation was deleted elsewhere: to be archived by the browser half. */
   toArchive: string[]
+}
+
+/** Another device working on a conversation that lives in a session here (C9), for the browser half's line. */
+export interface WorkingPresence {
+  from: string
+  deviceName: string
+  /** Unix epoch milliseconds. */
+  at: number
 }
 
 export class SyncEngine {
@@ -456,12 +565,20 @@ export class SyncEngine {
   private paused = false
   private pushTimer: ReturnType<typeof setTimeout> | undefined
   private pullTimer: ReturnType<typeof setInterval> | undefined
+  private frameTimer: ReturnType<typeof setTimeout> | undefined
+  private workingTimer: ReturnType<typeof setTimeout> | undefined
   private readonly dirty = new Set<string>()
+  /** Sessions whose turn started (true) or ended (false) here, told to the relay after the push (C9). */
+  private readonly presence = new Map<string, boolean>()
+  /** cid → the other device working on it (C9). */
+  private readonly working = new Map<string, WorkingPresence>()
   private pulling: Promise<number> | undefined
   private pushing: Promise<void> | undefined
   private relayState: SyncRelayState | null = null
   private lastError = ''
   private rev = 0
+  /** Signed in, as the host last said (`start` / `accountChanged` vs `signedOut`); decides whether another account's sessions are hidden (C10). */
+  private signedIn = false
 
   constructor(private readonly options: SyncEngineOptions) {
     this.state = migrate(options.load())
@@ -479,13 +596,15 @@ export class SyncEngine {
   view(): SyncView {
     return {
       enabled: this.state.enabled,
+      sideChats: this.state.sideChats,
       available: !this.paused && Boolean(this.state.accountId),
       paused: this.paused,
       cursor: this.state.cursor,
       relay: this.relayState,
       rev: this.rev,
       mainSession: this.state.mainSession,
-      sessions: Object.keys(this.state.cids),
+      sessions: Object.keys(this.state.cids).filter((sid) => this.owns(sid)),
+      foreign: this.foreign(),
       hidden: [...this.state.hidden],
       toArchive: [...this.state.toArchive],
     }
@@ -496,9 +615,31 @@ export class SyncEngine {
     return this.state.cids[sessionId]
   }
 
+  /**
+   * Whether a session is the signed-in account's or nobody's yet (C10): what is shown, pushed
+   * and dressed with the other devices' turns. Signed out, every session is.
+   */
+  owns(sessionId: string): boolean {
+    if (!this.signedIn || !this.state.accountId) return true
+    const owner = this.state.owners[sessionId]
+    return !owner || owner === this.state.accountId
+  }
+
+  /** The sessions another account owns, while signed in (C10): hidden, not deleted. */
+  private foreign(): string[] {
+    if (!this.signedIn || !this.state.accountId) return []
+    return Object.entries(this.state.owners).filter(([, owner]) => owner !== this.state.accountId).map(([sid]) => sid)
+  }
+
+  /** The session joins the signed-in account (C10): on its first push, or when a pull gives it a conversation. */
+  private adopt(sessionId: string): void {
+    if (this.state.accountId && !this.state.owners[sessionId]) this.state.owners[sessionId] = this.state.accountId
+  }
+
   // ---- lifecycle ----------------------------------------------------------------------------
 
   start(): void {
+    this.signedIn = true
     this.pullTimer ??= setInterval(() => void this.pullQuietly(), this.options.pullEveryMs ?? PULL_EVERY_MS)
     // pull first: the relay's history reaches the sessions here before ours goes up
     void this.pullQuietly().then(() => this.pushAllSoon())
@@ -509,21 +650,48 @@ export class SyncEngine {
     this.pullTimer = undefined
     if (this.pushTimer) clearTimeout(this.pushTimer)
     this.pushTimer = undefined
+    if (this.frameTimer) clearTimeout(this.frameTimer)
+    this.frameTimer = undefined
+    if (this.workingTimer) clearTimeout(this.workingTimer)
+    this.workingTimer = undefined
   }
 
-  /** A sign-in: a different account starts from cursor 0 with fresh ids. */
+  /**
+   * A sign-in (C10). A different account than the last one starts from cursor 0 — the
+   * relay's rows, the kept turns and the presence of the last account are dropped, every
+   * account's mapping is kept — and whatever this does to the view is told. The same
+   * account again (or a first sign-in) changes nothing but the pull that follows.
+   */
   async accountChanged(accountId: string): Promise<void> {
     this.paused = false
-    if (accountId && accountId !== this.state.accountId) {
-      this.state = { ...emptyState(), enabled: this.state.enabled, mainSession: this.state.mainSession, accountId }
+    this.signedIn = true
+    // a different account than the one this device last synced with (the first sign-in ever is not a switch)
+    const changed = Boolean(accountId) && Boolean(this.state.accountId) && accountId !== this.state.accountId
+    if (changed) {
+      this.state = forAccount(this.state, accountId)
+      this.working.clear()
+      this.presence.clear()
+      this.relayState = null
+      await this.options.sessions.forgetAll?.().catch(() => undefined)
+      await this.save()
+      this.log('info', 'nanomuse sync: another account signed in; its conversations are pulled afresh, the last account’s stay hidden')
+    } else if (accountId && !this.state.accountId) {
+      this.state.accountId = accountId
       await this.save()
     }
-    void this.pullQuietly().then(() => this.pushAllSoon())
+    if (changed) this.changed()
+    // the pull from zero follows, on its own tick, so the reset state is what a caller sees first
+    const timer = setTimeout(() => void this.pullQuietly().then(() => this.pushAllSoon()), 0)
+    timer.unref?.()
   }
 
+  /** A sign-out: nothing is dropped (the account is remembered, so a different one next is known); every local chat shows. */
   signedOut(): void {
     this.paused = false
+    this.signedIn = false
     this.relayState = null
+    this.working.clear()
+    this.presence.clear()
     this.changed()
   }
 
@@ -531,16 +699,19 @@ export class SyncEngine {
    * The chats column's main chat. While the account's main conversation already lives in a
    * session here, that session stays the main chat (one thread, C8): the id of the one it
    * lives in comes back for the column to adopt. Otherwise the session becomes the main chat
-   * and takes the relay's main conversation id when the relay has one.
+   * and takes the relay's main conversation id when the relay has one. A session of another
+   * account cannot become the main chat (C10).
    */
   async setMain(sessionId: string): Promise<string> {
     const current = this.state.mainSession
     if (!sessionId || current === sessionId) return current
+    if (!this.owns(sessionId)) return current
     if (current && this.holdsMain(current)) return current
     this.state.mainSession = sessionId
     const mainCid = this.mainCid()
     if (mainCid && !this.state.cids[sessionId]) {
       this.state.cids[sessionId] = mainCid
+      this.adopt(sessionId)
       this.state.titles[sessionId] = this.state.conversations[mainCid]?.title ?? ''
     } else {
       delete this.state.titles[sessionId]
@@ -585,12 +756,30 @@ export class SyncEngine {
     this.state.enabled = enabled
     if (enabled) {
       this.paused = false
-      // on again: this device's conversations go up in full
-      this.state.titles = {}
-      this.state.mids = {}
+      // on again: this device's conversations go up in full — the signed-in account's and the
+      // ownerless; another account's lines keep their ids (its relay store was not emptied, C10)
+      const keep = new Set<string>()
+      for (const sid of this.foreign()) for (const line of await this.options.sessions.lines(sid).catch(() => [] as SessionLine[])) keep.add(line.id)
+      this.state.titles = Object.fromEntries(Object.entries(this.state.titles).filter(([sid]) => !this.owns(sid)))
+      this.state.mids = Object.fromEntries(Object.entries(this.state.mids).filter(([id]) => keep.has(id)))
     }
     await this.save()
     if (enabled) void this.pullQuietly().then(() => this.pushAllSoon())
+    this.changed()
+    return this.view()
+  }
+
+  /**
+   * "Also sync side chats" (C9), this device's setting. On: the side chats here go up (oldest
+   * first, as the history did) after one pull of the account's newest side turns
+   * (`since=0&scope=all&tail=300`, idempotent by mid and cid). Off: side chats stop going
+   * up and coming down; what was synced stays where it is.
+   */
+  async setSideChats(on: boolean): Promise<SyncView> {
+    if (on === this.state.sideChats) return this.view()
+    this.state.sideChats = on
+    await this.save()
+    if (on) void this.pullTail().then(() => this.pushAllSoon())
     this.changed()
     return this.view()
   }
@@ -600,10 +789,64 @@ export class SyncEngine {
     if (!token) return (this.relayState = null)
     try {
       this.relayState = await this.options.relay.state(token)
+      for (const w of this.relayState.working) this.noteWorking(w, false)
+      this.expireWorking()
     } catch (error: unknown) {
       this.noteError(error)
     }
     return this.relayState
+  }
+
+  // ---- presence (C9) ------------------------------------------------------------------------
+
+  /** The hub's `working` frame: another device started or finished a turn on a conversation. */
+  onWorking(frame: WireWorking): void {
+    if (this.noteWorking(frame, true)) this.changed()
+  }
+
+  /** The other device working on the conversation that lives in a session here, if any (and not 10 minutes old); never for another account's session (C10). */
+  workingOf(sessionId: string): WorkingPresence | null {
+    this.expireWorking()
+    if (!this.owns(sessionId)) return null
+    const cid = this.state.cids[sessionId]
+    return (cid && this.working.get(cid)) || null
+  }
+
+  /** Whether the line the browser half shows moved. */
+  private noteWorking(w: WireWorking, tell: boolean): boolean {
+    if (!w.cid || w.from === this.options.deviceId()) return false
+    const at = w.at * 1000
+    if (!w.working || Date.now() - at >= WORKING_TTL_MS) return this.working.delete(w.cid)
+    const known = this.working.get(w.cid)
+    if (known && known.from === w.from && known.at >= at) return false
+    this.working.set(w.cid, { from: w.from, deviceName: w.device_name, at })
+    // the line goes away by itself 10 minutes after the last `at`
+    if (this.workingTimer) clearTimeout(this.workingTimer)
+    this.workingTimer = setTimeout(() => {
+      this.workingTimer = undefined
+      if (this.expireWorking()) this.changed()
+    }, Math.max(0, at + WORKING_TTL_MS - Date.now()) + 50)
+    return tell
+  }
+
+  private expireWorking(): boolean {
+    let dropped = false
+    for (const [cid, w] of this.working) {
+      if (Date.now() - w.at >= WORKING_TTL_MS) {
+        this.working.delete(cid)
+        dropped = true
+      }
+    }
+    return dropped
+  }
+
+  /** Told to the relay after the push: best-effort, once, never blocking (C9). */
+  private tellWorking(token: string, sessionId: string): void {
+    const working = this.presence.get(sessionId)
+    this.presence.delete(sessionId)
+    if (working === undefined || !this.syncs(sessionId)) return
+    const cid = this.state.cids[sessionId]
+    if (cid) void this.options.relay.working(token, this.options.deviceId(), cid, working).catch(() => undefined)
   }
 
   /** "Delete synced conversations": the relay's store emptied; what it knew is forgotten here, the sessions stay. */
@@ -625,8 +868,9 @@ export class SyncEngine {
 
   /** The person sent a message in a session here: it goes up now (C8), not when the turn ends. */
   messageSent(sessionId: string): void {
-    if (this.options.isTaskSession?.(sessionId)) return
+    if (!this.syncs(sessionId)) return
     this.dirty.add(sessionId)
+    this.presence.set(sessionId, true)
     this.pushSoon(Math.min(SEND_DELAY_MS, this.options.pushDelayMs ?? PUSH_DELAY_MS))
     // a new prompt here is a new anchor for the other devices' bubbles: the browser half re-reads them
     if (this.kept(sessionId)) this.changed()
@@ -637,24 +881,36 @@ export class SyncEngine {
     return Object.values(this.state.pulled).includes(sessionId)
   }
 
+  /** Whether a session's turns go up: not another device's task, not another account's (C10), and a side chat only when the switch is on (C9). */
+  private syncs(sessionId: string): boolean {
+    if (this.options.isTaskSession?.(sessionId)) return false
+    if (!this.owns(sessionId)) return false
+    return this.state.sideChats || sessionId === this.state.mainSession
+  }
+
   /** A turn ended in a session here: the model's final text goes up after the debounce. */
   turnEnded(sessionId: string): void {
-    if (this.options.isTaskSession?.(sessionId)) return
+    if (!this.syncs(sessionId)) return
     this.dirty.add(sessionId)
+    this.presence.set(sessionId, false)
     this.pushSoon(this.options.pushDelayMs ?? PUSH_DELAY_MS)
   }
 
   sessionRenamed(sessionId: string): void {
-    if (this.options.isTaskSession?.(sessionId)) return
+    if (!this.syncs(sessionId)) return
     this.dirty.add(sessionId)
     this.pushSoon(200)
   }
 
-  /** The relay's `sync` frame: another device pushed. */
+  /** The relay's `sync` frame: another device pushed. Frames arriving together become one pull. */
   onFrame(frame: { cursor?: number; from?: string }): void {
     if (frame.from && frame.from === this.options.deviceId()) return
     if (typeof frame.cursor === 'number' && frame.cursor <= this.state.cursor) return
-    void this.pullQuietly()
+    if (this.frameTimer) return
+    this.frameTimer = setTimeout(() => {
+      this.frameTimer = undefined
+      void this.pullQuietly()
+    }, this.options.frameCoalesceMs ?? FRAME_COALESCE_MS)
   }
 
   // ---- push ---------------------------------------------------------------------------------
@@ -672,7 +928,7 @@ export class SyncEngine {
     void this.options.sessions
       .list()
       .then((sessions) => {
-        for (const s of sessions) if (!s.blank && !this.options.isTaskSession?.(s.id)) this.dirty.add(s.id)
+        for (const s of sessions) if (!s.blank && this.syncs(s.id)) this.dirty.add(s.id)
         this.pushSoon(this.options.pushDelayMs ?? PUSH_DELAY_MS)
       })
       .catch(() => undefined)
@@ -709,11 +965,12 @@ export class SyncEngine {
       const messages: Record<string, unknown>[] = []
       const pending: Array<{ sessionId: string; line: SessionLine; mid: string }> = []
       const touched: string[] = []
-      const unvisited = new Set(ids)
+      // sessions with more than 200 new lines and those the round did not reach go again
+      const again = new Set(ids)
       for (const sessionId of ids) {
-        unvisited.delete(sessionId)
+        again.delete(sessionId)
         const info = sessions.get(sessionId)
-        if (!info || this.options.isTaskSession?.(sessionId)) continue
+        if (!info || !this.syncs(sessionId)) continue
         const cid = this.cidFor(sessionId)
         const title = info.title || 'New chat'
         if (this.state.titles[sessionId] !== title) {
@@ -722,7 +979,10 @@ export class SyncEngine {
         const lines = await this.options.sessions.lines(sessionId)
         for (const line of lines) {
           if (this.state.mids[line.id]) continue
-          if (messages.length >= MAX_POST_MESSAGES) break
+          if (messages.length >= MAX_POST_MESSAGES) {
+            again.add(sessionId)
+            break
+          }
           const mid = randomUUID()
           messages.push({ mid, cid, role: line.role, text: line.text, created_at: Math.floor(line.at / 1000) })
           pending.push({ sessionId, line, mid })
@@ -730,8 +990,15 @@ export class SyncEngine {
         touched.push(sessionId)
         if (messages.length >= MAX_POST_MESSAGES) break
       }
-      if (conversations.length === 0 && messages.length === 0) break
+      if (conversations.length === 0 && messages.length === 0) {
+        // nothing new in these sessions: they are done, not dirty again
+        for (const sid of touched) this.tellWorking(token, sid)
+        ids.splice(0, ids.length, ...ids.filter((sid) => again.has(sid)))
+        break
+      }
       const out = await this.options.relay.push(token, device, conversations, messages)
+      // the relay took the round: an ownerless session is the signed-in account's from now on (C10)
+      for (const sid of touched) this.adopt(sid)
       const redirect = new Map<string, string>()
       for (const r of out.rejected) if (r.reason === 'main_exists' && r.cid && r.cid_main) redirect.set(r.cid, r.cid_main)
       if (redirect.size > 0) {
@@ -741,6 +1008,7 @@ export class SyncEngine {
           if (to) {
             this.state.cids[sid] = to
             delete this.state.titles[sid]
+            again.add(sid)
             this.log('info', 'nanomuse sync: the main chat adopts the account’s conversation id')
           }
         }
@@ -766,12 +1034,8 @@ export class SyncEngine {
         }
       }
       await this.save()
-      // sessions with more than 200 new lines, the redirected ones and those the round did not reach go again
-      const again = new Set<string>(unvisited)
-      for (const sid of touched) {
-        const lines = await this.options.sessions.lines(sid)
-        if (lines.some((l) => !this.state.mids[l.id])) again.add(sid)
-      }
+      // the turn's start or end told once the words are up (C9)
+      for (const sid of touched) if (!again.has(sid)) this.tellWorking(token, sid)
       ids.splice(0, ids.length, ...ids.filter((sid) => again.has(sid)))
     }
     if (ids.length > 0) {
@@ -801,9 +1065,9 @@ export class SyncEngine {
   }
 
   /** What the other devices pushed since our cursor, applied in order; how many rows. One at a time. */
-  pull(): Promise<number> {
+  pull(tail = false): Promise<number> {
     const run = (): Promise<number> => {
-      const p = this.pullNow()
+      const p = this.pullNow(tail)
         .catch((error: unknown) => {
           this.noteError(error)
           throw error
@@ -817,15 +1081,23 @@ export class SyncEngine {
     return this.pulling ? this.pulling.then(run, run) : run()
   }
 
-  private async pullNow(): Promise<number> {
+  /** The side-chat switch went on: the account's newest side turns, once, from the start (C9). */
+  private pullTail(): Promise<number> {
+    return this.pull(true).catch(() => 0)
+  }
+
+  private async pullNow(tail: boolean): Promise<number> {
     if (!(await this.active())) return 0
     const token = await this.options.token()
     if (!token) return 0
     let applied = 0
     // what the other devices added to conversations living in sessions here: context for the model, per session
     const notes = new Map<string, RemoteLine[]>()
+    const scope = this.state.sideChats ? 'all' : 'main'
     for (let page = 0; page < 50; page++) {
-      const out = await this.options.relay.changes(token, this.state.cursor, PAGE)
+      // the first pull after sign-in asks for the newest 300 of the scope (C9): the chat shows before the history
+      const since = tail ? 0 : this.state.cursor
+      const out = await this.options.relay.changes(token, since, PAGE, scope, since === 0 ? TAIL : 0)
       // The page's conversations first, then its messages, each in seq order: a rename puts
       // a conversation's seq above its messages, and the relay sends every message's
       // conversation along with the page so none of them is an orphan.
@@ -839,7 +1111,7 @@ export class SyncEngine {
       }
       this.state.cursor = Math.max(this.state.cursor, out.cursor)
       await this.save()
-      if (!out.more) break
+      if (!out.more || tail) break
     }
     this.lastError = ''
     for (const [sessionId, lines] of notes) {
@@ -864,6 +1136,8 @@ export class SyncEngine {
       }
       return
     }
+    // side chats off (C9): a side conversation from elsewhere is not a chat here, and one that was stays as it is
+    if (c.kind === 'side' && !this.state.sideChats) return
     const known = this.state.conversations[c.cid]
     this.state.conversations[c.cid] = {
       kind: c.kind,
@@ -880,6 +1154,7 @@ export class SyncEngine {
         // still unpushed and go up under the adopted id)
         sessionId = this.state.mainSession
         this.state.cids[sessionId] = c.cid
+        this.adopt(sessionId)
         if (c.title) this.state.titles[sessionId] = c.title
         else delete this.state.titles[sessionId]
         this.dirty.add(sessionId)
@@ -895,6 +1170,7 @@ export class SyncEngine {
           return
         }
         this.state.cids[sessionId] = c.cid
+        this.adopt(sessionId)
         this.state.titles[sessionId] = title
         if (c.kind === 'main') this.state.mainSession = sessionId
       }
@@ -919,6 +1195,10 @@ export class SyncEngine {
     // once is enough: a row kept here already, or our own words coming back
     if (this.state.pulled[m.mid]) return
     if (m.device === this.options.deviceId()) return
+    // side chats off (C9): a side chat's rows stay where they were written
+    if (!this.state.sideChats && this.state.conversations[m.cid]?.kind !== 'main') return
+    // the reply arrived: the other device is not working on it any more
+    if (m.role === 'assistant') this.working.delete(m.cid)
     const sessionId = this.sessionOf(m.cid)
     if (!sessionId) return
     const line: RemoteLine = { mid: m.mid, role: m.role, text: m.text, at: m.created_at * 1000, device: m.device, deviceName: m.device_name }
@@ -931,8 +1211,9 @@ export class SyncEngine {
     }
   }
 
+  /** The session a conversation lives in here — one of the signed-in account's or nobody's (C10), never another account's. */
   private sessionOf(cid: string): string | undefined {
-    for (const [sid, c] of Object.entries(this.state.cids)) if (c === cid) return sid
+    for (const [sid, c] of Object.entries(this.state.cids)) if (c === cid && this.owns(sid)) return sid
     return undefined
   }
 

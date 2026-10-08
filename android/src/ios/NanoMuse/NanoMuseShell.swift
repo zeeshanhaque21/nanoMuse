@@ -86,16 +86,26 @@ struct NanoMuseRoot: View {
     /// The Muse shell on iPhone and iPad alike; off → the upstream layout.
     private var usesShell: Bool { shellEnabled }
 
-    /// The setup in front of everything until the account and a model are in (see NanoMuseFirstRun.needed).
-    private var needsSetup: Bool {
-        guard let hasSessions else { return false }
-        let providers = store.instances.contains { $0.isEnabled }
-        return NanoMuseFirstRun.needed(signedIn: NanoMuseCloud.isSignedIn, hasProviders: providers, hasSessions: hasSessions, done: setupDone)
+    /// The setup in front of everything until the account or a model of one's own is in (see NanoMuseFirstRun.needed).
+    /// `nil` while the answer still hangs on the session list, so a fresh install never shows the
+    /// shell for a frame before the welcome page.
+    private var needsSetup: Bool? {
+        let cloudId = NanoMuseCloud.instance?.id
+        let providers = store.instances.contains { $0.isEnabled && $0.hasAnyCredential && $0.id != cloudId }
+        if let hasSessions {
+            return NanoMuseFirstRun.needed(signedIn: NanoMuseCloud.isSignedIn, hasProviders: providers, hasSessions: hasSessions, done: setupDone)
+        }
+        // Without the sessions: an app with neither a sign-in nor a key of its own needs the setup
+        // whatever the list says; a finished setup never does; the one case between waits.
+        if !NanoMuseCloud.isSignedIn && !providers { return true }
+        return setupDone ? false : nil
     }
 
     var body: some View {
         Group {
-            if needsSetup {
+            if needsSetup == nil {
+                Color.clear
+            } else if needsSetup == true {
                 NanoMuseFirstRunView(
                     onStart: { setupDone = true },
                     onSettings: { showSetupSettings = true }
@@ -126,6 +136,7 @@ struct NanoMuseRoot: View {
         }
         .onAppear {
             NanoMuseProfileSync.shared.start()
+            NanoMuseAccountData.shared.start() // C12: whose chat is whose; the reinstall sweep
             NanoMuseSync.shared.start() // C7: conversations between the account's devices
             NanoMuseStarWatch.shared.start()
             NanoMuseStar.shared.dayOpened()
@@ -137,9 +148,9 @@ struct NanoMuseRoot: View {
             NanoMuseUpdateCheck.shared.checkIfStale()
         }
         .task {
-            hasSessions = !(await ChatStore.shared.listSessions()).isEmpty
+            hasSessions = !NanoMuseSync.shared.visible(await ChatStore.shared.listSessions()).isEmpty // C12: another account's chats do not count
             // The feed's daily routine exists from the start, as on Android (a no-op without a model).
-            if !needsSetup { await NanoMuseFeedFlow.ensureRoutine() }
+            if needsSetup == false { await NanoMuseFeedFlow.ensureRoutine() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .sessionDidCreate)) { _ in
             hasSessions = true
@@ -233,22 +244,43 @@ final class NanoMuseMainChat: ObservableObject {
             .receive(on: RunLoop.main)
             .sink { [weak self] note in self?.sessionCreated(note) }
             .store(in: &cancellables)
+        // C10: another account signed in — its own main chat, or a fresh draft; never the
+        // conversation the previous account left pinned here.
+        NotificationCenter.default.publisher(for: .nanoMuseAccountSwitched)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.accountSwitched() }
+            .store(in: &cancellables)
     }
 
     func resolve() {
         Task { @MainActor [self] in
             let remembered = UserDefaults.standard.string(forKey: Self.key)
-            if let remembered, await ChatStore.shared.sessionExists(id: remembered) {
+            // C10: a remembered chat of another account is not shown (NanoMuseSync.shows)
+            if let remembered, NanoMuseSync.shared.shows(remembered), await ChatStore.shared.sessionExists(id: remembered) {
                 set(remembered, draft: false)
                 return
             }
-            let sessions = await ChatStore.shared.listSessions()
+            let sessions = NanoMuseSync.shared.visible(await ChatStore.shared.listSessions())
             if let latest = sessions.filter({ !$0.isRemote }).max(by: { $0.updatedAt < $1.updatedAt }) {
                 UserDefaults.standard.set(latest.id, forKey: Self.key)
                 set(latest.id, draft: false)
                 return
             }
             set(Self.draftPrefix + UUID().uuidString, draft: true)
+        }
+    }
+
+    /// C10: the account changed under the tab. The chat it showed for the account that came
+    /// back is pinned again when it is still there; otherwise the tab resolves as on a first
+    /// launch — the account's own conversations, or a draft the account's synced main adopts.
+    private func accountSwitched() {
+        Task { @MainActor [self] in
+            if let remembered = NanoMuseSync.shared.rememberedMainSession, NanoMuseSync.shared.shows(remembered), await ChatStore.shared.sessionExists(id: remembered) {
+                pin(remembered)
+                return
+            }
+            UserDefaults.standard.removeObject(forKey: Self.key)
+            resolve()
         }
     }
 
@@ -313,6 +345,7 @@ struct NanoMuseHomeView: View {
     @StateObject private var main = NanoMuseMainChat()
     @StateObject private var keyboard = NanoMuseKeyboardWatcher()
     @ObservedObject private var star = NanoMuseStar.shared
+    @ObservedObject private var allowance = NanoMuseAllowance.shared
     /// The composer's voice panel stands in for the keyboard: the bottom bar leaves the same way.
     @ObservedObject private var voiceMode = VoiceModePreference.shared
     /// "Rename chat" from the main chat's ••• menu.
@@ -346,18 +379,28 @@ struct NanoMuseHomeView: View {
     }
 
     var body: some View {
-        ZStack {
-            chatLayer
-                .opacity(tab == .chat ? 1 : 0)
-                .allowsHitTesting(tab == .chat)
-                .accessibilityHidden(tab != .chat)
-            if tab != .chat {
-                roomLayer
-                    .transition(.opacity)
+        // The bottom bar is a row under the rooms, as on Android — not a `safeAreaInset`.
+        // 0.1.36–0.1.39 had it as one, and an inset on the NavigationStack's ancestor reaches
+        // the chat inside it through UIKit's safe area. What the device showed (iPad, 0.1.39;
+        // the maintainer's iPhone, 0.1.36–0.1.38): the chat respected the bar's 56 pt at
+        // launch, and once the bar had left for the keyboard and come back it no longer did —
+        // the chat ran under the bar and its composer, bottom-aligned, sat behind it ("the
+        // input field shows until I dismiss the keyboard, then never again"; the sliver of a
+        // composer's top edge above the bar in the 0.1.36 screenshot). A VStack row is plain
+        // layout: the stack above is as tall as what is left over the bar — and over the
+        // keyboard, which shortens the whole VStack — whether the bar is there or not.
+        VStack(spacing: 0) {
+            ZStack {
+                chatLayer
+                    .opacity(tab == .chat ? 1 : 0)
+                    .allowsHitTesting(tab == .chat)
+                    .accessibilityHidden(tab != .chat)
+                if tab != .chat {
+                    roomLayer
+                        .transition(.opacity)
+                }
             }
-        }
-        .animation(.easeInOut(duration: 0.15), value: tab)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
+            .animation(.easeInOut(duration: 0.15), value: tab)
             if !bottomBarHidden {
                 NanoMuseBottomBar(selected: $tab) { picked in
                     if picked == tab, picked != .chat { return }
@@ -553,6 +596,23 @@ struct NanoMuseHomeView: View {
                         .padding(.bottom, 6)
                         .transition(.move(edge: .top).combined(with: .opacity))
                     }
+                    // C11 / parity #33: a turn refused for the free allowance — the ways on, pinned like the star card.
+                    if let refused = allowance.pending {
+                        ScrollView(showsIndicators: false) {
+                            NanoMuseAllowanceCard(
+                                refused: refused,
+                                onTryAgain: { allowance.retry(session: main.liveId ?? main.chatId) },
+                                onDismiss: { allowance.dismiss() }
+                            )
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                        }
+                        .frame(maxHeight: 360)
+                        .background(NanoMuseTones.fill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 6)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                    }
                 }
                 .background {
                     Rectangle()
@@ -561,10 +621,14 @@ struct NanoMuseHomeView: View {
                 }
             }
             .background(ChatColors.background.ignoresSafeArea())
+            // Android: a swipe in from the leading edge opens the drawer on the Chat tab; here too,
+            // on the main chat (a pushed side chat keeps the system's back swipe).
+            .background(NanoMuseEdgeSwipe(enabled: tab == .chat && chatPath.isEmpty && !drawerOpen) { drawerOpen = true })
             .nmRenameAlert(rename)
             // The system bar stays out of the main chat; side chats pushed from here keep theirs.
             .toolbar(.hidden, for: .navigationBar)
             .animation(.easeInOut(duration: 0.25), value: star.pending)
+            .animation(.easeInOut(duration: 0.25), value: allowance.pending)
             .navigationDestination(for: String.self) { id in
                 let draft = id.hasPrefix(NanoMuseMainChat.draftPrefix)
                 AIChatView(sessionId: draft ? nil : id, draftId: draft ? id : nil)
@@ -910,29 +974,36 @@ struct NanoMuseDrawer: View {
     @State private var dragOffset: CGFloat = 0
     @State private var deleteCandidate: String?
 
-    private var width: CGFloat { min(320, UIScreen.main.bounds.width * 0.82) }
+    /// The panel's width: most of the window, at most 320 pt. Measured from the window the
+    /// drawer is in rather than the screen, so an iPad window narrower than the screen (Stage
+    /// Manager, Split View) gets a drawer that fits it.
+    private func width(in container: CGFloat) -> CGFloat { min(320, container * 0.82) }
 
     var body: some View {
-        ZStack(alignment: .leading) {
-            if isOpen {
-                Color.black.opacity(0.35)
-                    .ignoresSafeArea()
-                    .onTapGesture { close() }
-                    .transition(.opacity)
-                panel
-                    .frame(width: width)
-                    .offset(x: min(0, dragOffset))
-                    .transition(.move(edge: .leading))
-                    .gesture(
-                        DragGesture()
-                            .onChanged { v in dragOffset = v.translation.width }
-                            .onEnded { v in
-                                if v.translation.width < -60 { close() }
-                                dragOffset = 0
-                            }
-                    )
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                if isOpen {
+                    Color.black.opacity(0.35)
+                        .ignoresSafeArea()
+                        .onTapGesture { close() }
+                        .transition(.opacity)
+                    panel
+                        .frame(width: width(in: geo.size.width))
+                        .offset(x: min(0, dragOffset))
+                        .transition(.move(edge: .leading))
+                        .gesture(
+                            DragGesture()
+                                .onChanged { v in dragOffset = v.translation.width }
+                                .onEnded { v in
+                                    if v.translation.width < -60 { close() }
+                                    dragOffset = 0
+                                }
+                        )
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         }
+        .allowsHitTesting(isOpen)
         .animation(.easeInOut(duration: 0.22), value: isOpen)
         .nmOnChange(of: isOpen) { open in
             if open { refresh() }
@@ -1174,7 +1245,8 @@ struct NanoMuseDrawer: View {
 
     private func refresh() {
         Task { @MainActor [self] in
-            let list = await ChatStore.shared.listSessions()
+            // C10: the signed-in account's conversations and the unowned ones; another account's stay hidden
+            let list = NanoMuseSync.shared.visible(await ChatStore.shared.listSessions())
             sessions = list.sorted { $0.updatedAt > $1.updatedAt }
         }
     }

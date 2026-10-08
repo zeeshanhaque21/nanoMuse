@@ -10,22 +10,34 @@ import java.net.URI
  * config cannot say "any private address", so the rule lives here: an `http://` endpoint is
  * accepted when its host is this phone, a private range (10/8, 172.16/12, 192.168/16, the
  * carrier-grade 100.64/10 that Tailscale and friends use, link-local, IPv6 ULA/link-local) or a
- * local name (no dot, or `.local`, `.lan`, `.home`, `.internal`, `.home.arpa`). Anything else
- * must be `https://`. A LAN LLM server or a runtime on your own computer keeps working; a key
- * sent in the clear across the Internet does not.
+ * local name (no dot, or `.local`, `.lan`, `.home`, `.internal`, `.home.arpa`, `.localdomain`,
+ * Tailscale's `.ts.net`). Anything else must be `https://`. The relay address on the sign-in
+ * screen is judged by the same rule ([io.github.nanomuse.cloud.RelayAddress.isPrivateHost]).
+ * A LAN LLM server or a runtime on your own computer keeps working; a key sent in the clear
+ * across the Internet does not.
  */
 object LanOnly {
-    private val localSuffixes = listOf(".local", ".lan", ".home", ".internal", ".home.arpa", ".localdomain")
+    private val localSuffixes = listOf(".local", ".lan", ".home", ".internal", ".home.arpa", ".localdomain", ".ts.net")
 
-    /** Null when the endpoint is fine; otherwise a short reason it is refused. */
+    /** Null when the endpoint is fine; otherwise a short reason it is refused (English, for logs). */
     fun problem(url: String): String? {
+        val host = refusedHost(url) ?: return null
+        if (host.isEmpty()) return "the address has no host"
+        return "plain http:// only works for addresses on your own network (10.x, 172.16-31.x, 192.168.x, .local names); use https:// for $host"
+    }
+
+    /**
+     * The host of an `http://` endpoint that is not on the local network, or "" when the address
+     * has no host at all; null when the endpoint is fine. Screens pass it to
+     * `R.string.nm_lan_only_https` so the refusal reads in the person's language.
+     */
+    fun refusedHost(url: String): String? {
         val trimmed = url.trim()
         if (trimmed.isEmpty()) return null
         val uri = runCatching { URI(trimmed) }.getOrNull() ?: return null
         if (!uri.scheme.equals("http", ignoreCase = true)) return null
-        val host = uri.host?.trim('[', ']')?.lowercase() ?: return "the address has no host"
-        if (isLocal(host)) return null
-        return "plain http:// only works for addresses on your own network (10.x, 172.16–31.x, 192.168.x, .local names); use https:// for $host"
+        val host = uri.host?.trim('[', ']')?.lowercase() ?: return ""
+        return if (isLocal(host)) null else host
     }
 
     /** Whether [host] (a name or an IP literal) is this device or on its local network. */

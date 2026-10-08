@@ -1,6 +1,6 @@
 /**
- * The desk behind the Live stage (0.1.34): the approvals and holds the stage
- * answers (shared contracts C1 and C2 of this release), what the account's
+ * The desk behind the hands (0.1.34): the approvals and holds the chat's cards and
+ * the capsule answer (shared contracts C1 and C2 of this release), what the account's
  * connectors look like to the other devices (C3), and the update check the
  * About row runs (the fork's GitHub releases first, a configured mirror as the fallback).
  *
@@ -11,7 +11,7 @@ import type { ApprovalOutcome, ApprovalRequestEvent } from '@deepseek-ai/dsh-use
 
 // ---- approvals (C2) ------------------------------------------------------------------
 
-/** One question the agent asked before a step, as the stage and the capsule show it. */
+/** One question the agent asked before a step, as the chat's card and the capsule show it. */
 export interface PendingApproval {
   id: string
   sessionId: string
@@ -26,10 +26,10 @@ export interface PendingApproval {
 
 export type ApprovalScope = 'once' | 'conversation' | 'always'
 
-/** A standing "always allow": the hands in one app (`computer_app:<app>`), given on the stage, revocable on the Permissions page. */
+/** A standing "always allow": the hands in one app (`computer_app:<app>`), given on a permission card, revocable on the Permissions page. */
 export interface Grant {
   id: string
-  /** `computer_app:Safari` — the kind and the app the stage showed when it was given. */
+  /** `computer_app:Safari` — the kind and the app the card showed when it was given. */
   target: string
   at: number
 }
@@ -37,6 +37,87 @@ export interface Grant {
 /** The app of a window title as the hands report it (`Safari — Apple` → `Safari`). */
 export function appOf(title: string): string {
   return title.split(/\s+[—–·|-]\s+/)[0]?.trim().slice(0, 60) ?? ''
+}
+
+// ---- standing grants, by risk tier (the Permissions page) ----------------------------
+
+/**
+ * The three tiers the phone's Permissions page groups remembered approvals under, in the
+ * Sentinel's words: `highest` is what would otherwise ask every time (sensitive) and now runs
+ * without asking; `confirm` is what was asked once on a card and remembered (moderate);
+ * `notice` is what never asks and is told afterwards (safe). The desktop keeps nothing under
+ * `notice` today; the tier is in the contract so a store that lands there has its place.
+ */
+export type GrantTier = 'highest' | 'confirm' | 'notice'
+
+export const GRANT_TIERS: readonly GrantTier[] = ['highest', 'confirm', 'notice']
+
+/**
+ * One remembered permission on this computer, whatever store it lives in:
+ * - `computer_app` — the hands in one app, from *Always in <app>* on a permission card (`Grant`);
+ * - `device` — one device of the account may run things here without asking, from *always*
+ *   on a remote-control card (the hub's trusted list);
+ * - `remote_control` — the switch: every device of the account may, no questions asked.
+ * `id` is what `POST /grants/revoke` takes for any of them.
+ */
+export interface StandingGrant {
+  id: string
+  kind: 'computer_app' | 'device' | 'remote_control'
+  tier: GrantTier
+  /** The app, the device's name, or '' for the switch. */
+  target: string
+  /** When it was given; 0 when the store does not say (the switch). */
+  at: number
+}
+
+export const REMOTE_CONTROL_GRANT_ID = 'remote-control'
+export const DEVICE_GRANT_PREFIX = 'device:'
+
+/** Every remembered permission as one list: the hands' grants, the trusted devices, the remote-control switch. */
+export function standingGrants(input: { grants?: readonly Grant[]; trusted?: readonly { id: string; name: string; at: number }[]; remoteControl?: boolean }): StandingGrant[] {
+  const out: StandingGrant[] = []
+  if (input.remoteControl === true) out.push({ id: REMOTE_CONTROL_GRANT_ID, kind: 'remote_control', tier: 'highest', target: '', at: 0 })
+  for (const d of input.trusted ?? []) out.push({ id: `${DEVICE_GRANT_PREFIX}${d.id}`, kind: 'device', tier: 'confirm', target: d.name || d.id, at: d.at })
+  for (const g of input.grants ?? []) out.push({ id: g.id, kind: 'computer_app', tier: 'confirm', target: g.target.replace(/^computer_app:/, ''), at: g.at })
+  return out
+}
+
+/** The list by tier, highest first, newest first inside a tier; tiers with nothing in them are left out. */
+export function groupGrants(list: readonly StandingGrant[]): { tier: GrantTier; grants: StandingGrant[] }[] {
+  return GRANT_TIERS.map((tier) => ({ tier, grants: list.filter((g) => g.tier === tier).sort((a, b) => b.at - a.at) })).filter((group) => group.grants.length > 0)
+}
+
+/**
+ * Give the listeners after us (the card in the chat, bridged to the client with the
+ * request's `signal`) a signal the stage can abort: the request object is the asker's own
+ * plain object, read by the bridge when the card is shown, so its `signal` is swapped for
+ * the card's lifetime and put back after. The approval service read the asker's signal
+ * before the waterfall began, so aborting the card's never turns the outcome into
+ * `cancelled`. `undefined` when the request cannot be changed (then the card stays as before).
+ */
+export function cardSignal(req: ApprovalRequestEvent): { abort(reason: Error): void; release(): void } | undefined {
+  const target = req as { signal?: AbortSignal }
+  const own = Object.getOwnPropertyDescriptor(target, 'signal')
+  if (Object.isFrozen(target) || (own && (!own.writable || !own.configurable))) return undefined
+  const original = target.signal
+  if (original?.aborted) return undefined
+  const controller = new AbortController()
+  const forward = () => controller.abort(original?.reason as Error | undefined)
+  original?.addEventListener('abort', forward, { once: true })
+  try {
+    target.signal = controller.signal
+  } catch {
+    original?.removeEventListener('abort', forward)
+    return undefined
+  }
+  return {
+    abort: (reason) => controller.abort(reason),
+    release: () => {
+      original?.removeEventListener('abort', forward)
+      if (original === undefined) delete target.signal
+      else target.signal = original
+    },
+  }
 }
 
 /**
@@ -83,15 +164,29 @@ export class ApprovalDesk {
       status: 'pending',
       at: Date.now(),
     }
-    const fromStage = new Promise<ApprovalOutcome>((resolve) => this.pending.set(id, { row, resolve }))
+    let stageAnswered = false
+    const fromStage = new Promise<ApprovalOutcome>((resolve) =>
+      this.pending.set(id, {
+        row,
+        resolve: (outcome) => {
+          stageAnswered = true
+          resolve(outcome)
+        },
+      }),
+    )
     const onAbort = () => this.settle(id, 'cancelled')
     req.signal?.addEventListener('abort', onAbort, { once: true })
+    // The card in the chat follows a signal of its own: the stage's answer withdraws the card
+    // (one decision, both surfaces), while the asker's signal still cancels both.
+    const card = cardSignal(req)
     this.changed()
     try {
       return await Promise.race([next(), fromStage])
     } finally {
       req.signal?.removeEventListener('abort', onAbort)
       if (this.pending.delete(id)) this.changed()
+      if (stageAnswered) card?.abort(new Error('answered on the stage'))
+      card?.release()
     }
   }
 
@@ -303,10 +398,14 @@ export interface UpdateInfo {
   error?: string
 }
 
-/** `-1`, `0` or `1` for `a` against `b`; `v` prefixes and pre-release tags (`-rc.1`) are read. */
+/**
+ * `-1`, `0` or `1` for `a` against `b`; `v` prefixes and pre-release tags (`-rc.1`) are read,
+ * and so is a label in front of the number (`dsh-nanomuse 0.1.41`, `nanoMuse Desktop 0.1.41`):
+ * the first dotted number in the string is the version.
+ */
 export function compareVersions(a: string, b: string): number {
   const parse = (v: string) => {
-    const m = /^v?(\d+(?:\.\d+)*)(?:-([0-9A-Za-z.-]+))?/.exec(v.trim())
+    const m = /(?:^|[^\d.])v?(\d+(?:\.\d+)*)(?:-([0-9A-Za-z.-]+))?/.exec(v.trim())
     return { nums: (m?.[1] ?? '0').split('.').map((n) => Number(n) || 0), pre: m?.[2] ?? '' }
   }
   const x = parse(a)
@@ -318,18 +417,51 @@ export function compareVersions(a: string, b: string): number {
   if (x.pre === y.pre) return 0
   if (!x.pre) return 1
   if (!y.pre) return -1
-  return x.pre < y.pre ? -1 : 1
+  return comparePre(x.pre, y.pre)
 }
 
-/** The desktop installer for this computer, when the release has one. */
-export function pickAsset(assets: ReleaseAsset[], platform: string, arch: string): ReleaseAsset | undefined {
+/**
+ * Pre-release tags identifier by identifier (SemVer 11.4): numbers as numbers, so `rc.10`
+ * is after `rc.9`; a number before a word; the shorter tag first when they agree so far.
+ */
+function comparePre(a: string, b: string): number {
+  const xs = a.split('.')
+  const ys = b.split('.')
+  for (let i = 0; i < Math.max(xs.length, ys.length); i++) {
+    const x = xs[i]
+    const y = ys[i]
+    if (x === undefined) return -1
+    if (y === undefined) return 1
+    const xn = /^\d+$/.test(x)
+    const yn = /^\d+$/.test(y)
+    if (xn && yn) {
+      const d = Number(x) - Number(y)
+      if (d !== 0) return d < 0 ? -1 : 1
+    } else if (xn !== yn) {
+      return xn ? -1 : 1
+    } else if (x !== y) {
+      return x < y ? -1 : 1
+    }
+  }
+  return 0
+}
+
+/**
+ * The desktop installer for this computer, when the release has one. Linux gets the `.deb`
+ * first, the one docs/desktop.md prefers, unless the running app is an AppImage (`appImage`,
+ * from the shell's `info()`): then the AppImage, so the person stays on what they chose.
+ */
+export function pickAsset(assets: ReleaseAsset[], platform: string, arch: string, appImage = false): ReleaseAsset | undefined {
   const cpu = arch === 'arm64' ? 'arm64' : 'x64'
+  const linux = [new RegExp(`^nanoMuse-Desktop-.*-linux-${cpu}\\.deb$`, 'i'), new RegExp(`^nanoMuse-Desktop-.*-linux-${cpu}\\.AppImage$`, 'i')]
   const wanted: RegExp[] =
     platform === 'darwin'
       ? [new RegExp(`^nanoMuse-Desktop-.*-mac-${cpu}\\.dmg$`, 'i'), new RegExp(`^nanoMuse-Desktop-.*-mac-${cpu}\\.zip$`, 'i')]
       : platform === 'win32'
         ? [/^nanoMuse-Desktop-.*-win-x64\.exe$/i]
-        : [new RegExp(`^nanoMuse-Desktop-.*-linux-${cpu}\\.AppImage$`, 'i'), new RegExp(`^nanoMuse-Desktop-.*-linux-${cpu}\\.deb$`, 'i')]
+        : appImage
+          ? linux.reverse()
+          : linux
   for (const re of wanted) {
     const hit = assets.find((a) => re.test(a.name))
     if (hit) return hit

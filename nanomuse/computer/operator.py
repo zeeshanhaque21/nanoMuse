@@ -13,11 +13,20 @@ The contract (``harness/desktop/src/operator-server.ts``), JSON both ways, beare
 * ``GET /info`` → ``{available, reason, platform, display: {width, height, scaleFactor}}`` —
   ``display.width/height`` is the space the hands move in (X11 root pixels on Linux,
   points on macOS, physical pixels on Windows).
-* ``POST /screenshot {width?, height?, format?}`` → ``{base64, mime, width, height,
-  screen: {width, height}, scaleFactor, display: {id, bounds}}`` — the primary display,
-  scaled to the requested size (the picture the model sees), ``screen`` the hands' space.
+* ``POST /screenshot {width?, height?, format?, quality?, max_pixels?}`` → ``{base64, mime,
+  width, height, screen: {width, height}, scaleFactor, display: {id, bounds}}`` — the
+  primary display, scaled to the requested size (the picture the model sees; without one
+  the screen's size under ``max_pixels``, 2 Mpx by default), ``screen`` the hands' space.
+  On Linux under Wayland the operator refuses (503) with the same reason ``/info`` gives.
 * ``POST /execute {action, x, y, x2, y2, dy, text, submit, clear, keys, seconds}`` →
   ``{ok, note}``; coordinates in the hands' space. Errors are 4xx/5xx with ``{error}``.
+* macOS, with the app's helper *nanoMuse Computer Use* (``/info`` says
+  ``helper.present``): ``GET /windows`` → ``{windows: [{id, pid, app, bundle_id, title,
+  bounds: [x, y, w, h], layer, on_screen}]}`` and ``POST /window {id, max_pixels?,
+  format?, quality?}`` → ``{base64, mime, width, height, window: {id, x, y, width,
+  height}, scale}`` — what window mode (:mod:`nanomuse.computer.mac_window`) lists and
+  captures through, so the runtime never captures the screen itself on a Mac under the app
+  (the helper takes the picture with ScreenCaptureKit on macOS 14 and later).
 
 Without the two variables (the CLI, the web app, Docker) nothing here is used and the
 Python backends in :mod:`nanomuse.computer.hands` do the work as before.
@@ -33,7 +42,7 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from nanomuse.computer.coords import picture_size
+from nanomuse.computer.coords import PICTURE_MAX_PIXELS, picture_size
 from nanomuse.computer.hands import HandsUnavailable, open_application
 from nanomuse.logger import logger
 
@@ -43,7 +52,14 @@ MAX_BODY = 32 * 1024 * 1024  # a 4K PNG is a few MB; anything bigger is not a sc
 
 
 class OperatorError(RuntimeError):
-    """The operator refused or failed an action (its own words)."""
+    """The operator refused or failed an action (its own words). ``status`` is the HTTP
+    status it answered with (0 when it did not answer at all): 403 is a permission the
+    person has to switch on, 404 a window that is gone, 503 the operator or its helper
+    not being there."""
+
+    def __init__(self, message: str, status: int = 0) -> None:
+        super().__init__(message)
+        self.status = status
 
 
 def operator_env(env: dict[str, str] | None = None) -> tuple[str, str] | None:
@@ -100,7 +116,7 @@ class OperatorClient:
                 detail = str(json.loads(exc.read(65536).decode() or "{}").get("error") or "")
             except Exception:  # noqa: BLE001 — not JSON; the status is all there is
                 detail = ""
-            raise OperatorError(detail or f"the operator answered {exc.code}") from exc
+            raise OperatorError(detail or f"the operator answered {exc.code}", exc.code) from exc
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             raise OperatorError(f"the desktop operator is not reachable: {exc}") from exc
         try:
@@ -115,9 +131,16 @@ class OperatorClient:
         return self._call("GET", "/info")
 
     def screenshot(
-        self, width: int = 0, height: int = 0, fmt: str = "jpeg", quality: int = 80
+        self,
+        width: int = 0,
+        height: int = 0,
+        fmt: str = "jpeg",
+        quality: int = 80,
+        max_pixels: int = PICTURE_MAX_PIXELS,
     ) -> dict[str, Any]:
-        body: dict[str, Any] = {"format": fmt, "quality": quality}
+        """The picture: ``width``×``height`` when both are given, else the screen's size
+        under ``max_pixels`` (0 = the screen as it is), as ``fmt`` (``jpeg`` or ``png``)."""
+        body: dict[str, Any] = {"format": fmt, "quality": quality, "max_pixels": int(max_pixels)}
         if width and height:
             body["width"], body["height"] = int(width), int(height)
         return self._call("POST", "/screenshot", body)
@@ -127,6 +150,20 @@ class OperatorClient:
         if not out.get("ok", False):
             raise OperatorError(str(out.get("error") or out.get("note") or "the action failed"))
         return str(out.get("note") or "")
+
+    def windows(self) -> list[dict[str, Any]]:
+        """The windows on screen, front to back (macOS with the helper; 503 elsewhere)."""
+        out = self._call("GET", "/windows")
+        found = out.get("windows")
+        return [w for w in found if isinstance(w, dict)] if isinstance(found, list) else []
+
+    def window(
+        self, window_id: int, max_pixels: int = PICTURE_MAX_PIXELS, fmt: str = "png"
+    ) -> dict[str, Any]:
+        """One window's own pixels (``base64``, ``mime``, ``width``, ``height``) and its
+        frame in points (``window: {id, x, y, width, height}``); 404 when it is gone."""
+        body: dict[str, Any] = {"id": int(window_id), "max_pixels": int(max_pixels), "format": fmt}
+        return self._call("POST", "/window", body)
 
 
 def _size_of(obj: Any, default: tuple[int, int] = (0, 0)) -> tuple[int, int]:
@@ -164,6 +201,9 @@ class OperatorHands:
             )
         self.platform = str(info.get("platform") or platform.system().lower())
         self._size = display_size(info)
+        helper = info.get("helper")
+        # macOS: the app's helper bundle is there — window mode lists and captures through it
+        self.helper_present = isinstance(helper, dict) and helper.get("present") is True
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> OperatorHands:

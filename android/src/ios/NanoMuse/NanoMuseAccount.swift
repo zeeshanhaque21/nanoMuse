@@ -18,6 +18,8 @@ struct NanoMuseSheet: Sendable {
         var inviteBonusCny: Double?
         var inviteeBonusCny: Double?
         var ownKeyDocs: String?
+        /// Relay 0.21 (contract C11): the ways on for the person's region, as the relay lists them; nil from an older relay.
+        var guidance: NanoMuseGuidance?
 
         /// What is left, from the relay or from the grant and the total.
         var remaining: Double? {
@@ -88,7 +90,8 @@ struct NanoMuseSheet: Sendable {
                 usdCny: num(s["usd_cny"]),
                 inviteBonusCny: num(s["invite_bonus_cny"]),
                 inviteeBonusCny: num(s["invitee_bonus_cny"]),
-                ownKeyDocs: (s["own_key_docs"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                ownKeyDocs: (s["own_key_docs"] as? String).flatMap { $0.isEmpty ? nil : $0 },
+                guidance: NanoMuseGuidance.parse(s["guidance"] as? [String: Any])
             )
         }
         var invite: Invite?
@@ -173,6 +176,7 @@ extension NanoMuseCloud {
     static func sheet() async throws -> NanoMuseSheet {
         let reply = try await call("GET", "/v1/me", body: nil, token: key())
         account = parseAccount(reply)
+        NanoMuseAllowance.shared.absorb(me: reply) // the 80 % heads-up, the region's guidance (contract C11)
         return NanoMuseSheet.parse(reply)
     }
 
@@ -217,22 +221,19 @@ extension NanoMuseCloud {
         _ = try await call("POST", "/v1/auth/password", body: body, token: key())
     }
 
-    /// Every device's key, this phone's included; then the provider leaves the app.
-    static func signOutEverywhere() async throws {
+    /// Every device's key, this phone's included; then the provider leaves the app, and this
+    /// phone's copy of the account's data stays only with `keep` (contract C12).
+    static func signOutEverywhere(keep: Bool = false) async throws {
         _ = try await call("POST", "/v1/auth/sign-out-all", body: ["all": true], token: key())
-        await forgetLocally()
+        await forgetLocally(keep: keep)
     }
 
-    /// The account, its keys, ledger and devices — gone for good; then the provider leaves the app.
+    /// The account, its keys, ledger, devices and synced conversations — gone for good at the
+    /// relay; and everything of it on this phone — chats, memory, feed, goals, face, the key —
+    /// goes too (contract C12). The next sign-in with the same address is a new account.
     static func deleteAccount() async throws {
         _ = try await call("POST", "/v1/auth/delete", body: nil, token: key())
-        await forgetLocally()
-    }
-
-    private static func forgetLocally() async {
-        await MainActor.run { NanoMuseHub.shared.stop() }
-        if let inst = instance { ProviderConfigStore.shared.removeInstance(inst.id) }
-        clear()
+        await forgetLocally(keep: false)
     }
 }
 
@@ -252,7 +253,7 @@ struct NanoMuseStarAsk: Equatable, Identifiable {
 @MainActor
 final class NanoMuseStar: ObservableObject {
     static let shared = NanoMuseStar()
-    static let repoURL = URL(string: "https://github.com/nano-muse/nanoMuse")!
+    static let repoURL = URL(string: "https://github.com/zeeshanhaque21/nanoMuse")!
 
     /// The moments by name, as the shell's card API has known them. `firstTask` / `tenthTask`
     /// are the names from before the policy; they read as `tasks` with that count.
@@ -356,11 +357,18 @@ final class NanoMuseStar: ObservableObject {
 
     // MARK: Words
 
-    /// The words for a moment (the same meaning as every other client).
+    /// The card's sentence for a moment: the one the operator set in the relay's console
+    /// (`star.text_zh` first when the UI is Chinese, then `star.text`), else the app's own line.
+    /// The title and the buttons are always the app's.
     static func words(for moment: NanoMuseStarMoment) -> String {
+        NanoMuseNudges.shared.policy.sentence(chinese: NanoMuseLocale.isChinese) ?? builtInWords(for: moment)
+    }
+
+    /// The app's own line for a moment (the same meaning as every other client).
+    static func builtInWords(for moment: NanoMuseStarMoment) -> String {
         switch moment {
         case .signedIn:
-            return AppLocalized("Welcome. nanoMuse is free, open source and non-profit — a personal agent for anyone who runs it. If that is worth something to you, a star on GitHub is how the next person finds it.")
+            return AppLocalized("Welcome. nanoMuse is free, open source and non-profit, a personal agent for anyone who runs it. If that is worth something to you, a star on GitHub is how the next person finds it.")
         case .tasks(let n) where n == 1:
             return AppLocalized("One task done. If nanoMuse helped, a star on GitHub tells the people building it that it did.")
         case .tasks(let n):
@@ -368,7 +376,7 @@ final class NanoMuseStar: ObservableObject {
         case .newLook:
             return AppLocalized("A new face, drawn for you. If you like where nanoMuse is going, a star on GitHub helps more people find it.")
         case .exhausted:
-            return AppLocalized("The free allowance is used up — thank you for coming this far. If nanoMuse has earned it, a star on GitHub keeps the project in view for the next person.")
+            return AppLocalized("The free allowance is used up. Thank you for coming this far. If nanoMuse has earned it, a star on GitHub keeps the project in view for the next person.")
         case .daysUsed(let n) where n == 1:
             return AppLocalized("A day with nanoMuse. If it helped, a star on GitHub helps the next person find it.")
         case .daysUsed(let n) where n == 7:

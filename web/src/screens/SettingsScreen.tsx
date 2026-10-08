@@ -41,7 +41,9 @@ import { IdentityForm, identityBody, identityOf, type Identity } from "../compon
 import { PageBar } from "../components/BackBar";
 import { CommunityNotice } from "../components/CommunityNotice";
 import { DataControls, PRIVACY_URL } from "../components/DataControls";
-import { LOCALES, setLocaleSetting, useLocaleSetting, useT } from "../i18n";
+import { getLocale, LOCALES, setLocaleSetting, useLocaleSetting, useT } from "../i18n";
+import { has, regionOf, unavailableLine, useProviders } from "../providers";
+import { isMainland, ownKeyWay } from "../region";
 import { setThemeSetting, useThemeSetting } from "../theme";
 import { disablePush, enablePush, pushState, type PushState } from "../push";
 import { useStore } from "../store";
@@ -57,7 +59,7 @@ const MODES: Array<{ id: "ask" | "strict" | "auto"; title: string; text: string;
   {
     id: "ask",
     title: "Balanced",
-    text: "Browse, read and write files freely; stop for anything hard to undo — email, purchases, shell commands.",
+    text: "Browse, read and write files freely; stop for anything hard to undo: email, purchases, shell commands.",
     icon: <ShieldCheck size={18} />,
   },
   {
@@ -226,6 +228,7 @@ export function SettingsScreen() {
                 key={m.id}
                 type="button"
                 onClick={() => void update({ sentinel_mode: m.id })}
+                aria-pressed={s?.sentinel.mode === m.id}
                 className={cx(
                   "w-full text-left rounded-2xl border px-3.5 py-3 flex items-start gap-3 transition",
                   s?.sentinel.mode === m.id ? "border-accent bg-accent/8" : "border-border",
@@ -324,10 +327,10 @@ export function SettingsScreen() {
             </button>
           )}
           {s?.llm.cloud && (
-            <button type="button" onClick={() => openOwnKeySetup(setTab)} className="w-full text-[13.5px] flex items-center justify-between">
-              <span className="text-muted">{t("Use my own API key")}</span>
+            <button type="button" onClick={() => openOwnKeySetup(setTab, ownKeyWay(state.hub?.account).preset)} className="w-full text-[13.5px] flex items-center justify-between">
+              <span className="text-muted">{t("Use my own API key or a plan I pay for")}</span>
               <span className="text-[12.5px] text-muted flex items-center gap-1">
-                {t("OpenAI, Bailian, DeepSeek…")} <ChevronRight size={14} />
+                {t("{first} first, then {others}", { first: ownKeyWay(state.hub?.account).label, others: isMainland(state.hub?.account) ? t("DeepSeek, Kimi, OpenAI, ChatGPT…") : t("OpenAI, ChatGPT, Gemini, DeepSeek…") })} <ChevronRight size={14} />
               </span>
             </button>
           )}
@@ -428,7 +431,7 @@ export function SettingsScreen() {
         <Section title={t("Developer")} id="developer" plain={!wide}>
           <Toggle
             label={t("Developer tools")}
-            hint={t("The Coding screen — Cursor, Codex and the other coding agents on this computer — in the sidebar, and the runtime's address below. This device only.")}
+            hint={t("The Coding screen (Cursor, Codex and the other coding agents on this computer) in the sidebar, and the runtime's address below. This device only.")}
             checked={developer}
             onChange={setDeveloperTools}
           />
@@ -438,11 +441,11 @@ export function SettingsScreen() {
                 {t("Runtime:")} {window.location.origin} · <span className="text-fg/70">{t("the token is in the server_token file in the data folder")}</span>
               </div>
               <div>
-                <a href="https://github.com/nano-muse/nanoMuse/blob/main/docs/cli.md" target="_blank" rel="noreferrer" className="text-accent underline-offset-2 hover:underline">
+                <a href="https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/cli.md" target="_blank" rel="noreferrer" className="text-accent underline-offset-2 hover:underline">
                   {t("The command line and the API")}
                 </a>
                 {" · "}
-                <a href="https://github.com/nano-muse/nanoMuse/blob/main/docs/harness.md" target="_blank" rel="noreferrer" className="text-accent underline-offset-2 hover:underline">
+                <a href="https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/harness.md" target="_blank" rel="noreferrer" className="text-accent underline-offset-2 hover:underline">
                   {t("nanoMuse on DeepSeek Harness")}
                 </a>
               </div>
@@ -488,11 +491,6 @@ type SectionId = "who" | "sentinel" | "proactivity" | "notifications" | "keep-ru
 const SECTION_IDS: SectionId[] = ["who", "sentinel", "proactivity", "notifications", "keep-running", "model", "appearance", "desktop", "data", "developer", "about"];
 
 /**
- * The phone's Settings: Muse's bar, then white cards of outlined-glyph rows on the grey
- * canvas, grouped the way the Android app groups them — the model, the agent, how it
- * behaves, the app, about — each row opening its own page or screen.
- */
-/**
  * The Version card (contract C2): the installed release, and the latest one as the runtime
  * found it on this fork's GitHub releases — "you have it", "x is out" with Update, or "could
  * not check" with a try again. Permanent: both lines are there whatever the answer. A phone
@@ -520,7 +518,7 @@ function VersionRows({ installed, release, checking, onCheck }: { installed: str
         </a>
       </>
     );
-  else if (release?.latest) latest = <>{t("Latest {version} — you have it", { version: release.latest })} · {checkNow}</>;
+  else if (release?.latest) latest = <>{t("Latest {version}; you have it", { version: release.latest })} · {checkNow}</>;
   else latest = <>{t("Could not check")} · {checkNow}</>;
   return (
     <div className="rounded-2xl bg-surface-2/60 px-3.5 py-2.5 text-[13px]">
@@ -532,11 +530,18 @@ function VersionRows({ installed, release, checking, onCheck }: { installed: str
   );
 }
 
+/**
+ * The phone's Settings: Muse's bar, then white cards of outlined-glyph rows on the grey
+ * canvas, grouped the way the Android app groups them — the model, the agent, how it
+ * behaves, the app, about — each row opening its own page or screen.
+ */
 function SettingsHome({ release, onOpen }: { release: UpdateView | null; onOpen: (id: SectionId) => void }) {
   const { state, setTab } = useStore();
   const t = useT();
   const s = state.settings;
   const hub = state.hub;
+  // what the configured providers cover (contract C11), from the runtime; null on an older one
+  const providers = useProviders();
   const name = state.profile?.name ?? "nanoMuse";
   const themeSetting = useThemeSetting();
   const others = hub?.devices.filter((d) => !d.this && d.kind !== "web") ?? [];
@@ -566,7 +571,18 @@ function SettingsHome({ release, onOpen }: { release: UpdateView | null; onOpen:
           <MuseDivider />
           <MuseRow icon={<Cloud size={22} />} label="nanoMuse Cloud" value={hub?.account.signed_in ? hub.account.hint : t("Sign in")} onClick={() => setTab("account")} />
           <MuseDivider />
-          <MuseRow icon={<Clapperboard size={22} />} label={t("Image & video models")} onClick={() => setTab("connections")} />
+          <MuseRow
+            icon={<Clapperboard size={22} />}
+            label={t("Image & video models")}
+            value={
+              has(providers, "image") === false
+                ? unavailableLine(t, "image", regionOf(hub?.account), getLocale())
+                : has(providers, "video") === false
+                  ? unavailableLine(t, "video", regionOf(hub?.account), getLocale())
+                  : undefined
+            }
+            onClick={() => setTab("connections")}
+          />
           <MuseDivider />
           <MuseRow icon={<BarChart3 size={22} />} label={t("Usage")} onClick={() => setTab("account")} />
         </MuseCard>
@@ -827,7 +843,7 @@ function PushSettings({ name }: { name: string }) {
   const test = async () => {
     try {
       const r = await api.pushTest();
-      toast(r.ok ? t("Sent — it should arrive in a moment") : r.error ?? t("Could not send"));
+      toast(r.ok ? t("Sent. It should arrive in a moment") : r.error ?? t("Could not send"));
     } catch (e) {
       toast((e as Error).message);
     }
@@ -837,7 +853,7 @@ function PushSettings({ name }: { name: string }) {
     status === "unsupported"
       ? t("This browser cannot receive push notifications.")
       : status === "insecure"
-        ? t("Notifications need https:// (or localhost). Over plain http on your LAN the app works, this part stays off — see docs/deployment.md.")
+        ? t("Notifications need https:// (or localhost). Over plain http on your LAN the app works, this part stays off; see docs/deployment.md.")
         : status === "denied"
           ? t("Blocked for this site. Allow notifications in the browser's site settings, then try again.")
           : info && !info.available
@@ -892,6 +908,7 @@ export function ProactivityDial({ value, onChange }: { value: Proactivity; onCha
             key={l.id}
             type="button"
             onClick={() => onChange(l.id)}
+            aria-pressed={value === l.id}
             className={cx(
               "rounded-xl py-1.5 text-[13px] font-medium transition",
               value === l.id ? "bg-surface shadow-sm text-accent" : "text-muted",

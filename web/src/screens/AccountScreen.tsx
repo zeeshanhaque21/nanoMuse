@@ -10,7 +10,7 @@ import { useT, intlLocale } from "../i18n";
 import { useStore } from "../store";
 import { ownKeyLine } from "../region";
 import type { CloudAccount, CloudEvent, CloudMe, CloudSession, UsageRow } from "../types";
-import { cx } from "../util";
+import { cx, relativeSeconds } from "../util";
 
 /**
  * Your nanoMuse Cloud account: who you are signed in as, what has been used (by kind — chat,
@@ -70,7 +70,7 @@ export function AccountScreen() {
               <StarNudgeOnce moment="signed_in" />
             )}
             {me && <Allowance me={me} onChanged={() => void load()} />}
-            {me?.invite?.code && <Invite me={me} />}
+            {me?.invite?.code && <Invite invite={me.invite} />}
             {me && <Usage me={me} />}
             {me && <DataControlsLink me={me} />}
             <Password account={account} onChanged={() => void load()} />
@@ -148,6 +148,7 @@ function Allowance({ me, onChanged }: { me: CloudMe; onChanged: () => void }) {
     invite_bonus_cny: spend.invite_bonus_cny ?? me.invite?.bonus_cny,
     invitee_bonus_cny: spend.invitee_bonus_cny ?? me.invite?.invitee_bonus_cny,
     own_key_docs: spend.own_key_docs,
+    guidance: spend.guidance,
   };
   return (
     <Section title={t("Free allowance")}>
@@ -182,7 +183,7 @@ function Allowance({ me, onChanged }: { me: CloudMe; onChanged: () => void }) {
       )}
       {limited && (
         <p className="text-[12.5px] text-muted">
-          {t("¥{allowance} to start, +¥{invite} for each friend you invite — and +¥{invite} for them; after that, your own key keeps the model going.", {
+          {t("¥{allowance} to start, +¥{invite} for each friend you invite, and +¥{invite} for them; after that, your own key keeps the model going.", {
             allowance: (spend.allowance_cny ?? 10).toFixed(0),
             invite: (info.invite_bonus_cny ?? 5).toFixed(0),
           })}{" "}
@@ -226,10 +227,9 @@ function DataControlsLink({ me }: { me: CloudMe }) {
 }
 
 /** Invite a friend: the code and link, what each sign-up adds, and what came of it so far. */
-function Invite({ me }: { me: CloudMe }) {
+function Invite({ invite: inv }: { invite: NonNullable<CloudMe["invite"]> }) {
   const t = useT();
   const { toast } = useStore();
-  const inv = me.invite!;
   const link = inv.url || "";
   const earned = inv.earned_cny ?? inv.invites * inv.bonus_cny;
   const copy = async (text: string) => {
@@ -242,8 +242,8 @@ function Invite({ me }: { me: CloudMe }) {
   };
   const share = async () => {
     const text = link
-      ? t("Try nanoMuse with me — a fully open-source personal agent, free to use. Sign up with my code {code}: {link}", { code: inv.code, link })
-      : t("Try nanoMuse with me — a fully open-source personal agent, free to use. Sign up with my code {code}", { code: inv.code });
+      ? t("Try nanoMuse with me, a fully open-source personal agent, free to use. Sign up with my code {code}: {link}", { code: inv.code, link })
+      : t("Try nanoMuse with me, a fully open-source personal agent, free to use. Sign up with my code {code}", { code: inv.code });
     const nav = navigator as Navigator & { share?: (data: { text: string }) => Promise<void> };
     if (nav.share) {
       try {
@@ -258,7 +258,7 @@ function Invite({ me }: { me: CloudMe }) {
   return (
     <Section title={t("Invite a friend")}>
       <p className="text-[12.5px] text-muted">
-        {t("Each new person who signs up with your code adds ¥{bonus} to your allowance — and ¥{bonus} to theirs. It never expires.", { bonus: inv.bonus_cny.toFixed(0) })}
+        {t("Each new person who signs up with your code adds ¥{bonus} to your allowance, and ¥{bonus} to theirs. It never expires.", { bonus: inv.bonus_cny.toFixed(0) })}
       </p>
       <div className="flex items-center justify-between gap-3 rounded-2xl bg-surface-2/70 px-3 py-2">
         <div>
@@ -485,7 +485,7 @@ function Sessions({ sessions, loading, onChanged }: { sessions: CloudSession[] |
                 </div>
                 <div className="truncate text-[12px] text-muted">
                   {s.via === "password" ? t("password") : t("code")} · {t("since {date}", { date: new Date(s.created_at * 1000).toLocaleDateString(intlLocale()) })}
-                  {s.last_used_at ? ` · ${t("used {when}", { when: relative(s.last_used_at, t) })}` : ""}
+                  {s.last_used_at ? ` · ${t("used {when}", { when: relativeSeconds(s.last_used_at) })}` : ""}
                 </div>
               </div>
               {!s.current && (
@@ -536,7 +536,7 @@ function Timeline({ events }: { events: CloudEvent[] }) {
       <ul className="space-y-2">
         {shown.map((e, i) => (
           <li key={`${e.ts}-${i}`} className="flex gap-3 text-[12.5px]">
-            <span className="w-[74px] shrink-0 text-muted">{relative(e.ts, t)}</span>
+            <span className="w-[74px] shrink-0 text-muted">{relativeSeconds(e.ts)}</span>
             <span className="min-w-0 flex-1">
               <span className="font-medium">{t(EVENT_LABELS[e.kind] ?? e.kind)}</span>
               {e.detail && <span className="ml-1.5 break-all text-muted">{e.detail}</span>}
@@ -595,13 +595,4 @@ function SignOut({ account, onDone }: { account: CloudAccount | null; onDone: ()
       {account?.is_model && <p className="text-center text-[11.5px] text-muted">{t("The Cloud model is in use; after signing out, pick another under Connections.")}</p>}
     </Section>
   );
-}
-
-function relative(ts: number, t: (s: string, v?: Record<string, string | number>) => string): string {
-  const s = Math.max(0, Math.floor(Date.now() / 1000 - ts));
-  if (s < 60) return t("just now");
-  if (s < 3600) return t("{n} min ago", { n: Math.floor(s / 60) });
-  if (s < 86400) return t("{n} h ago", { n: Math.floor(s / 3600) });
-  if (s < 86400 * 7) return t("{n} d ago", { n: Math.floor(s / 86400) });
-  return new Date(ts * 1000).toLocaleDateString(intlLocale());
 }

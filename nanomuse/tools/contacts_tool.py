@@ -13,13 +13,13 @@ class Contacts(BaseTool):
     name: str = "contacts"
     description: str = (
         "The user's address book. Use it whenever the user names a person you need to write "
-        "to, call, or know something about — do not guess an address. Actions: `search` — "
+        "to, call, or know something about; do not guess an address. Actions: `search`, "
         "people matching `query` (a name, nickname, company, email or phone; every word must "
-        "match, prefixes count) with their emails and phones; `get` — one person by "
-        "`contact_id`; `add` — a person the user tells you how to reach (`name` plus `email`, "
+        "match, prefixes count) with their emails and phones; `get`, one person by "
+        "`contact_id`; `add`, a person the user tells you how to reach (`name` plus `email`, "
         "`phone`, `org`, `note`, `birthday`), kept in the agent's own book and updated if the "
-        "name is already there; `remove` — a person from that own book by `contact_id` "
-        "(people from the user's imported address books cannot be removed here); `list` — the "
+        "name is already there; `remove`, a person from that own book by `contact_id` "
+        "(people from the user's imported address books cannot be removed here); `list`, the "
         "first people alphabetically (`limit`). No match: say so and ask, rather than guess."
     )
     parameters: dict[str, Any] = {
@@ -47,7 +47,8 @@ class Contacts(BaseTool):
         action = args.get("action", "")
         what = args.get("query") or args.get("name") or args.get("contact_id") or ""
         return CallAssessment(
-            risk=RiskLevel.SAFE,
+            # forgetting a person is the one step here that cannot be read back
+            risk=RiskLevel.MODERATE if action == "remove" else RiskLevel.SAFE,
             reads_private_data=action in ("search", "get", "list"),
             summary=f"contacts {action}" + (f" {str(what)[:60]!r}" if what else ""),
         )

@@ -257,7 +257,7 @@ object UpdateChecker {
     }
 
     /** Public so UI can deep-link users to manual download when GitHub is blocked. */
-    const val RELEASES_URL: String = "https://github.com/nano-muse/nanoMuse/releases"
+    const val RELEASES_URL: String = "https://github.com/zeeshanhaque21/nanoMuse/releases"
 
     /** Returns (downloadUrl, sizeBytes) for the first .apk asset, or (null, 0). */
     private fun findApkAsset(assets: JSONArray?): Pair<String?, Long> {

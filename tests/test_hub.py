@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import functools
 import hashlib
 import json
 import queue
@@ -19,7 +20,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from websockets.asyncio.server import serve
+from websockets.asyncio.server import ServerConnection, serve
 
 from nanomuse.cloud import CloudClient, hub_url, model_url
 from nanomuse.config import Settings
@@ -161,6 +162,26 @@ def test_cloud_urls() -> None:
 
 
 # ----------------------------------------------------------------------------- a fake relay
+class _TrackedConnection(ServerConnection):
+    """A server connection the relay keeps a list of, from the TCP accept to the TCP close.
+
+    websockets itself only lists the connections whose handshake succeeded; the HTTP requests
+    the runtime's cloud client also sends to this port (it is the relay's URL) never get
+    that far, so stopping needs its own list to end them from this side."""
+
+    def __init__(self, *args: Any, registry: set[_TrackedConnection], **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._registry = registry
+
+    def connection_made(self, transport: asyncio.BaseTransport) -> None:
+        super().connection_made(transport)
+        self._registry.add(self)
+
+    def connection_lost(self, exc: Exception | None) -> None:
+        self._registry.discard(self)
+        super().connection_lost(exc)
+
+
 class FakeRelay:
     """A relay in its own thread: one runtime connects; a fake phone answers its calls.
 
@@ -180,6 +201,7 @@ class FakeRelay:
         self.phone_handler: Callable[[dict[str, Any]], list[dict[str, Any]]] | None = None
         self.connections = 0
         self._server: Any = None
+        self._conns: set[_TrackedConnection] = set()  # every TCP connection still open
         self._thread = threading.Thread(target=self._run, daemon=True)
 
     # -- lifecycle
@@ -189,14 +211,29 @@ class FakeRelay:
         return self
 
     def stop(self) -> None:
+        """Stop listening, drop every connection still open, wait for the handlers.
+
+        Waiting for the server waits for every accepted TCP connection to close and for
+        every handler to return. Those depend on the peer: an open socket is closed with a
+        close handshake the peer must answer, a socket whose HTTP request never came is kept
+        until it does — each for up to 10 s (websockets' close and open timeouts). The peer
+        here is the runtime under test, whose event loop is gone by the time this runs, so a
+        connection it left open would hold the stop past the 5 s below. Ending those from
+        this side keeps the stop independent of the peer."""
+
         async def _close() -> None:
-            if self._server is not None:
-                self._server.close()
-                await self._server.wait_closed()
+            if self._server is None:
+                return
+            self._server.close()
+            for conn in list(self._conns):
+                conn.transport.abort()
+            await self._server.wait_closed()
 
         asyncio.run_coroutine_threadsafe(_close(), self.loop).result(5)
         self.loop.call_soon_threadsafe(self.loop.stop)
         self._thread.join(5)
+        if not self._thread.is_alive():
+            self.loop.close()
 
     def _run(self) -> None:
         asyncio.set_event_loop(self.loop)
@@ -204,7 +241,12 @@ class FakeRelay:
         self.loop.run_forever()
 
     async def _serve(self) -> None:
-        self._server = await serve(self._handler, "127.0.0.1", 0)
+        self._server = await serve(
+            self._handler,
+            "127.0.0.1",
+            0,
+            create_connection=functools.partial(_TrackedConnection, registry=self._conns),
+        )
         self.port = self._server.sockets[0].getsockname()[1]
         self.ready.set()
 
@@ -393,6 +435,41 @@ def test_client_refuses_to_hammer_on_bad_key(relay: FakeRelay) -> None:
         await client.stop()
 
     asyncio.run(scenario())
+
+
+def test_a_paused_hub_is_waited_out_not_hammered(monkeypatch: pytest.MonkeyPatch) -> None:
+    """4003 with the reason `hub_paused` (docs/hub.md): the client waits a minute before the
+    next try instead of reconnecting on the 1 s backoff; a plain 4003 keeps the backoff."""
+    from websockets.exceptions import ConnectionClosed
+    from websockets.frames import Close
+
+    async def scenario(reason: str) -> tuple[str, str, float]:
+        client = HubClient("wss://relay.test/v1/hub", "k", "pc-1", "Desk", actions=["info"])
+        seen: list[tuple[str, str, float]] = []
+
+        async def paused() -> None:
+            raise ConnectionClosed(Close(4003, reason), None)
+
+        async def spy(aw, timeout):  # noqa: ANN001
+            # the back-off wait: note how long it would be and end the loop instead
+            seen.append((client.state, client.state_detail, timeout))
+            client._stop.set()
+            aw.close()
+
+        monkeypatch.setattr(client, "_session", paused)
+        monkeypatch.setattr("nanomuse.hub.client.asyncio.wait_for", spy)
+        client.start()
+        for _ in range(100):
+            if seen:
+                break
+            await asyncio.sleep(0.02)
+        await client.stop()
+        return seen[0]
+
+    state, detail, wait = asyncio.run(scenario("hub_paused"))
+    assert state == "disconnected" and "paused" in detail and wait == 60.0
+    state, _, wait = asyncio.run(scenario("replaced"))
+    assert state == "disconnected" and wait == 1.0
 
 
 def test_a_certificate_failure_is_a_disconnect_not_a_refusal(

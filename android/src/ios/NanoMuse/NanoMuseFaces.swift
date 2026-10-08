@@ -140,6 +140,15 @@ final class NanoMuseFaceStore: ObservableObject {
         custom[mood] = squared
     }
 
+    /// C12: the folder changed under the store — another account's face is in place (or none).
+    /// The motion clips are per face and go; NanoMuseAvatarMotion draws new ones when enabled.
+    func reload() {
+        NanoMuseAvatarMotion.shared.clear()
+        custom = [:]
+        meta = Meta()
+        load()
+    }
+
     /// Back to the dragon.
     func reset(sync: Bool = true) {
         NanoMuseAvatarMotion.shared.clear()
@@ -454,9 +463,14 @@ enum NanoMuseTones {
 
 /// Whether the UI runs in Chinese right now (the in-app override wins).
 enum NanoMuseLocale {
-    static var isChinese: Bool {
-        let lang = AppBundle.current.preferredLocalizations.first
+    /// The BCP-47 tag of the language the screens show right now (`zh-Hans`, `en`, `ja`): the
+    /// in-app override wins, else the system's first preferred language.
+    static var tag: String {
+        AppBundle.current.preferredLocalizations.first
             ?? Locale.preferredLanguages.first ?? "en"
-        return lang.lowercased().hasPrefix("zh")
+    }
+
+    static var isChinese: Bool {
+        tag.lowercased().hasPrefix("zh")
     }
 }

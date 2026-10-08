@@ -31,7 +31,7 @@ import {
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api, fileUrl, frameUrl } from "../api";
 import { AllowanceWays } from "./AllowanceWays";
-import { t, useT } from "../i18n";
+import { localLabel, t, useT } from "../i18n";
 import { useStore } from "../store";
 import type {
   ApprovalEvent,
@@ -232,11 +232,19 @@ export function ApprovalCard({
 }: {
   event: ApprovalEvent;
   name?: string;
-  onDecide: (approved: boolean, scope: string) => void;
+  onDecide: (approved: boolean, scope: string) => void | Promise<void>;
 }) {
   const [showArgs, setShowArgs] = useState(false);
   const [more, setMore] = useState(false);
   const [overflows, setOverflows] = useState(false);
+  // one decision at a time: the buttons go quiet until the runtime has answered (or the call failed),
+  // so a second tap while the first is in flight cannot approve twice or approve and then deny
+  const [deciding, setDeciding] = useState(false);
+  const decide = (approved: boolean, scope: string) => {
+    if (deciding) return;
+    setDeciding(true);
+    void Promise.resolve(onDecide(approved, scope)).finally(() => setDeciding(false));
+  };
   const cardRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   const t = useT();
@@ -323,8 +331,9 @@ export function ApprovalCard({
           <div className="flex flex-col gap-2 px-4 pb-4 pt-2">
             <button
               type="button"
-              onClick={() => onDecide(true, "once")}
-              className="h-[46px] w-full rounded-full bg-accent text-[15px] font-semibold text-accent-fg transition active:scale-[0.98]"
+              onClick={() => decide(true, "once")}
+              disabled={deciding}
+              className="h-[46px] w-full rounded-full bg-accent text-[15px] font-semibold text-accent-fg transition active:scale-[0.98] disabled:opacity-60"
             >
               {t("Allow once")}
             </button>
@@ -335,16 +344,18 @@ export function ApprovalCard({
                 <button
                   key={scope}
                   type="button"
-                  onClick={() => onDecide(true, scope)}
-                  className="h-11 w-full truncate rounded-full bg-surface-2 px-4 text-[15px] font-medium transition active:scale-[0.98]"
+                  onClick={() => decide(true, scope)}
+                  disabled={deciding}
+                  className="h-11 w-full truncate rounded-full bg-surface-2 px-4 text-[15px] font-medium transition active:scale-[0.98] disabled:opacity-60"
                 >
                   {scopeLabel(scope, event.tool, event.target, event.args)}
                 </button>
               ))}
             <button
               type="button"
-              onClick={() => onDecide(false, "once")}
-              className="h-11 w-full rounded-full bg-surface-2 text-[15px] font-medium transition active:scale-[0.98]"
+              onClick={() => decide(false, "once")}
+              disabled={deciding}
+              className="h-11 w-full rounded-full bg-surface-2 text-[15px] font-medium transition active:scale-[0.98] disabled:opacity-60"
             >
               {t("Deny")}
             </button>
@@ -403,6 +414,16 @@ export function QuestionCard({ event, name }: { event: QuestionEvent; name: stri
 // ------------------------------------------------------------------ notice
 /** A line from the runtime — in the person's language when the sentence is one we know;
  * a failed run's raw exception stays one tap away for bug reports. */
+/**
+ * A notice's sentence in the UI language. A reminder, a routine or a tidy-up opens with the
+ * run's label ("Reminder: <title>"), a fixed English part and the person's own words: the
+ * fixed part is translated and the words stay as written.
+ */
+function noticeText(event: NoticeEvent): string {
+  if (event.source === "reminder" || event.source === "memory") return localLabel(event.text);
+  return t(event.text, event.vars);
+}
+
 export function Notice({ event }: { event: NoticeEvent }) {
   const t = useT();
   const [showDetail, setShowDetail] = useState(false);
@@ -428,7 +449,7 @@ export function Notice({ event }: { event: NoticeEvent }) {
           event.level === "error" && "bg-rose-500/12 text-rose-700 dark:text-rose-300",
         )}
       >
-        {t(event.text, event.vars)}
+        {noticeText(event)}
         {detail && (
           <>
             {" "}
@@ -443,8 +464,7 @@ export function Notice({ event }: { event: NoticeEvent }) {
   );
 }
 
-// ------------------------------------------------------------------ artifact
-/** A file the agent made. Opens in the in-app viewer (pages render sandboxed, never with the app's origin). */
+// ------------------------------------------------------------------ browser
 /** The agent's browser, as a card: the latest frame, where it is, what it just did. */
 export function BrowserCard({ event, onOpen }: { event: BrowserEvent; onOpen: (id: string) => void }) {
   const [gone, setGone] = useState(false);
@@ -638,7 +658,7 @@ function holdThing(tool: string, t: (s: string) => string): string {
 
 /** The one line of a hold: "Your turn — sign in to Gmail" or "You took over the browser". */
 export function holdLine(hold: HoldEvent, t: (s: string, v?: Record<string, string | number>) => string): string {
-  if (hold.by === "agent") return hold.reason ? t("Your turn — {reason}", { reason: hold.reason }) : t("Your turn");
+  if (hold.by === "agent") return hold.reason ? t("Your turn: {reason}", { reason: hold.reason }) : t("Your turn");
   return t("You took over {thing}", { thing: holdThing(hold.tool, t) });
 }
 
@@ -690,7 +710,7 @@ export function HoldCard({ event, name = "nanoMuse" }: { event: HoldEvent; name?
             <div className="mt-1.5 text-[12.5px] leading-snug text-muted">
               {on
                 ? event.by === "agent"
-                  ? t("Do this part yourself, then press Done — {name} looks again and carries on from there.", { name })
+                  ? t("Do this part yourself, then press Done. {name} looks again and carries on from there.", { name })
                   : t("{name} waits. Press Done when you are finished and it looks again.", { name })
                 : ended}
             </div>
@@ -743,6 +763,8 @@ export function describeHandsStep(last: NonNullable<HandsEvent["last"]>, t: (s: 
   }
 }
 
+// ------------------------------------------------------------------ artifact
+/** A file the agent made. Opens in the in-app viewer (pages render sandboxed, never with the app's origin). */
 export function ArtifactCard({ event, onOpen }: { event: ArtifactEvent; onOpen: (path: string) => void }) {
   const t = useT();
   const kind = fileKind(event.name);

@@ -1,6 +1,6 @@
 {
   "name": "dsh-nanomuse",
-  "version": "0.1.37",
+  "version": "0.1.41",
   "description": "nanoMuse as a DeepSeek Harness bundle: the account, the face, the persona, Hands and Reach of a Muse-style personal agent, as plugins.",
   "license": "GPL-3.0-or-later",
   "repository": {
@@ -39,6 +39,10 @@
     "./connectors-tools": {
       "types": "./lib/types/connectors-tools.d.ts",
       "default": "./lib/connectors-tools.js"
+    },
+    "./hands-tools": {
+      "types": "./lib/types/hands-tools.d.ts",
+      "default": "./lib/hands-tools.js"
     },
     "./client": {
       "types": "./lib/types/client/index.d.ts",

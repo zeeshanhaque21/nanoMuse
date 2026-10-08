@@ -271,11 +271,62 @@ def _platform() -> str:
     return sys.platform
 
 
+# names that are commands to the machine, not applications a person opens: `open_app` is
+# for a window on the screen, and these would stop the session or worse
+NOT_APPLICATIONS = frozenset(
+    {
+        "shutdown",
+        "poweroff",
+        "reboot",
+        "halt",
+        "init",
+        "telinit",
+        "systemctl",
+        "launchctl",
+        "logout",
+        "pkill",
+        "killall",
+        "kill",
+        "taskkill",
+        "rm",
+        "del",
+        "format",
+        "diskutil",
+        "mkfs",
+        "dd",
+        "sh",
+        "bash",
+        "zsh",
+        "fish",
+        "cmd",
+        "powershell",
+        "pwsh",
+        "sudo",
+        "su",
+        "doas",
+        "runas",
+    }
+)
+
+
+def looks_like_an_application(name: str) -> bool:
+    """A bare name a person would call an application: no path, no shell characters,
+    not one of the commands in :data:`NOT_APPLICATIONS`."""
+    bare = name.strip()
+    if not bare or len(bare) > 80:
+        return False
+    if any(ch in bare for ch in "/\\;&|<>`$\"'\n\r\t") or bare.startswith("-"):
+        return False
+    return bare.lower().removesuffix(".exe") not in NOT_APPLICATIONS
+
+
 def open_application(name: str) -> str:
     """Start an application by the name a person uses for it. Returns what was started."""
     name = name.strip()
     if not name:
         raise ValueError("an application name is required")
+    if not looks_like_an_application(name):
+        raise ValueError(f"{name!r} is not an application to open")
     platform = _platform()
     if platform == "darwin":
         subprocess.run(["open", "-a", name], check=True, timeout=20, capture_output=True)
@@ -351,6 +402,27 @@ def _desktop_entry(name: str) -> Path | None:
 
 BACKENDS = ("auto", "desktop", "pyautogui", "xdotool")
 
+WAYLAND_TEXT = (
+    "Wayland session: no global screen or cursor for a program to drive. Log in with Xorg "
+    "(the session chooser on the login screen), or run the hands on another computer of "
+    "the account."
+)
+
+
+def wayland_session(env: dict[str, str] | None = None) -> bool:
+    """Linux: whether this is a Wayland session — the one case the hands cannot work in at
+    all (no global pointer to move, a root grab that shows none of the native windows).
+    ``XDG_SESSION_TYPE`` is what the login manager sets; a ``WAYLAND_DISPLAY`` without a
+    ``DISPLAY`` is the same thing from a compositor started by hand. XWayland (both set,
+    session type wayland) counts: the X11 tools would reach X windows only. The desktop
+    app's operator (``harness/desktop/src/operator.ts``) draws the same line."""
+    if not _platform().startswith("linux"):
+        return False
+    e = os.environ if env is None else env
+    if (e.get("XDG_SESSION_TYPE") or "").strip().lower() == "wayland":
+        return True
+    return bool(e.get("WAYLAND_DISPLAY")) and not e.get("DISPLAY")
+
 
 def _make_backend(name: str) -> HandsBackend:
     if name == "desktop":
@@ -387,16 +459,10 @@ def pick_backend(preference: str = "auto") -> HandsBackend:
         # macOS under the desktop app: the operator or nothing. pyautogui here would ask
         # TCC a second time, for the runtime, and the fix is the one the operator named.
         raise HandsUnavailable(operator_reason)
-    if (
-        sys.platform.startswith("linux")
-        and os.environ.get("WAYLAND_DISPLAY")
-        and not os.environ.get("DISPLAY")
-    ):
-        raise HandsUnavailable(
-            operator_reason
-            or "this is a Wayland session without XWayland: the mouse and keyboard cannot be "
-            "driven from a program here. Log in to an X11 session, or run the phone's hands."
-        )
+    if wayland_session():
+        # Linux under Wayland: xdotool and pyautogui would start (XWayland is an X server)
+        # and then move nothing the person can see — said plainly instead, once.
+        raise HandsUnavailable(operator_reason or WAYLAND_TEXT)
     errors: list[str] = [operator_reason] if operator_reason else []
     order = {"pyautogui": ["pyautogui"], "xdotool": ["xdotool"]}.get(
         preference, ["pyautogui", "xdotool"]
@@ -426,6 +492,7 @@ def describe_availability(preference: str = "auto") -> dict[str, Any]:
 
 __all__ = [
     "BACKENDS",
+    "WAYLAND_TEXT",
     "HandsBackend",
     "HandsUnavailable",
     "PyAutoGUIHands",
@@ -434,4 +501,5 @@ __all__ = [
     "hands_space",
     "open_application",
     "pick_backend",
+    "wayland_session",
 ]

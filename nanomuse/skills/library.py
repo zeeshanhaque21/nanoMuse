@@ -79,8 +79,9 @@ class Skill:
             if not root.is_dir():
                 continue
             for p in sorted(root.rglob("*")):
-                if p.is_file() and not any(part.startswith(".") for part in p.parts):
-                    out.append(p.relative_to(self.path))
+                rel = p.relative_to(self.path)
+                if p.is_file() and not any(part.startswith(".") for part in rel.parts):
+                    out.append(rel)
         return out
 
     def to_dict(self, body: bool = False) -> dict[str, Any]:
@@ -492,15 +493,21 @@ async def fetch_skill_text(url: str) -> str:
     url = raw_skill_url(url)
     if not url.startswith("https://"):
         raise ValueError("the link must start with https://")
-    async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
-        r = await client.get(url, headers={"User-Agent": "nanoMuse"})
-    if r.status_code >= 400:
-        raise ValueError(f"HTTP {r.status_code} for {url}")
-    if len(r.content) > MAX_SKILL_BYTES:
+    from nanomuse.tools.web import read_capped
+
+    async with (
+        httpx.AsyncClient(timeout=20, follow_redirects=True) as client,
+        client.stream("GET", url, headers={"User-Agent": "nanoMuse"}) as r,
+    ):
+        if r.status_code >= 400:
+            raise ValueError(f"HTTP {r.status_code} for {url}")
+        # one byte past the cap is enough to know; the rest is never read
+        content = await read_capped(r, MAX_SKILL_BYTES + 1)
+    if len(content) > MAX_SKILL_BYTES:
         raise ValueError(
             f"that file is larger than a SKILL.md can be ({MAX_SKILL_BYTES // 1024} KB)"
         )
-    text = r.content.decode("utf-8", errors="replace")
+    text = content.decode("utf-8", errors="replace")
     if not text.lstrip().startswith("---"):
         raise ValueError("that is not a SKILL.md (it does not start with front matter)")
     return text

@@ -42,6 +42,72 @@ export interface RuntimeInfo {
   source: 'env' | 'path' | 'none'
   ok: boolean
   problem?: 'missing' | 'not-executable' | 'not-found'
+  /** Linux: the display session (`hands-check.ts` `displayInfo`); absent elsewhere. */
+  display?: { session: 'x11' | 'wayland' | 'none'; reason: string }
+  /** How the last mount of the hands' MCP client went (`hands-tools.ts`); `at` 0 before the first. Absent on an older host. */
+  mount?: { at: number; ok: boolean; reason: string }
+}
+
+/**
+ * Why this computer has no hands, in one sentence, from `hands/runtime`: the runtime is not
+ * there (three ways), or it is there and its mount failed. Empty when nothing is known to be
+ * wrong, so the caller keeps its own wording.
+ */
+export function handsOffReason(t: Translate, info: RuntimeInfo): string {
+  if (!info.ok) return info.problem === 'missing' ? t('pmRuntimeMissing', { path: info.path }) : info.problem === 'not-executable' ? t('pmRuntimeNotExec', { path: info.path }) : t('pmRuntimeNone')
+  if (info.mount && !info.mount.ok) return t('pmRuntimeMountFailed', { path: info.path, reason: info.mount.reason })
+  return ''
+}
+
+/** `hands/runtime` once per mount; `null` until it answers. */
+export function useRuntimeInfo(): RuntimeInfo | null {
+  const [info, setInfo] = useState<RuntimeInfo | null>(null)
+  useEffect(() => {
+    let on = true
+    void call<RuntimeInfo>('hands/runtime')
+      .then((r) => {
+        if (on) setInfo(r)
+      })
+      .catch(() => undefined)
+    return () => {
+      on = false
+    }
+  }, [])
+  return info
+}
+
+/**
+ * Settings → Computer use where nothing is gated: on Linux the two rows — the screen and the
+ * mouse and keyboard — stand for the display session, which is what decides whether the hands
+ * can work there: a check on X11; on Wayland the hands are off, with the runtime's sentence
+ * and the way to Xorg. Elsewhere (Windows) the one line as before.
+ */
+export function DisplayRows({ t, name }: { t: Translate; name: string }): ReactNode {
+  const info = useRuntimeInfo()
+  const display = info?.display
+  if (!display) return h('p', null, t('cuNotGated'))
+  const on = display.session === 'x11'
+  const badge = on ? t('cuX11') : display.session === 'wayland' ? t('cuWaylandBadge') : t('cuNoDisplayBadge')
+  const row = (key: string, title: string, sub: string) =>
+    h(
+      'div',
+      { key, className: 'nm-row' },
+      h('div', { className: 'nm-row-main' }, h('span', { className: 'nm-row-title' }, title, h('span', { className: `nm-hc-live${on ? ' nm-hc-live-ok' : ''}` }, badge)), h('span', { className: 'nm-row-sub' }, sub)),
+      on ? h('span', { className: 'nm-ob-granted', 'aria-label': t('obAllowed') }, h(IconCheck, { size: 16 })) : null,
+    )
+  return h(
+    'div',
+    { className: 'nm-card' },
+    row('screen', t('cuScreenRow'), t('cuScreenRowSub', { name })),
+    row('input', t('cuInputRow'), t('cuInputRowSub', { name })),
+    on
+      ? null
+      : h(
+          'div',
+          { className: 'nm-row', role: 'alert' },
+          h('span', { className: 'nm-row-sub nm-wrap' }, display.session === 'wayland' ? `${t('cuHandsOff')} ${display.reason} ${t('cuWaylandHint')}` : `${t('cuHandsOff')} ${t('cuDisplayNone')} ${display.reason}`),
+        ),
+  )
 }
 
 type Busy = 'screenshot' | 'move' | null
@@ -112,13 +178,13 @@ function ShotResult({ t, shot, perms }: { t: Translate; shot: ScreenshotResult; 
     'div',
     { className: 'nm-hc-result nm-hc-bad', role: 'alert' },
     h('span', { className: 'nm-hc-black', 'aria-hidden': true }),
-    h('span', { className: 'nm-wrap' }, shot.black ? t('pmTryShotBlack') : t('pmTryFailed', { error: shot.error ?? '' })),
+    h('span', { className: 'nm-wrap' }, shot.black ? t(perms.helper ? 'pmTryShotBlackHelper' : 'pmTryShotBlack') : t('pmTryFailed', { error: shot.error ?? '' })),
     shot.black
       ? h(
           'span',
           { className: 'nm-hc-actions' },
           h('button', { type: 'button', className: 'nm-pill nm-pill-ghost nm-pill-sm', onClick: () => perms.settings('screen') }, t('obOpenSettings')),
-          h('button', { type: 'button', className: 'nm-pill nm-pill-sm', onClick: () => perms.relaunch() }, t('pmBlackRelaunch')),
+          h('button', { type: 'button', className: 'nm-pill nm-pill-sm', onClick: () => perms.relaunch() }, t(perms.helper ? 'pmBlackRelaunchHelper' : 'pmBlackRelaunch')),
         )
       : null,
   )
@@ -126,49 +192,33 @@ function ShotResult({ t, shot, perms }: { t: Translate; shot: ScreenshotResult; 
 
 /** Which binary the hands run; loud about a path that leads nowhere. */
 export function RuntimeRow({ t }: { t: Translate }): ReactNode {
-  const [info, setInfo] = useState<RuntimeInfo | null>(null)
-  useEffect(() => {
-    let on = true
-    void call<RuntimeInfo>('hands/runtime')
-      .then((r) => {
-        if (on) setInfo(r)
-      })
-      .catch(() => undefined)
-    return () => {
-      on = false
-    }
-  }, [])
+  const info = useRuntimeInfo()
   if (!info) return null
-  const sub = info.ok
-    ? `${info.path} · ${info.source === 'env' ? t('pmRuntimeBundled') : t('pmRuntimeOnPath')}`
-    : info.problem === 'missing'
-      ? t('pmRuntimeMissing', { path: info.path })
-      : info.problem === 'not-executable'
-        ? t('pmRuntimeNotExec', { path: info.path })
-        : t('pmRuntimeNone')
+  const problem = handsOffReason(t, info)
+  const sub = problem || `${info.path} · ${info.source === 'env' ? t('pmRuntimeBundled') : t('pmRuntimeOnPath')}`
   return h(
     'div',
-    { className: `nm-row${info.ok ? '' : ' nm-hc-runtime-bad'}` },
+    { className: `nm-row${problem ? ' nm-hc-runtime-bad' : ''}` },
     h('span', { className: 'nm-row-icon' }, h(IconMonitor, { size: 18 })),
     h('div', { className: 'nm-row-main' }, h('span', { className: 'nm-row-title' }, t('pmRuntime')), h('span', { className: 'nm-row-sub nm-wrap nm-hc-mono' }, sub)),
-    info.ok ? h('span', { className: 'nm-ob-granted', 'aria-label': t('obAllowed') }, h(IconCheck, { size: 16 })) : null,
+    problem ? null : h('span', { className: 'nm-ob-granted', 'aria-label': t('obAllowed') }, h(IconCheck, { size: 16 })),
   )
 }
 
-/** What the black-screen notice needs of `usePermissions()`; the capsule builds it from the live state so it need not poll. */
-export type BlackScreenPerms = Pick<Permissions, 'blackScreen' | 'relaunch' | 'clearBlackScreen'>
+/** What the black-screen notice needs of `usePermissions()`; the capsule builds it from the live state so it need not poll (and does not know about the helper). */
+export type BlackScreenPerms = Pick<Permissions, 'blackScreen' | 'relaunch' | 'clearBlackScreen'> & Partial<Pick<Permissions, 'helper'>>
 
-/** The hands saw a black screen: Screen Recording for nanoMuse Desktop, then a relaunch — the button is here. */
+/** The hands saw a black screen: Screen Recording for nanoMuse Desktop (or for the helper, nanoMuse Computer Use), then a relaunch — the button is here. */
 export function BlackScreenNotice({ t, perms, compact = false }: { t: Translate; perms: BlackScreenPerms; compact?: boolean }): ReactNode {
   if (!perms.blackScreen) return null
   return h(
     'div',
     { className: `nm-hc-black-notice${compact ? ' nm-hc-compact' : ''}`, role: 'alert' },
-    h('div', { className: 'nm-hc-black-text' }, h('strong', null, t('pmBlackTitle')), compact ? null : h('span', { className: 'nm-wrap' }, t('pmBlackBody'))),
+    h('div', { className: 'nm-hc-black-text' }, h('strong', null, t('pmBlackTitle')), compact ? null : h('span', { className: 'nm-wrap' }, t(perms.helper ? 'pmBlackBodyHelper' : 'pmBlackBody'))),
     h(
       'div',
       { className: 'nm-hc-actions' },
-      h('button', { type: 'button', className: 'nm-pill nm-pill-sm', onClick: () => perms.relaunch() }, h(IconRefresh, { size: 14 }), ' ', t('pmBlackRelaunch')),
+      h('button', { type: 'button', className: 'nm-pill nm-pill-sm', onClick: () => perms.relaunch() }, h(IconRefresh, { size: 14 }), ' ', t(perms.helper ? 'pmBlackRelaunchHelper' : 'pmBlackRelaunch')),
       h('button', { type: 'button', className: 'nm-pill nm-pill-ghost nm-pill-sm', onClick: () => perms.clearBlackScreen() }, t('pmBlackLater')),
     ),
   )

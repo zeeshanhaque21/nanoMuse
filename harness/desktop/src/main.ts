@@ -2,13 +2,18 @@ import { pathToFileURL } from "node:url";
 import { app, BrowserWindow, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, powerSaveBlocker, screen, shell, systemPreferences, Tray } from "electron";
 import { randomBytes } from "node:crypto";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { GLOW_HIDE_MS, GLOW_SETTLE_MS, type Leak, LeakLog, leakIsEvidence, leakIsReal, pointerAction, REARM_DELAYS_MS, staleInstance } from "./glow";
+import { defaultHelperPath, HELPER_NAME, MacHelper } from "./mac-helper";
 import * as macPermissions from "./mac-permissions";
 import { Operator, SCREEN_PERMISSION_TEXT, type Marker } from "./operator";
 import { startOperatorServer, type OperatorServer } from "./operator-server";
+import { EXTERNAL_URL, navigationVerdict, sameOrigin } from "./navigation";
+import { relink } from "./profile-link";
+import { maskProxyUrl, proxyEnv, validProxyUrl } from "./proxy";
 
 /**
  * nanoMuse Desktop — the nanoMuse desktop, built on DeepSeek Harness.
@@ -93,6 +98,8 @@ let mainWindow: BrowserWindow | null = null;
 let hostUrl: string | null = null;
 let quitting = false;
 let restarts = 0;
+/** The proxy the running Host was started with ("" for none): the Network row offers a restart while it differs from the setting. */
+let hostProxy = "";
 
 /**
  * `~/.nanomuse/desktop`, the harness home of this app alone — the CLI's `~/.dsh` is left alone.
@@ -204,18 +211,7 @@ function ensureProfile(dshDir: string): string {
   }
   const link = join(dir, "node_modules", BUNDLE);
   const target = join(dshDir, "node_modules", BUNDLE);
-  let current: string | undefined;
-  try {
-    current = lstatSync(link).isSymbolicLink() ? readlinkSync(link) : "(not a link)";
-  } catch {
-    current = undefined;
-  }
-  if (current !== target) {
-    rmSync(link, { recursive: true, force: true });
-    // a junction on Windows: no privilege needed, and it points at a directory
-    symlinkSync(target, link, process.platform === "win32" ? "junction" : "dir");
-    log(`profile: ${BUNDLE} → ${target}`);
-  }
+  if (relink(link, target)) log(`profile: ${BUNDLE} → ${target}`);
   return dir;
 }
 
@@ -320,6 +316,13 @@ function startHost(): Promise<string> {
         }
         const shellPath = loginShellPath();
         if (shellPath) env.PATH = shellPath;
+        // The proxy for the model providers (the Cloud page's Network row): on the Host's
+        // environment, which Node's fetch reads with NODE_USE_ENV_PROXY and the runtime's
+        // httpx reads as it is; the relay and loopback are on NO_PROXY (src/proxy.ts).
+        const proxied = proxyEnv(prefs.proxy, prefs.relayHosts ?? []);
+        Object.assign(env, proxied);
+        hostProxy = proxied.HTTPS_PROXY ?? "";
+        if (hostProxy) log(`proxy: providers through ${maskProxyUrl(hostProxy)}; never for ${proxied.NO_PROXY}`);
         const runtime = bundledRuntime();
         if (!env.NANOMUSE_PY && runtime) env.NANOMUSE_PY = runtime;
         // Loud when the hands have nothing to run: a packaged build without its runtime, or
@@ -355,8 +358,10 @@ function startHost(): Promise<string> {
         });
         proc.stderr?.setEncoding("utf8");
         proc.stderr?.on("data", (chunk: string) => {
-          hostStderr = (hostStderr + chunk).slice(-65_536);
-          for (const line of chunk.split("\n")) if (line.trim()) log(`dsh! ${line}`);
+          const lines = chunk.split("\n").filter((line) => line.trim());
+          const kept = process.platform === "linux" ? lines.filter((line) => !glibCritical(line)) : lines;
+          if (kept.length) hostStderr = (hostStderr + kept.join("\n") + "\n").slice(-65_536);
+          for (const line of kept) log(`dsh! ${line}`);
         });
         proc.on("error", (exc) => {
           if (settled) return;
@@ -365,19 +370,39 @@ function startHost(): Promise<string> {
           reject(exc);
         });
         proc.on("exit", (code, signal) => {
-          log(`host exited: code=${code} signal=${signal}`);
+          log(`host exited: code=${code} signal=${signal}${glibCriticals ? ` (${glibCriticals} GLib-GObject-CRITICAL lines from sharp's libvips not logged)` : ""}`);
+          glibCriticals = 0;
           child = null;
           if (!settled) {
             settled = true;
             clearTimeout(timer);
             reject(new Error(`the host exited before it was ready (code ${code ?? signal})`));
-          } else if (!quitting) {
+          } else if (!quitting && !restartingHost) {
             void hostStopped();
           }
         });
       })
       .catch(reject);
   });
+}
+
+/** How many `GLib-GObject-CRITICAL` lines the Host's stderr carried this launch (Linux; see glibCritical). */
+let glibCriticals = 0;
+const GLIB_CRITICAL = /GLib-GObject-CRITICAL \*\*: .*g_object_(un)?ref: assertion 'G_IS_OBJECT \(object\)' failed/;
+
+/**
+ * Linux: whether a Host stderr line is the GLib assertion that sharp's libvips raises on
+ * every picture it touches inside Electron — the harness resizes the hands' screenshots
+ * with sharp, whose prebuilt libvips carries its own GLib, while Electron's binary links
+ * the system's and leaks its symbols into the process (electron/electron#46323; sharp's
+ * install notes, "Electron and Linux"). Harmless to the picture, 65 000 lines a session
+ * in the log. The first one is logged with this explanation; the rest are counted.
+ */
+function glibCritical(line: string): boolean {
+  if (!GLIB_CRITICAL.test(line)) return false;
+  glibCriticals += 1;
+  if (glibCriticals === 1) log(`dsh! ${line.trim()} — sharp's libvips and Electron's GLib in one process (electron/electron#46323); further lines of this kind are counted, not logged`);
+  return true;
 }
 
 function stopHost(): Promise<void> {
@@ -397,6 +422,30 @@ function stopHost(): Promise<void> {
     }
     setTimeout(done, 5000).unref();
   });
+}
+
+/** A host restart the person asked for is under way: the exit handler must not treat it as a crash. */
+let restartingHost = false;
+
+/**
+ * Stop the Host and start it again, the window staying up: what *Restart now* under the
+ * Network row does, so a proxy just set reaches the provider calls without quitting the app.
+ * The operator server and the helper stay; the page reloads under the Host's new token.
+ */
+async function restartHost(): Promise<void> {
+  if (restartingHost || quitting || !hostUrl) return;
+  restartingHost = true;
+  log("host: restarting at the person's request");
+  try {
+    await stopHost();
+    restarts = 0;
+    await boot();
+  } catch (exc) {
+    log(`restart failed: ${String(exc)}`);
+    await reportStartupFailure(exc);
+  } finally {
+    restartingHost = false;
+  }
 }
 
 function details(message: string): string {
@@ -527,8 +576,41 @@ const PERMISSION_PANES: Record<PermissionKind | "files", string> = {
   files: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles",
 };
 
-/** The only links that leave the app: http(s) with a host. */
-const EXTERNAL_URL = /^https?:\/\/[^/]/;
+// ---- macOS: "nanoMuse Computer Use", the helper that holds the hands' permissions ----------
+//
+// The grants go to the responsible process, so a separate app bundle started through `open`
+// has its own rows in the Screen Recording and Accessibility panes and can be restarted on
+// its own when a grant lands (src/mac-helper.ts has the why and the protocol). The operator
+// sends it every screenshot and action; mac-permissions.ts reads its grants. Without the
+// bundle (a development run without build.sh, an older build) everything works as before.
+
+let macHelper: MacHelper | null = null;
+
+/** The helper client, made once on macOS; null elsewhere. Starting it is `helperReady()`. */
+function helper(): MacHelper | null {
+  if (process.platform !== "darwin") return null;
+  if (!macHelper) {
+    macHelper = new MacHelper({
+      appPath: defaultHelperPath(process.execPath, app.isPackaged, join(__dirname, ".."), process.env),
+      dataDir: join(app.getPath("userData"), "computer-use"),
+      log,
+    });
+    macPermissions.useHelper(macHelper);
+  }
+  return macHelper;
+}
+
+/** The helper running (started now if need be); false where there is none or it failed to start. */
+async function helperReady(): Promise<boolean> {
+  const h = helper();
+  return h ? h.ready() : false;
+}
+
+/** What the permission dialogs name as the switch to flip. */
+function permissionTarget(): string {
+  return macPermissions.helperInUse() ? HELPER_NAME : "nanoMuse Desktop";
+}
+
 let awakeBlocker: number | null = null;
 
 function releaseAwake(): void {
@@ -547,6 +629,10 @@ interface Prefs {
   quickChat: boolean;
   /** The person's own quick-chat combination (an Electron accelerator); absent means the platform's default. */
   quickChatKey?: string;
+  /** The proxy for the model providers (`http://host:port`, `socks5://host:port`); absent means none. */
+  proxy?: string;
+  /** The relay hosts the plugin reported (its `config.baseURL`), kept on NO_PROXY with the default relay. */
+  relayHosts?: string[];
 }
 const PREFS_DEFAULT: Prefs = { openAtLogin: false, menuBar: true, quickChat: true };
 /** ⌥ Space on macOS as in Muse; Ctrl+Alt+Space where Alt+Space is the window menu. */
@@ -682,9 +768,10 @@ function applyPrefs(): void {
   applyOpenAtLogin();
 }
 
-/** What the General page shows: the values, the key in force and the default, whether another app holds it, and which of the three this platform can do. */
-function prefsView(): Prefs & { quickChatKey: string; quickChatDefault: string; quickChatTaken: boolean; supports: { openAtLogin: boolean; menuBar: boolean; quickChat: boolean } } {
-  return { ...prefs, quickChatKey: quickChatKey(), quickChatDefault: QUICK_CHAT_DEFAULT, quickChatTaken, supports: { openAtLogin: process.platform !== "linux" || Boolean(process.env.APPIMAGE) || app.isPackaged, menuBar: true, quickChat: true } };
+/** What the General page shows: the values, the key in force and the default, whether another app holds it, and which of the three this platform can do; the Network row's proxy, as kept and as shown. */
+function prefsView(): Prefs & { quickChatKey: string; quickChatDefault: string; quickChatTaken: boolean; proxy: string; proxyMasked: string; proxyApplied: string; supports: { openAtLogin: boolean; menuBar: boolean; quickChat: boolean } } {
+  const proxy = validProxyUrl(prefs.proxy ?? "") ?? "";
+  return { ...prefs, quickChatKey: quickChatKey(), quickChatDefault: QUICK_CHAT_DEFAULT, quickChatTaken, proxy, proxyMasked: maskProxyUrl(proxy), proxyApplied: hostProxy, supports: { openAtLogin: process.platform !== "linux" || Boolean(process.env.APPIMAGE) || app.isPackaged, menuBar: true, quickChat: true } };
 }
 
 /**
@@ -709,32 +796,37 @@ async function reportBug(): Promise<{ screenshot: string; url: string }> {
       screenshot = "";
     }
   }
-  const body = [
-    "## What happened",
-    "",
-    "",
-    "## What I expected",
-    "",
-    "",
-    "## Where",
-    "",
-    ...facts,
-    "",
-    screenshot ? `(Drag the screenshot nanoMuse saved to Downloads — ${screenshot.split(/[\\/]/).pop()} — in here.)` : "",
-  ].join("\n");
-  const url = `${ISSUES_PAGE}/new?labels=desktop&body=${encodeURIComponent(body)}`;
+  // The issue form's fields, by id (.github/ISSUE_TEMPLATE/bug_report.yml): a bare `body`
+  // would be dropped on the way to the form.
+  const params = new URLSearchParams({
+    template: "bug_report.yml",
+    labels: "bug,desktop",
+    surface: "Desktop app",
+    version: app.getVersion(),
+    os: facts.join(" · "),
+    what: screenshot ? `\n\n(Drag the screenshot nanoMuse saved to Downloads — ${screenshot.split(/[\\/]/).pop()} — in here.)` : "",
+  });
+  const url = `${ISSUES_PAGE}/new?${params.toString()}`;
   void shell.openExternal(url);
   return { screenshot, url };
 }
 
 /** The requests the preload bridge forwards from the web client (see preload.ts). */
 function registerBridge(): void {
-  ipcMain.handle("nanomuse:info", () => ({ version: app.getVersion(), platform: process.platform, arch: process.arch }));
-  ipcMain.handle("nanomuse:permissions", () => ({
-    accessibility: permissionState("accessibility"),
-    screen: permissionState("screen"),
-    microphone: permissionState("microphone"),
-  }));
+  // appImage: the Linux build runs from an AppImage (the runtime sets APPIMAGE), so About offers the AppImage of a newer version, not the .deb
+  ipcMain.handle("nanomuse:info", () => ({ version: app.getVersion(), platform: process.platform, arch: process.arch, appImage: Boolean(process.env.APPIMAGE) }));
+  ipcMain.handle("nanomuse:permissions", async () => {
+    // the helper's grants, fresh, when it runs — started again when it went away (the
+    // "Quit & Reopen" the Screen Recording switch offers ends it); `helper` tells the page
+    // which rows to name
+    if (macHelper?.present() && (await helperReady())) await macHelper.status().catch(() => undefined);
+    return {
+      accessibility: permissionState("accessibility"),
+      screen: permissionState("screen"),
+      microphone: permissionState("microphone"),
+      helper: macPermissions.helperInUse(),
+    };
+  });
   ipcMain.handle("nanomuse:permissions:request", async (_e, kind: PermissionKind) => {
     if (process.platform !== "darwin") return "not-needed" satisfies PermissionState;
     if (!(kind in PERMISSION_PANES)) return "denied" satisfies PermissionState;
@@ -744,7 +836,8 @@ function registerBridge(): void {
     return permissionState(kind);
   });
   // macOS applies Screen Recording only to freshly started processes: after granting it, the
-  // runtime that takes the screenshots has to start again.
+  // process that takes the screenshots has to start again — the helper when it is in use,
+  // the whole app otherwise.
   ipcMain.handle("nanomuse:relaunch", () => {
     relaunchNow();
   });
@@ -773,11 +866,23 @@ function registerBridge(): void {
         const { quickChatKey: _drop, ...rest } = prefs;
         prefs = !key || key === QUICK_CHAT_DEFAULT ? rest : validAccelerator(key) ? { ...rest, quickChatKey: key } : prefs;
       }
+      if (typeof patch.proxy === "string") {
+        // the proxy for the providers: an empty string removes it; an address that is not one is ignored
+        const { proxy: _drop, ...rest } = prefs;
+        const url = validProxyUrl(patch.proxy);
+        prefs = !patch.proxy.trim() ? rest : url ? { ...rest, proxy: url } : prefs;
+      }
+      if (Array.isArray(patch.relayHosts)) {
+        // the relay the plugin talks to, so a self-hosted one is on NO_PROXY as well
+        prefs = { ...prefs, relayHosts: patch.relayHosts.filter((h): h is string => typeof h === "string" && h.trim() !== "").slice(0, 8) };
+      }
       writePrefs();
       applyPrefs();
     }
     return prefsView();
   });
+  // the Network row's *Restart now*: the Host again with the proxy just set, the window staying
+  ipcMain.handle("nanomuse:restart-host", () => restartHost());
   ipcMain.handle("nanomuse:report-bug", () => reportBug());
   ipcMain.handle("nanomuse:permissions:guide", () => guidePermissions());
   ipcMain.handle("nanomuse:content-protection", (e, on: boolean) => {
@@ -792,12 +897,18 @@ function registerBridge(): void {
 // ---- the overlays while the hands work (0.1.34) ---------------------------------------------
 //
 // Two windows the web client drives over IPC, both with content protection on so neither is
-// ever in a screenshot the hands take (UI-TARS does the same with its ScreenMarker):
-//   • the glow — transparent, click-through, always on top, over the whole display: an
-//     animated border says "the agent has the hands", the agent's face follows the pointer;
-//   • the capsule — a small always-on-top card with the question the agent asked before a
-//     step (Allow once / Deny) or the hold ("Your turn — Done"), shown when the main window
-//     is not the one in front, so the person can answer from wherever they are.
+// ever in a screenshot the hands take (UI-TARS does the same with its ScreenMarker). They are
+// the phone's HandsStage and HandsCapsule, drawn for a desktop (resources/glow.html,
+// resources/capsule.html):
+//   • the glow — transparent, click-through, always on top, over the whole display: a light
+//     breathing along the four edges says "the agent has the hands" (blue; amber while they
+//     wait for the person), and at the point of each action the marker — ring, arc, dot, the
+//     action's name — locks on and ripples; a drag draws its path;
+//   • the capsule — a small always-on-top pill at the top of the screen with the agent's face,
+//     "Step N" and what the hands are doing, Stop and "I'll take it", and under it the
+//     question the agent asked before a step (Allow once / Deny) or the hold ("Your turn —
+//     Done"); shown when the main window is not the one in front, so the person can see and
+//     answer from wherever they are. It moves out of the way when the hands act under it.
 
 interface OverlayCard {
   id: string;
@@ -807,8 +918,25 @@ interface OverlayCard {
   actions: { id: string; label: string; tone?: "on" | "no" }[];
 }
 
+interface OverlayHands {
+  active: boolean;
+  held: boolean;
+  x: number;
+  y: number;
+  kind: string;
+  /** The step the hands are on, from 1; 0 before the first. */
+  step: number;
+  /** The capsule's first line ("Step 3", "Your turn") and its second (what the hands do, the hold's reason). */
+  title: string;
+  text: string;
+  face: string;
+  /** The capsule's buttons, in the client's words; empty when not offered. */
+  stop: string;
+  take: string;
+}
+
 interface OverlayState {
-  hands: { active: boolean; held: boolean; x: number; y: number; kind: string; text: string; face: string } | null;
+  hands: OverlayHands | null;
   cards: OverlayCard[];
 }
 
@@ -816,13 +944,151 @@ let glowWindow: BrowserWindow | null = null;
 let capsuleWindow: BrowserWindow | null = null;
 let overlayState: OverlayState = { hands: null, cards: [] };
 let glowHideTimer: NodeJS.Timeout | null = null;
+let capsuleHideTimer: NodeJS.Timeout | null = null;
+/** The capsule's width and its margin from the top of the work area; it sits top-centre like the phone's, and at the bottom when it has dodged. */
+const CAPSULE_WIDTH = 420;
+const CAPSULE_MARGIN = 12;
+/** Whether the capsule has moved to the bottom of the work area to get out from under the hands. */
+let capsuleDodged = false;
+/** How far from the capsule a pointer action is still "under" it. */
+const CAPSULE_DODGE_PX = 8;
+/** How long the capsule is given to be out of the way before the pointer moves. */
+const CAPSULE_DODGE_MS = 120;
+/** Linux: the capsule is off the screen for a capture (no content protection there). */
+let capsuleAside = false;
+/** The display bounds the glow was last given (JSON), so applyOverlay does not set them again and again. */
+let glowBounds = "";
 /** The last action the operator carried out, for the glow's marker (UI-TARS's prediction marker): fractions of the display, the words, when. */
 let overlayMarker: (Marker & { at: number }) | null = null;
 let markerTimer: NodeJS.Timeout | null = null;
 /** How long a marker stays after its action; the glow stays up with it even before the web client has caught up. */
 const MARKER_MS = 2200;
-/** True between the operator's "before" and "after" capture hooks (Linux): the glow must not come back into the picture. */
-let capturing = false;
+/**
+ * Linux: why the glow is off the screen for a moment — `capture` between the operator's
+ * "before" and "after" hooks (it must not be in the picture), `action` while a pointer
+ * action runs (an unmapped window takes no input, whatever its X11 input shape — see
+ * src/glow.ts for what goes wrong with the shape). applyOverlay does not bring it back
+ * meanwhile.
+ */
+let glowAside: "" | "capture" | "action" = "";
+/**
+ * Settles once the glow, last shown, is click-through again: on X11 Chromium clears the
+ * input shape Electron's setIgnoreMouseEvents set on every bounds change (creation, first
+ * map, setBounds — src/glow.ts), so it is set again after each of those, and the operator
+ * waits for the settled one before it moves the pointer with the glow up (operator.ts,
+ * onAction).
+ */
+let glowClickThrough: Promise<void> = Promise.resolve();
+let glowRearmTimers: NodeJS.Timeout[] = [];
+/** The watchdog's count of repairs (Linux): the glow's page saw the pointer, which a click-through window never does. */
+const glowLeaks = new LeakLog();
+/** Linux: when the glow was last shown, resized or moved — Chromium makes up an enter and a move right after (glow.ts, LEAK_GRACE_MS). */
+let glowShownAt = 0;
+/** Linux: when this process last set the glow's bounds itself, so a resize of the window manager's doing is told apart in the log. */
+let glowOwnBoundsAt = 0;
+
+/** Linux: the glow's input shape, set now (one X request; a no-op elsewhere). */
+function setGlowClickThrough(): void {
+  const win = glowWindow;
+  if (!win || win.isDestroyed() || process.platform !== "linux") return;
+  win.setIgnoreMouseEvents(true, { forward: true });
+}
+
+/**
+ * Linux: sets the glow's input shape again at REARM_DELAYS_MS — right after the native
+ * call that cleared it (setImmediate), when the X server's ConfigureNotify for it has been
+ * handled, and once more late. Every show, resize and move of the glow arms this, and so
+ * does every action with the glow up. The promise settles with the GLOW_SETTLE_MS one.
+ */
+function armGlowClickThrough(): void {
+  const win = glowWindow;
+  if (!win || win.isDestroyed() || process.platform !== "linux") return;
+  glowShownAt = Date.now();
+  for (const timer of glowRearmTimers) clearTimeout(timer);
+  glowRearmTimers = [];
+  setImmediate(setGlowClickThrough);
+  glowClickThrough = new Promise<void>((resolve) => {
+    for (const delay of REARM_DELAYS_MS) {
+      if (delay <= 0) continue;
+      glowRearmTimers.push(
+        setTimeout(() => {
+          setGlowClickThrough();
+          if (delay === GLOW_SETTLE_MS) resolve();
+        }, delay),
+      );
+    }
+  });
+}
+
+/**
+ * Linux: the glow's page reported a pointer event. A click-through glow gets none (its
+ * input shape is one pixel at (0,0)), so this is the X server telling us the shape is
+ * gone — set it again at once, and say so in the log once per episode, so a log someone
+ * sends in shows when and where it happened. The enter and move Chromium makes up right
+ * after a show are not evidence and are let pass (glow.ts, leakIsEvidence).
+ */
+function repairGlowShape(leak: Leak): void {
+  const now = Date.now();
+  if (!leakIsEvidence(leak, now - glowShownAt)) return;
+  setGlowClickThrough();
+  armGlowClickThrough();
+  if (glowLeaks.record(now)) log(`glow: the pointer reached the glow (${leak.type} at ${Math.round(leak.x)},${Math.round(leak.y)}) — its X11 input shape was lost; set again (repair ${glowLeaks.repairs})`);
+}
+
+/**
+ * Linux: the glow's X window was resized or moved. Chromium has just cleared its input
+ * shape for that (glow.ts), so it is set again; when the change was not this process's
+ * own `setBounds`, the log says who-knows-what did it, once per such change.
+ */
+function glowReBounded(what: "resize" | "move"): void {
+  const win = glowWindow;
+  if (!win || win.isDestroyed()) return;
+  if (Date.now() - glowOwnBoundsAt > 1000) {
+    const b = win.getBounds();
+    log(`glow: ${what}d from outside to ${b.width}×${b.height} at ${b.x},${b.y}; its X11 input shape is set again`);
+  }
+  armGlowClickThrough();
+}
+
+/** Shows the glow (never taking focus) and, on Linux, makes it click-through again once it is up. */
+function showGlow(): void {
+  const win = glowWindow;
+  if (!win || win.isDestroyed()) return;
+  win.showInactive();
+  armGlowClickThrough();
+}
+
+/**
+ * Linux: the glow steps aside for a pointer action — hidden before the pointer moves,
+ * back right after the action with the marker fresh, so the ring and the action's name
+ * appear where the click just landed. Resolves once the X server has the window unmapped.
+ */
+async function glowStepAside(): Promise<void> {
+  const win = glowWindow;
+  if (!win || win.isDestroyed() || !win.isVisible()) return;
+  glowAside = "action";
+  win.hide();
+  await new Promise((r) => setTimeout(r, GLOW_HIDE_MS));
+}
+
+/** The operator's last action becomes the marker, shown for MARKER_MS; the glow follows it (applyOverlay). */
+function setMarker(marker: Marker): void {
+  overlayMarker = { ...marker, at: Date.now() };
+  if (markerTimer) clearTimeout(markerTimer);
+  markerTimer = setTimeout(() => {
+    markerTimer = null;
+    applyOverlay();
+  }, MARKER_MS + 50);
+  applyOverlay();
+}
+
+/** Linux: after the action — the glow comes back (if it is still wanted) with the marker drawn anew, timed from now. */
+function glowStepBack(): void {
+  if (glowAside !== "action") return;
+  glowAside = "";
+  if (overlayMarker) setMarker(overlayMarker);
+  else applyOverlay();
+}
 
 // ---- the operator: the hands of this computer, run by this process -------------------------
 
@@ -837,34 +1103,69 @@ function ensureOperator(): Promise<OperatorServer | null> {
   operator ??= new Operator({
     log,
     permissions: () => ({ accessibility: permissionState("accessibility") !== "denied", screen: permissionState("screen") === "granted" || permissionState("screen") === "not-needed" }),
-    onAction: (marker) => {
-      overlayMarker = { ...marker, at: Date.now() };
-      if (markerTimer) clearTimeout(markerTimer);
-      markerTimer = setTimeout(() => {
-        markerTimer = null;
-        applyOverlay();
-      }, MARKER_MS + 50);
-      applyOverlay();
+    // macOS: "nanoMuse Computer Use" takes the screenshots and moves the mouse when it is there (src/mac-helper.ts)
+    helper: helper() ?? undefined,
+    onAction: async (marker) => {
+      setMarker(marker);
+      await capsuleDodge(marker);
+      if (process.platform !== "linux") return;
+      // Linux: a pointer action must not land on the glow. It steps aside (unmapped, so it
+      // takes no input whatever its X11 shape) and comes back in onActed; for the other
+      // actions the glow stays up and is made click-through again before the operator goes on.
+      if (pointerAction(marker.kind)) return glowStepAside();
+      if (glowWindow && !glowWindow.isDestroyed() && glowWindow.isVisible()) armGlowClickThrough();
+      return glowClickThrough;
     },
+    onActed: process.platform === "linux" ? () => glowStepBack() : undefined,
     // Linux has no content protection: the glow would be in the picture, so it steps out of
     // the way for the capture (one frame) and comes back; macOS and Windows exclude it anyway.
     onCapture:
       process.platform === "linux"
         ? async (phase) => {
-            capturing = phase === "before";
-            if (!glowWindow || glowWindow.isDestroyed()) return;
-            if (phase === "before" && glowWindow.isVisible()) {
-              glowWindow.hide();
-              await new Promise((r) => setTimeout(r, 70));
-            } else if (phase === "after" && overlayUp()) glowWindow.showInactive();
+            if (!glowWindow || glowWindow.isDestroyed()) {
+              glowAside = phase === "before" ? "capture" : "";
+              capsuleAside = phase === "before";
+              if (capsuleAside && capsuleWindow && !capsuleWindow.isDestroyed() && capsuleWindow.isVisible()) {
+                capsuleWindow.hide();
+                await new Promise((r) => setTimeout(r, 70));
+              } else if (!capsuleAside) applyOverlay();
+              return;
+            }
+            if (phase === "before") {
+              capsuleAside = true;
+              const capsuleWasUp = Boolean(capsuleWindow && !capsuleWindow.isDestroyed() && capsuleWindow.isVisible());
+              if (capsuleWasUp) capsuleWindow?.hide();
+              if (glowAside === "action") {
+                if (capsuleWasUp) await new Promise((r) => setTimeout(r, 70));
+                return; // the glow is already off the screen for the action
+              }
+              glowAside = "capture";
+              if (glowWindow.isVisible() || capsuleWasUp) {
+                glowWindow.hide();
+                await new Promise((r) => setTimeout(r, 70));
+              }
+            } else {
+              capsuleAside = false;
+              if (glowAside === "capture") {
+                glowAside = "";
+                if (overlayUp()) showGlow();
+              }
+              applyOverlay();
+            }
           }
         : undefined,
   });
   operatorStarting = startOperatorServer(operator, log)
     .then((server) => {
       operatorServer = server;
-      const info = operator?.info();
-      log(`operator: ${info?.available ? "available" : `not available (${info?.reason ?? "?"})`} · display ${info?.display.width}×${info?.display.height} (scale ${info?.display.scaleFactor})`);
+      const status = () => {
+        const info = operator?.info();
+        log(`operator: ${info?.available ? "available" : `not available (${info?.reason ?? "?"})`} · display ${info?.display.width}×${info?.display.height} (scale ${info?.display.scaleFactor})`);
+      };
+      // macOS: the line is about the helper's grants once it runs — written after it is up
+      // (or has failed), not before, when it would name nanoMuse Desktop's own rows
+      if (process.platform === "darwin" && helper()?.present()) void helperReady().then(status, status);
+      else status();
       return server;
     })
     .catch((exc: unknown) => {
@@ -881,6 +1182,8 @@ async function stopOperator(): Promise<void> {
   const server = operatorServer;
   operatorServer = null;
   if (server) await server.close().catch(() => undefined);
+  // macOS: the helper goes with us (it would notice on its own within two seconds)
+  if (macHelper) await macHelper.stop().catch(() => undefined);
 }
 
 /** The `--operator-check` run: the operator alone, asked over its own HTTP, the answers to a file. */
@@ -935,7 +1238,7 @@ function overlayWindow(kind: "glow" | "capsule"): BrowserWindow {
     skipTaskbar: true,
     focusable: false,
     alwaysOnTop: true,
-    ...(glow ? { x: display.bounds.x, y: display.bounds.y, width: display.bounds.width, height: display.bounds.height } : { width: 360, height: 120, x: display.workArea.x + display.workArea.width - 376, y: display.workArea.y + 16 }),
+    ...(glow ? { x: display.bounds.x, y: display.bounds.y, width: display.bounds.width, height: display.bounds.height } : { ...capsulePlace(60), width: CAPSULE_WIDTH + 16, height: 60 }),
     webPreferences: OVERLAY_PREFS,
   });
   // Never in a screenshot: the hands must not see our own marks on the screen.
@@ -943,10 +1246,55 @@ function overlayWindow(kind: "glow" | "capsule"): BrowserWindow {
   win.setAlwaysOnTop(true, "screen-saver");
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   if (glow) win.setIgnoreMouseEvents(true, { forward: true });
+  if (glow && process.platform === "linux") {
+    // Chromium clamps a new window to the work area (under GNOME Shell: the display less
+    // its dock and top bar), so the glow would stop short of two edges; the display's
+    // bounds, asked for again, take. Every bounds change — this one, the first map, a
+    // later setBounds — costs the window its input shape (src/glow.ts): set it again.
+    const b = win.getBounds();
+    glowOwnBoundsAt = Date.now();
+    if (b.width !== display.bounds.width || b.height !== display.bounds.height || b.x !== display.bounds.x || b.y !== display.bounds.y) {
+      log(`glow: made ${b.width}×${b.height} at ${b.x},${b.y} (the work area); set to the display's ${display.bounds.width}×${display.bounds.height}`);
+      win.setBounds(display.bounds);
+    }
+    win.on("show", () => armGlowClickThrough());
+    win.on("resize", () => glowReBounded("resize"));
+    win.on("move", () => glowReBounded("move"));
+  }
   win.on("page-title-updated", (e) => e.preventDefault());
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   void win.loadFile(join(ownResources(), `${kind}.html`));
   return win;
+}
+
+/** Where the capsule sits: top-centre of the primary display's work area, or bottom-centre once it has dodged the hands. */
+function capsulePlace(height: number): { x: number; y: number } {
+  const area = screen.getPrimaryDisplay().workArea;
+  const x = Math.round(area.x + (area.width - (CAPSULE_WIDTH + 16)) / 2);
+  const y = capsuleDodged ? area.y + area.height - height - CAPSULE_MARGIN : area.y + CAPSULE_MARGIN;
+  return { x, y };
+}
+
+/**
+ * The hands are about to act at the marker's point (fractions of the display): when that is
+ * under the capsule, the capsule moves to the other edge of the work area first and the
+ * operator waits CAPSULE_DODGE_MS so the pointer never lands on it. The phone's capsule dodges
+ * the finger the same way.
+ */
+async function capsuleDodge(marker: Marker): Promise<void> {
+  const win = capsuleWindow;
+  if (!win || win.isDestroyed() || !win.isVisible() || !pointerAction(marker.kind)) return;
+  const display = screen.getPrimaryDisplay();
+  const b = win.getBounds();
+  const under = (fx: number, fy: number) => {
+    const px = display.bounds.x + fx * display.bounds.width;
+    const py = display.bounds.y + fy * display.bounds.height;
+    return px >= b.x - CAPSULE_DODGE_PX && px <= b.x + b.width + CAPSULE_DODGE_PX && py >= b.y - CAPSULE_DODGE_PX && py <= b.y + b.height + CAPSULE_DODGE_PX;
+  };
+  if (!under(marker.fx, marker.fy) && !(marker.fx2 !== undefined && marker.fy2 !== undefined && under(marker.fx2, marker.fy2))) return;
+  capsuleDodged = !capsuleDodged;
+  win.setBounds({ ...b, ...capsulePlace(b.height) });
+  await new Promise((r) => setTimeout(r, CAPSULE_DODGE_MS));
 }
 
 function sendOverlay(win: BrowserWindow | null, state: unknown): void {
@@ -964,9 +1312,12 @@ function overlayUp(): boolean {
   return Boolean((hands && (hands.active || hands.held)) || freshMarker());
 }
 
-/** What the glow draws: the web client's state (face, caption) and the operator's marker (the exact point of the last action). */
+/** Nothing on the hands yet: the shape the pages expect. */
+const NO_HANDS: OverlayHands = { active: false, held: false, x: -1, y: -1, kind: "", step: 0, title: "", text: "", face: "", stop: "", take: "" };
+
+/** What the glow draws: the web client's state (the hands' own point, the action's kind) and the operator's marker (the exact point of the last action). */
 function glowState(): Record<string, unknown> {
-  const hands = overlayState.hands ?? { active: false, held: false, x: -1, y: -1, kind: "", text: "", face: "" };
+  const hands = overlayState.hands ?? NO_HANDS;
   const marker = freshMarker();
   return { ...hands, active: true, marker: marker ? { x: marker.fx, y: marker.fy, x2: marker.fx2 ?? -1, y2: marker.fy2 ?? -1, kind: marker.kind, text: marker.text, at: marker.at } : null };
 }
@@ -975,26 +1326,56 @@ function applyOverlay(): void {
   // the glow: up while the hands are active (or held) or the operator just acted, down a moment after
   if (overlayUp()) {
     if (glowHideTimer) { clearTimeout(glowHideTimer); glowHideTimer = null; }
-    if (!glowWindow || glowWindow.isDestroyed()) glowWindow = overlayWindow("glow");
     const display = screen.getPrimaryDisplay();
-    glowWindow.setBounds(display.bounds);
-    if (!glowWindow.isVisible() && !capturing) glowWindow.showInactive();
+    const bounds = JSON.stringify(display.bounds);
+    if (!glowWindow || glowWindow.isDestroyed()) {
+      glowWindow = overlayWindow("glow"); // made at the display's bounds
+      glowBounds = bounds;
+    }
+    // only when the display changed: on X11 every configure of the window costs it its input shape
+    if (bounds !== glowBounds) {
+      glowBounds = bounds;
+      glowOwnBoundsAt = Date.now();
+      glowWindow.setBounds(display.bounds);
+    }
+    if (!glowWindow.isVisible() && !glowAside) showGlow();
     sendOverlay(glowWindow, glowState());
   } else if (glowWindow && !glowWindow.isDestroyed() && glowWindow.isVisible()) {
     sendOverlay(glowWindow, { active: false });
     if (!glowHideTimer) glowHideTimer = setTimeout(() => { glowHideTimer = null; glowWindow?.hide(); }, 400);
   }
-  // the capsule: the cards, but only when the main window is not in front (the page shows them itself then)
+  // the capsule: the hands' pill and the cards, but only when the main window is not in front
+  // (the chat shows the run and the cards itself then), and never while a capture is on (Linux)
   const mainInFront = Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused() && mainWindow.isVisible());
+  const hands = overlayState.hands && (overlayState.hands.active || overlayState.hands.held) ? overlayState.hands : null;
   const cards = mainInFront ? [] : overlayState.cards;
-  if (cards.length) {
-    if (!capsuleWindow || capsuleWindow.isDestroyed()) capsuleWindow = overlayWindow("capsule");
+  const capsuleUp = !mainInFront && !capsuleAside && (Boolean(hands) || cards.length > 0);
+  if (capsuleUp) {
+    if (capsuleHideTimer) { clearTimeout(capsuleHideTimer); capsuleHideTimer = null; }
+    if (!capsuleWindow || capsuleWindow.isDestroyed()) {
+      capsuleDodged = false;
+      capsuleWindow = overlayWindow("capsule");
+    }
     capsuleWindow.setFocusable(true);
-    if (!capsuleWindow.isVisible()) capsuleWindow.showInactive();
-    sendOverlay(capsuleWindow, { cards });
+    if (!capsuleWindow.isVisible()) {
+      capsuleDodged = false;
+      capsuleWindow.setBounds({ ...capsuleWindow.getBounds(), ...capsulePlace(capsuleWindow.getBounds().height) });
+      capsuleWindow.showInactive();
+    }
+    sendOverlay(capsuleWindow, { hands, cards });
   } else if (capsuleWindow && !capsuleWindow.isDestroyed() && capsuleWindow.isVisible()) {
-    sendOverlay(capsuleWindow, { cards: [] });
-    capsuleWindow.hide();
+    if (capsuleAside) {
+      capsuleWindow.hide();
+      return;
+    }
+    // a moment, so a step's end and the next step's start do not blink the capsule
+    if (!capsuleHideTimer) {
+      capsuleHideTimer = setTimeout(() => {
+        capsuleHideTimer = null;
+        sendOverlay(capsuleWindow, { hands: null, cards: [] });
+        capsuleWindow?.hide();
+      }, 220);
+    }
   }
 }
 
@@ -1010,8 +1391,12 @@ function registerOverlays(): void {
             x: typeof hands.x === "number" ? hands.x : -1,
             y: typeof hands.y === "number" ? hands.y : -1,
             kind: String(hands.kind ?? "").slice(0, 32),
-            text: String(hands.text ?? "").slice(0, 120),
+            step: typeof hands.step === "number" && hands.step > 0 ? Math.min(9999, Math.floor(hands.step)) : 0,
+            title: String(hands.title ?? "").slice(0, 60),
+            text: String(hands.text ?? "").slice(0, 160),
             face: typeof hands.face === "string" && /^(data:image\/[a-z+]+;base64,|https?:\/\/127\.0\.0\.1|https?:\/\/localhost)/.test(hands.face) ? hands.face.slice(0, 400_000) : "",
+            stop: String(hands.stop ?? "").slice(0, 40),
+            take: String(hands.take ?? "").slice(0, 40),
           }
         : null,
       cards: Array.isArray(state.cards)
@@ -1028,17 +1413,22 @@ function registerOverlays(): void {
   });
   ipcMain.on("nanomuse:overlay:ready", (e) => {
     if (e.sender === glowWindow?.webContents) sendOverlay(glowWindow, overlayState.hands ? { ...overlayState.hands } : { active: false });
-    if (e.sender === capsuleWindow?.webContents) sendOverlay(capsuleWindow, { cards: overlayState.cards });
+    if (e.sender === capsuleWindow?.webContents) sendOverlay(capsuleWindow, { hands: overlayState.hands && (overlayState.hands.active || overlayState.hands.held) ? overlayState.hands : null, cards: overlayState.cards });
   });
   ipcMain.on("nanomuse:overlay:act", (e, payload: { card?: string; action?: string }) => {
     if (e.sender !== capsuleWindow?.webContents || !payload) return;
     mainWindow?.webContents.send("nanomuse:overlay:action", { card: String(payload.card ?? ""), action: String(payload.action ?? "") });
   });
+  ipcMain.on("nanomuse:overlay:leak", (e, leak: unknown) => {
+    // Linux: the glow's page saw the pointer — only possible when its input shape is gone
+    if (process.platform !== "linux" || e.sender !== glowWindow?.webContents || !leakIsReal(leak)) return;
+    repairGlowShape(leak);
+  });
   ipcMain.on("nanomuse:overlay:resize", (e, height: number) => {
     if (e.sender !== capsuleWindow?.webContents || typeof height !== "number") return;
-    const h = Math.max(60, Math.min(480, Math.round(height)));
+    const h = Math.max(48, Math.min(480, Math.round(height)));
     const b = capsuleWindow.getBounds();
-    if (b.height !== h) capsuleWindow.setBounds({ ...b, height: h });
+    if (b.height !== h) capsuleWindow.setBounds({ ...b, height: h, ...capsulePlace(h) });
   });
   app.on("browser-window-focus", applyOverlay);
   app.on("browser-window-blur", applyOverlay);
@@ -1052,13 +1442,21 @@ function registerOverlays(): void {
 async function guidePermissions(): Promise<Record<PermissionKind, PermissionState>> {
   const state = () => ({ accessibility: permissionState("accessibility"), screen: permissionState("screen"), microphone: permissionState("microphone") });
   if (process.platform !== "darwin") return state();
+  // the helper first, so the dialogs name its rows and its grants are the ones read
+  await helperReady();
+  const viaHelper = macPermissions.helperInUse();
+  const target = permissionTarget();
   if (permissionState("accessibility") !== "granted") {
     const { response } = await dialog.showMessageBox({
       type: "info",
       message: zh ? "nanoMuse 需要「辅助功能」权限" : "nanoMuse needs Accessibility",
       detail: zh
-        ? "动手操作电脑要靠它移动鼠标和输入。系统会弹出请求；在「系统设置 → 隐私与安全性 → 辅助功能」里打开 nanoMuse Desktop 即可——它附带的运行时作为应用的一部分运行，不会单独出现在列表里。"
-        : "The hands move the mouse and type through it. The system asks next; in System Settings → Privacy & Security → Accessibility, switch on nanoMuse Desktop. The runtime it bundles runs as part of the app and does not appear separately.",
+        ? viaHelper
+          ? `动手操作电脑要靠它移动鼠标和输入。系统会弹出请求；在「系统设置 → 隐私与安全性 → 辅助功能」里打开 ${target} 即可——这是 nanoMuse 自带的一个小程序，专门负责截图和操作，权限只给它。`
+          : "动手操作电脑要靠它移动鼠标和输入。系统会弹出请求；在「系统设置 → 隐私与安全性 → 辅助功能」里打开 nanoMuse Desktop 即可——它附带的运行时作为应用的一部分运行，不会单独出现在列表里。"
+        : viaHelper
+          ? `The hands move the mouse and type through it. The system asks next; in System Settings → Privacy & Security → Accessibility, switch on ${target} — the small program nanoMuse brings along for the screenshots and the input. Only it needs the permission.`
+          : "The hands move the mouse and type through it. The system asks next; in System Settings → Privacy & Security → Accessibility, switch on nanoMuse Desktop. The runtime it bundles runs as part of the app and does not appear separately.",
       buttons: [zh ? "继续" : "Continue", zh ? "以后再说" : "Later"],
       defaultId: 0,
       cancelId: 1,
@@ -1070,8 +1468,12 @@ async function guidePermissions(): Promise<Record<PermissionKind, PermissionStat
       type: "info",
       message: zh ? "nanoMuse 需要「屏幕录制」权限" : "nanoMuse needs Screen Recording",
       detail: zh
-        ? "它靠截图看到屏幕上有什么。点「继续」后系统会询问一次；在「屏幕录制」面板里打开 nanoMuse Desktop（只需要这一项），然后重新启动应用——macOS 的这项权限只对重新启动后的应用生效。"
-        : "It sees the screen through screenshots. After Continue the system asks once; switch on nanoMuse Desktop in the Screen Recording pane (that one entry is all), then relaunch the app — macOS applies this permission to freshly started apps only.",
+        ? viaHelper
+          ? `它靠截图看到屏幕上有什么。点「继续」后系统会询问一次；在「屏幕录制」面板里打开 ${target}（只需要这一项）。打开后它会自己重新启动，应用本身不用重启。`
+          : "它靠截图看到屏幕上有什么。点「继续」后系统会询问一次；在「屏幕录制」面板里打开 nanoMuse Desktop（只需要这一项），然后重新启动应用——macOS 的这项权限只对重新启动后的应用生效。"
+        : viaHelper
+          ? `It sees the screen through screenshots. After Continue the system asks once; switch on ${target} in the Screen Recording pane (that one entry is all). It restarts by itself once the switch is on; the app does not need to.`
+          : "It sees the screen through screenshots. After Continue the system asks once; switch on nanoMuse Desktop in the Screen Recording pane (that one entry is all), then relaunch the app — macOS applies this permission to freshly started apps only.",
       buttons: [zh ? "继续" : "Continue", zh ? "以后再说" : "Later"],
       defaultId: 0,
       cancelId: 1,
@@ -1088,6 +1490,12 @@ async function guidePermissions(): Promise<Record<PermissionKind, PermissionStat
  * before 0.1.37. Then the pane, where the switch is, and the watch for the grant.
  */
 async function requestScreenRecording(openPane = true): Promise<void> {
+  if (await helperReady()) {
+    // the helper's own request: its row appears in the pane; it opens the pane itself when asked
+    await macHelper?.request("screen", openPane).catch(() => undefined);
+    watchScreenGrant();
+    return;
+  }
   if (!macPermissions.askScreen()) {
     try {
       await desktopCapturer.getSources({ types: ["screen"], thumbnailSize: { width: 1, height: 1 } });
@@ -1101,6 +1509,11 @@ async function requestScreenRecording(openPane = true): Promise<void> {
 
 /** The Accessibility dialog (`AXIsProcessTrustedWithOptions` with the prompt — it also lists the app in the pane), then the pane when it is still off. */
 function requestAccessibility(openPane = true): void {
+  if (macPermissions.helperInUse()) {
+    // the helper's dialog and row; the pane when its grant is still off
+    void macHelper?.request("accessibility", openPane && permissionState("accessibility") !== "granted").catch(() => undefined);
+    return;
+  }
   const asked = macPermissions.askAccessibility();
   const trusted = systemPreferences.isTrustedAccessibilityClient(!asked);
   if (!trusted && openPane) void shell.openExternal(PERMISSION_PANES.accessibility);
@@ -1114,22 +1527,43 @@ function requestAccessibility(openPane = true): void {
  * the grant needs. Nothing is asked when both are already on, nor under `--operator-check`
  * / `--screenshot` (the checks must not block on a dialog). The status goes to the log.
  */
-function ensureMacPermissionsAtLaunch(): void {
+async function ensureMacPermissionsAtLaunch(): Promise<void> {
   if (process.platform !== "darwin") return;
+  // the helper first: when it runs, its grants are the ones that count and the ones asked for
+  await helperReady();
   const accessibility = permissionState("accessibility");
   const screen = permissionState("screen");
-  log(`permissions: accessibility=${accessibility} screen=${screen} (${macPermissions.loaded() ? "native" : `systemPreferences — ${macPermissions.loadError()}`})`);
+  const status = macHelper?.cachedStatus();
+  // the helper's word on the screen (ScreenCaptureKit on macOS 14+) goes next to the TCC state: `screen=granted (capture ScreenCaptureKit)` is the line to look for when a screenshot is in doubt
+  const source = macPermissions.helperInUse() ? `${HELPER_NAME} ${status?.version ?? ""}${status?.capture ? `, capture ${status.capture}` : ""}${status?.screenDetail ? `, ${status.screenDetail}` : ""}`.trim() : macPermissions.loaded() ? "native" : `systemPreferences — ${macPermissions.loadError()}`;
+  log(`permissions: accessibility=${accessibility} screen=${screen} (${source}${!macPermissions.helperInUse() && macHelper ? `; helper: ${macHelper.failure()}` : ""})`);
   if (accessibility === "granted" && screen === "granted") return;
   if (screen !== "granted") void requestScreenRecording(true);
   if (accessibility !== "granted") requestAccessibility(false);
 }
 
+/** `app.relaunch()` asked for once; a second call before the quit would start two copies (0.1.38 did). */
+let relaunching = false;
+
 /**
- * Quit and start again. Through `app.quit()`, not `app.exit()`: `before-quit` stops the host
- * and the operator server first, so the old `nanomuse mcp` — started before the permission
- * was granted, and so still without it — does not outlive the relaunch.
+ * Start the process that takes the screenshots again, so a Screen Recording grant takes
+ * effect. With the helper in use that is the helper alone — `/quit` and a fresh `open`, the
+ * app and the conversation untouched. Otherwise the whole app: through `app.quit()`, not
+ * `app.exit()`, so `before-quit` stops the host and the operator server first and the old
+ * `nanomuse mcp` — started before the permission was granted, and so still without it —
+ * does not outlive the relaunch.
  */
 function relaunchNow(): void {
+  // with a helper bundle the helper is what restarts — also while it is between two processes
+  // or failed to start (then this is the retry); in 0.1.38 a restart that found the helper
+  // "not running" fell through here and relaunched the whole app, twice when clicked twice
+  if (helper()?.present()) {
+    log("permissions: restarting the helper for the new grant");
+    void macHelper?.restart();
+    return;
+  }
+  if (relaunching) return;
+  relaunching = true;
   app.relaunch();
   app.quit();
 }
@@ -1147,6 +1581,8 @@ function watchScreenGrant(): void {
   if (permissionState("screen") === "granted") return;
   const started = Date.now();
   screenGrantWatch = setInterval(() => {
+    // the helper gone meanwhile (the switch's "Quit & Reopen" ends it): back, so its grant is what is read
+    if (macHelper?.present() && !macHelper.running() && !macHelper.busy()) void macHelper.ready();
     if (permissionState("screen") !== "granted") {
       if (Date.now() - started > 5 * 60_000 && screenGrantWatch) {
         clearInterval(screenGrantWatch);
@@ -1156,6 +1592,12 @@ function watchScreenGrant(): void {
     }
     if (screenGrantWatch) clearInterval(screenGrantWatch);
     screenGrantWatch = null;
+    if (macPermissions.helperInUse()) {
+      // the grant is the helper's: a quiet restart of that one process, nothing to ask
+      log("permissions: Screen Recording granted to the helper while running — restarting it");
+      void macHelper?.restart();
+      return;
+    }
     log("permissions: Screen Recording granted while running — offering a relaunch");
     void dialog
       .showMessageBox({
@@ -1224,15 +1666,16 @@ function createWindow(): BrowserWindow {
     return { action: "deny" };
   });
   win.webContents.on("will-navigate", (e, url) => {
-    if (hostUrl && url.startsWith(new URL(hostUrl).origin)) return;
-    // our own pages (the loading page) and nothing else from disk
-    if (url.startsWith("file:") && url.startsWith(pathToFileURL(ownResources()).href)) return;
+    // the Host's origin (compared as parsed URLs, not a prefix) and our own pages from disk
+    // (the loading page) stay in the window; http(s) goes to the browser; the rest is dropped
+    const verdict = navigationVerdict(url, hostUrl, pathToFileURL(ownResources()).href);
+    if (verdict === "allow") return;
     e.preventDefault();
-    if (EXTERNAL_URL.test(url)) void shell.openExternal(url);
+    if (verdict === "external") void shell.openExternal(url);
   });
-  win.webContents.session.setPermissionRequestHandler((_wc, permission, callback) => {
-    // the microphone for voice input; nothing else is asked for
-    callback(permission === "media");
+  win.webContents.session.setPermissionRequestHandler((_wc, permission, callback, details) => {
+    // the microphone for voice input, for the Host's page alone; nothing else is asked for
+    callback(permission === "media" && sameOrigin(details.requestingUrl, hostUrl));
   });
   win.on("closed", mainWindowClosed);
   // the splash: the logo in a loading ring and the wordmark (resources/loading.html) — no face
@@ -1370,12 +1813,20 @@ function buildMenu(): void {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-if (!app.requestSingleInstanceLock()) {
+if (!app.requestSingleInstanceLock({ version: app.getVersion() })) {
   app.quit();
 } else {
-  app.on("second-instance", () => {
+  app.on("second-instance", (_e, _argv, _cwd, data) => {
     // the launcher clicked while this instance runs — with its window closed, too (the
     // tray case): showWindow() makes the window again when it is gone
+    if (process.platform === "linux" && staleInstance(app.getVersion(), data)) {
+      // Linux: a package upgrade (.deb) leaves the old copy running in the tray; the
+      // launcher then starts the new binary, which only wakes the old one. Hand over.
+      log(`second instance is ${(data as { version: string }).version}, this is ${app.getVersion()}: relaunching into the installed version`);
+      app.relaunch();
+      app.quit();
+      return;
+    }
     log(`second instance: ${mainWindow ? "focusing the window" : hostUrl ? "opening the window again" : "still starting"}`);
     showWindow();
   });
@@ -1396,7 +1847,7 @@ if (!app.requestSingleInstanceLock()) {
       await operatorCheck(operatorCheckFlag);
       return;
     }
-    if (!screenshotFlag) ensureMacPermissionsAtLaunch();
+    if (!screenshotFlag) void ensureMacPermissionsAtLaunch().catch((exc: unknown) => log(`permissions: ${String(exc)}`));
     try {
       await boot();
     } catch (exc) {
@@ -1419,7 +1870,7 @@ if (!app.requestSingleInstanceLock()) {
     globalShortcut.unregisterAll();
     if (quitting) return;
     quitting = true;
-    if (child || operatorServer) {
+    if (child || operatorServer || macHelper?.running()) {
       e.preventDefault();
       void Promise.all([stopHost(), stopOperator()]).then(() => app.quit());
     }
