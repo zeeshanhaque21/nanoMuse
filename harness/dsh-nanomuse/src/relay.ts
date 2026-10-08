@@ -33,6 +33,18 @@ export function withTimeout(fetchImpl: typeof fetch, defaultMs: number): TimedFe
   }
 }
 
+/**
+ * The relay's fetch: with no origin configured every call refuses here, before a request
+ * leaves, so the service can start without a relay and the first call says why it cannot run.
+ */
+export function relayFetch(origin: string, fetchImpl: typeof fetch, timeoutMs: number): TimedFetch {
+  const timed = withTimeout(fetchImpl, timeoutMs)
+  return (input, init) =>
+    origin
+      ? timed(input, init)
+      : Promise.reject(new RelayError(0, 'relay_unconfigured', 'Relay not configured: set the relay origin to your relay.'))
+}
+
 /** A relay error, with the relay's own code when it sent one. */
 export class RelayError extends Error {
   constructor(
@@ -256,10 +268,8 @@ export class Relay {
   private readonly fetchImpl: TimedFetch
 
     constructor(origin: string, fetchImpl: typeof fetch = fetch, timeoutMs = RELAY_TIMEOUT_MS) {
-      const trimmed = (origin || '').trim().replace(/\/+$/, '')
-      if (!trimmed) throw new RelayError(0, 'relay_unconfigured', 'Relay not configured: set the relay origin to your relay.')
-      this.origin = trimmed
-      this.fetchImpl = withTimeout(fetchImpl, timeoutMs)
+      this.origin = (origin || '').trim().replace(/\/+$/, '')
+      this.fetchImpl = relayFetch(this.origin, fetchImpl, timeoutMs)
   }
 
   /** The OpenAI-compatible root the model adapter is pointed at. */

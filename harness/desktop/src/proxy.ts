@@ -49,8 +49,8 @@ function hostOf(text: string): string {
 }
 
 /**
- * The NO_PROXY list: loopback, the relay every build knows, and the relay hosts the plugin
- * reported (its `config.baseURL` — a self-hosted or showcase relay), each once, in order.
+ * The NO_PROXY list: loopback, then the relay hosts the plugin reported (its `config.baseURL`,
+ * a self-hosted or showcase relay), each once, in order.
  */
 export function noProxyList(relayHosts: readonly string[]): string[] {
   const out = [...LOOPBACK];
