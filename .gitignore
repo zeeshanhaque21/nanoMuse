@@ -76,3 +76,9 @@ cloud/data/
 
 # Release signing passwords - consolidated copy, never commit (2026-10-04)
 android/SIGNING-PASSWORDS.md
+
+# Reviewer scratch (untracked evidence, logs, snapshots): never commit
+.maintenance-review/
+
+# Operator-local iOS build configuration (the .example is tracked; the real file is not)
+android/src/ios/Configs/ProviderCustomization.xcconfig

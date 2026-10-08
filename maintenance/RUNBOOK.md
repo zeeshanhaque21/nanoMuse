@@ -168,10 +168,19 @@ git grep -l 'nanomuse\.cn' -- . \
   ':(exclude)docs/release-notes-template.md' ':(exclude)nanomuse/server/static/**'
 ```
 
-Expected remainder: at most `README.md`, `docs/every-device.md`, `docs/launch-checklist.md`
-(historical, reworded to attribute the site to upstream) and
-`tests/test_fork_relay_defaults.py` (the regression test asserting their absence).
-**State the actual output.** Do not paste a command whose output you have not seen.
+Expected remainder, as of the 0.1.41 sync (head `7adc1514e5`): 13 files, and the run must
+state the actual output. Classification, not a count target:
+
+- `cloud/README.md`: file name of the upstream deploy artifact `cloud.nanomuse.cn.caddy`.
+- `docs/zh/cloud.md`, `docs/zh/every-device.md`: prose attributing upstream's public relay and showcase.
+- `docs/zh/privacy.md`: privacy-policy text about upstream's site and relay (legal text, owner decision).
+- `maintenance-evidence/run-2026-10-05/*`: immutable release evidence, never edited.
+- `maintenance/RUNBOOK.md`: this file's literal scan commands and contract text.
+- `tests/test_fork_relay_defaults.py`, `tests/test_fork_upstream_037_sanitization.py`,
+  `tests/test_nudges_runtime.py`: absence assertions.
+
+Any file outside this list is a new active reference and must be fixed or classified in
+the evidence before the run is reported.
 
 ---
 
@@ -180,38 +189,52 @@ Expected remainder: at most `README.md`, `docs/every-device.md`, `docs/launch-ch
 Run in this order. Cheap first, and get a real end-to-end result before expensive builds.
 
 ```
-# Python
-python3 -m pytest tests/ -q --ignore=tests/test_bridge.py --ignore=tests/test_computer.py \
-  --ignore=tests/test_holds.py --ignore=tests/test_mac_window.py \
-  --ignore=tests/test_mcp_bridge.py --ignore=tests/test_model_defaults.py
-(cd cloud && python3 -m pytest tests -q)                 # 74 passed
-(cd demo/showcase/gateway && python3 -m pytest tests -q) # 40 passed
-python3 -m ruff check nanomuse tests scripts demo cloud
-python3 -m ruff format --check nanomuse tests scripts
-(cd web && npm run check)                                # lint + tsc + vitest
+# Isolated py3.12 venv, the same install CI uses. Build it once per checkout.
+uv venv --python 3.12 .venv-ci
+VIRTUAL_ENV=$PWD/.venv-ci uv pip install -e ".[dev]"
+
+# Python runtime: every test, no ignore list. Ambient interpreters can carry a `tests`
+# package that shadows this directory; the venv above does not.
+.venv-ci/bin/python -m pytest -q -m "not live" -p no:cacheprovider
+.venv-ci/bin/python -m ruff check nanomuse tests scripts demo cloud
+.venv-ci/bin/python -m ruff format --check nanomuse tests scripts
+.venv-ci/bin/python -m mypy
 python3 -m compileall -q demo cloud nanomuse scripts
+
+# Relay (cloud/) and the showcase gateway, same venv
+(cd cloud && ../.venv-ci/bin/python -m pytest tests -q -p no:cacheprovider)
+(cd demo/showcase/gateway && ../../../.venv-ci/bin/python -m pytest tests -q -p no:cacheprovider)
+
+# Web console and website, Node 22 (the default node is too new for the lock files)
+(cd web && PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run check)
+(cd website && PATH=/opt/homebrew/opt/node@22/bin:$PATH npm ci && PATH=/opt/homebrew/opt/node@22/bin:$PATH npm run docs:build)
+
+# Harness bundle, pnpm 11 on Node 22 (the CI commands)
+(cd harness/dsh-nanomuse && PATH=/opt/homebrew/opt/node@22/bin:$PATH CI=true npx --yes pnpm@11 install --frozen-lockfile && PATH=/opt/homebrew/opt/node@22/bin:$PATH npx --yes pnpm@11 build && PATH=/opt/homebrew/opt/node@22/bin:$PATH npx --yes pnpm@11 typecheck && PATH=/opt/homebrew/opt/node@22/bin:$PATH npx --yes pnpm@11 test)
 ```
 
-### Baseline failures - know these before you start
+### Baseline - what fails today, and what does not count
 
-`tests/` is **not** a package (no `__init__.py`), and a `tests` package exists in
-`~/.venv-vllm-metal/…/site-packages`. Those six modules fail to collect on a pristine
-checkout. Establish the baseline yourself rather than asserting it:
+The current tree has no known pre-existing failure in the isolated venv. Earlier reports of
+10 to 12 "pre-existing" root failures came from the environment, not the code: an ambient
+`tests` package shadowing the test directory, an ambient `~/.nanomuse` app-settings file that
+the config tests read, and a host timezone that is not UTC. A pristine comparison is still the
+way to prove a failure is not yours:
 
 ```
 git clone --no-checkout --shared <fork-or-worktree> /tmp/nm_base
-cd /tmp/nm_base && git fetch <upstream-url> '+refs/remotes/upstream/main:refs/remotes/upstream/main'
-git checkout refs/remotes/fork/main     && python3 -m pytest tests/ -q --ignore=<the six>
-git checkout refs/remotes/upstream/main && python3 -m pytest tests/ -q --ignore=<the six>
+cd /tmp/nm_base && git checkout <pinned-sha>
+python3 -m venv /tmp/nm_base/.venv && /tmp/nm_base/.venv/bin/pip install -e ".[dev]" && /tmp/nm_base/.venv/bin/python -m pytest -q -m "not live"
 ```
 
-As of `34aebbb9f4`: **10 failures, all pre-existing** - `test_config` ×2,
-`test_memory_goals`, `test_server` ×4, `test_attachments`, `test_tools`,
-`test_channels_api` (the last is new from upstream and absent on the fork).
-`cloud/tests` had 1 pre-existing failure on upstream
-(`test_admin_health_is_aggregates_only`).
+Use the venv's own interpreter, not the ambient one, and run it on a pinned commit. Anything that
+fails on the pinned commit and passes on yours is a regression you introduced: fix it, do not
+label it baseline.
 
-Anything beyond that is a **regression you introduced.** Fix it, do not label it baseline.
+Known intermittent: `tests/test_sync.py::test_pull_makes_threads_and_history_and_tombstones_remove`
+failed once in several runs with its temp directory under the repository, while the engine's
+startup pull was running (`applied == 0`). Its cause is not isolated. Treat a recurrence as a real
+failure to investigate, and do not retry until it passes.
 
 ### mypy needs a pinned interpreter
 
@@ -222,7 +245,7 @@ That is a local toolchain artifact, not a code error. Build a 3.12 venv:
 ```
 uv venv --python 3.12 .venv-ci
 VIRTUAL_ENV=$PWD/.venv-ci uv pip install -e . mypy
-.venv-ci/bin/python -m mypy        # Success: no issues found in 121 source files
+.venv-ci/bin/python -m mypy        # Success: no issues found in 138 source files (head 7adc1514e5)
 ```
 
 ### Platform-dependent test traps
