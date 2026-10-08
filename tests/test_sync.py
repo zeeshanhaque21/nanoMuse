@@ -401,6 +401,9 @@ def test_the_second_main_adopts_the_accounts_id(synced) -> None:
 # ----------------------------------------------------------------------------- pull
 def test_pull_makes_threads_and_history_and_tombstones_remove(synced) -> None:
     client, service, llm, relay = synced
+    # the first pull the engine starts with the app must end before this test writes to the
+    # relay, or that background pull can take the rows and the explicit pull below reports 0
+    wait_for(lambda: service.sync._pull_task is None or service.sync._pull_task.done())
     cid = str(uuid.uuid4())
     relay.add_conversation(cid, "side", "Dinner plans", device="phone-1")
     m1 = relay.add_message(cid, "user", "book a table", created_at=1738000050)
