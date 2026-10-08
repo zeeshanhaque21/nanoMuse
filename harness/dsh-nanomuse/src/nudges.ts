@@ -21,6 +21,8 @@
  *   sentence for the moment; the title and the buttons stay the app's (`starText`).
  */
 
+import { relayFetch } from './relay.ts'
+
 // ---- the policy ----------------------------------------------------------------------
 
 export interface NudgeMoments {
@@ -86,6 +88,12 @@ export const NUDGES_EVERY_MS = 24 * 3600_000
  * operator configures a relay; no third-party host is contacted by default. */
 export const NUDGES_ORIGIN = ''
 export const NUDGES_TIMEOUT_MS = 5000
+
+/** The relay's policy (`GET /v1/nudges`), undefined when the relay did not send one. */
+export async function fetchNudgesPolicy(origin: string, fetchImpl: typeof fetch = fetch): Promise<unknown> {
+  const res = await relayFetch(origin, fetchImpl, NUDGES_TIMEOUT_MS)(`${origin}/v1/nudges`)
+  return res.ok ? res.json().catch(() => undefined) : undefined
+}
 
 function numbers(value: unknown, fallback: number[]): number[] {
   if (!Array.isArray(value)) return fallback
