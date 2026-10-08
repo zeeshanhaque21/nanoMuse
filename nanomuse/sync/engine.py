@@ -143,6 +143,8 @@ class ConversationSync:
         self._pull_again = False
         # bumped on every account switch; a page requested before a switch is dropped, not applied
         self._account_gen = 0
+        # the account key this generation's requests go out with; set with the generation
+        self._token = ""
         # a 401 from the relay: nothing more until the next sign-in
         self._paused = False
         self._applying = False
@@ -282,6 +284,7 @@ class ConversationSync:
     def start(self) -> None:
         """After the hub is up: a first pull, a push of what is new, and the minute timer."""
         self._stopped = False
+        self._token = self.svc.hub._key()
         if self._timer is None or self._timer.done():
             self._timer = asyncio.create_task(self._tick(), name="sync-timer")
         if self.active:
@@ -315,6 +318,7 @@ class ConversationSync:
         tail pull — with the presence map and the hub's device list cleared and the main chat
         re-homed; the mappings of the account that was here before are kept, so switching
         back shows its conversations again."""
+        self._token = self.svc.hub._key()
         self._paused = False
         self.last_error = ""
         previous = self.account_id
@@ -334,21 +338,23 @@ class ConversationSync:
         """The main chat is one conversation per account (C8), so a new account cannot keep
         the old one's: the old main chat becomes a hidden thread marked ``main_of`` and the
         new account's own comes back when it has one, else a fresh one begins. A main chat
-        nobody has synced yet stays — it is nobody's and joins the account on its first push."""
+        nobody has synced stays nobody's only while no account was here before; with one, its
+        unsynced text is that account's, so it cannot join the next account on that account's
+        first push."""
         main = self.svc.threads.get(MAIN_THREAD)
         if main is None:
             return
         owner = self.owner_of(MAIN_THREAD)
+        if not owner:
+            # text written under the previous account and never synced: it stays with that
+            # account rather than landing in the new one's main chat
+            owner = previous
         restore = str(self.state["mains"].get(account_id) or "")
         if restore not in self.svc.threads:
             restore = ""
         if not restore and (not owner or owner == account_id):
             # the main chat is this account's, or nobody's yet (it joins on its first push)
             return
-        if not owner:
-            # text written under the previous account and never synced: it stays with that
-            # account rather than landing in the new one's main chat
-            owner = previous
         has_text = any(ev.get("type") in ("user", "assistant") for ev in main.timeline.events)
         archived = self.svc.rehome_main(owner, restore or None, keep=bool(owner and has_text))
         if archived is not None:
@@ -374,6 +380,7 @@ class ConversationSync:
 
     def signed_out(self) -> None:
         """The key is gone: nothing more until the next sign-in; what is local stays."""
+        self._token = ""
         for t in (self._push_task, self._pull_task):
             if t is not None and not t.done():
                 t.cancel()
@@ -482,9 +489,11 @@ class ConversationSync:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return
-        self._keep(loop.create_task(self._send_working(thread, working), name="sync-working"))
+        self._keep(
+            loop.create_task(self._send_working(thread, working, self._token), name="sync-working")
+        )
 
-    async def _send_working(self, thread: Thread, working: bool) -> None:
+    async def _send_working(self, thread: Thread, working: bool, token: str) -> None:
         for _ in range(3):  # a push rescheduled under us: wait for the one that replaced it
             push = self._push_task
             if push is None or push.done():
@@ -497,9 +506,8 @@ class ConversationSync:
         cid = self.cid_of(thread.id)
         if not cid or not self.active or self._stopped:
             return
-        self.client.cloud.api_key = self.svc.hub._key()
         try:
-            await self.client.working(cid, working, self.svc.hub.device_id)
+            await self.client.working(cid, working, self.svc.hub.device_id, token=token)
         except Exception as exc:  # noqa: BLE001 — presence is a hint, never worth a retry
             logger.debug("sync: working={} not delivered: {}", working, exc)
 
@@ -529,7 +537,11 @@ class ConversationSync:
                 loop = asyncio.get_running_loop()
             except RuntimeError:
                 return
-            self._keep(loop.create_task(self._delete_remote_conversation(cid), name="sync-delete"))
+            self._keep(
+                loop.create_task(
+                    self._delete_remote_conversation(cid, self._token), name="sync-delete"
+                )
+            )
 
     def on_frame(self, frame: dict[str, Any]) -> None:
         """The hub says another device pushed: pull when our cursor is behind. Or (C9) that
@@ -588,10 +600,9 @@ class ConversationSync:
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
 
-    async def _delete_remote_conversation(self, cid: str) -> None:
-        self.client.cloud.api_key = self.svc.hub._key()
+    async def _delete_remote_conversation(self, cid: str, token: str) -> None:
         try:
-            await self.client.delete_conversation(cid)
+            await self.client.delete_conversation(cid, token=token)
         except CloudError as exc:
             if exc.code != "no_conversation":
                 self._note_error(exc)
@@ -738,7 +749,7 @@ class ConversationSync:
                 raise
 
     async def _push_locked(self) -> dict[str, Any]:
-        self.client.cloud.api_key = self.svc.hub._key()
+        token, generation = self._token, self._account_gen
         device = self.svc.hub.device_id
         pushed = 0
         sent = False
@@ -768,7 +779,12 @@ class ConversationSync:
             if not conversations and not messages:
                 break
             sent = True
-            out = await self.client.push(device, conversations, messages)
+            out = await self.client.push(device, conversations, messages, token=token)
+            if generation != self._account_gen:
+                # the account switched while this round was on the wire: the answer is the
+                # previous account's, so none of it is applied; the rows stay unsynced here
+                # and the push the switch scheduled sends them under the new account's key
+                return {"pushed": pushed, "cursor": self.cursor}
             # the cursor only moves on a pull: the relay's cursor after our POST would skip
             # whatever the other devices pushed in between
             rejected = [r for r in out.get("rejected") or [] if isinstance(r, dict)]
@@ -831,16 +847,15 @@ class ConversationSync:
                 raise
 
     async def _pull_locked(self) -> int:
-        self.client.cloud.api_key = self.svc.hub._key()
+        token, generation = self._token, self._account_gen
         applied = 0
-        generation = self._account_gen
         # C9: a fresh device (cursor 0) asks for the tail of its scope, not the whole store;
         # side chats just turned on ask once more from zero, for everything, as a tail too
         from_zero = self._pull_from_zero or self.cursor == 0
         self._pull_from_zero = False
         for _page in range(MAX_ROUNDS):
             if from_zero:
-                out = await self.client.changes(0, PAGE, scope=self.scope, tail=TAIL)
+                out = await self.client.changes(0, PAGE, scope=self.scope, tail=TAIL, token=token)
                 from_zero = False
                 skipped = int(out.get("skipped") or 0)
                 if skipped:
@@ -850,7 +865,7 @@ class ConversationSync:
                         skipped,
                     )
             else:
-                out = await self.client.changes(self.cursor, PAGE, scope=self.scope)
+                out = await self.client.changes(self.cursor, PAGE, scope=self.scope, token=token)
             if generation != self._account_gen:
                 # the account switched while this page was on the wire: its rows and cursor
                 # belong to the account before, so none of them is applied (C10)

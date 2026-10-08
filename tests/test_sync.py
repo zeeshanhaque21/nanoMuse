@@ -91,6 +91,9 @@ class FakeSyncRelay:
         self.pushes: list[dict[str, Any]] = []
         self.pulls: list[dict[str, Any]] = []
         self.working_calls: list[dict[str, Any]] = []
+        self.deleted_keys: list[str] = []
+        # every request with the key it went out with (CloudClient._request's choice)
+        self.key_log: list[dict[str, Any]] = []
         self.calls: list[str] = []
         self.fail: CloudError | None = None
         self.fail_working: CloudError | None = None
@@ -108,6 +111,10 @@ class FakeSyncRelay:
     def _next(self) -> int:
         self.seq += 1
         return self.seq
+
+    def _key(self, token: str | None) -> str:
+        """The key a request goes out with, as CloudClient._request picks it."""
+        return self.cloud.api_key if token is None else token
 
     def _check(self, what: str) -> None:
         self.calls.append(what)
@@ -182,10 +189,16 @@ class FakeSyncRelay:
         return await self.state()
 
     async def changes(
-        self, since: int = 0, limit: int = 500, scope: str = "all", tail: int = 0
+        self,
+        since: int = 0,
+        limit: int = 500,
+        scope: str = "all",
+        tail: int = 0,
+        token: str | None = None,
     ) -> dict[str, Any]:
         self._check("changes")
         self.pulls.append({"since": since, "limit": limit, "scope": scope, "tail": tail})
+        self.key_log.append({"method": "changes", "key": self._key(token), "texts": []})
         convs = [c for c in self.convs.values() if scope != "main" or c["kind"] == "main"]
         cids = {c["cid"] for c in convs}
         msgs = [m for m in self.msgs.values() if m["cid"] in cids]
@@ -220,19 +233,31 @@ class FakeSyncRelay:
             "messages": [dict(r) for k, r in rows if k == "m"],
         }
 
-    async def working(self, cid: str, working: bool, device: str) -> None:
+    async def working(self, cid: str, working: bool, device: str, token: str | None = None) -> None:
         self._check("working")
         if self.fail_working is not None:
             raise self.fail_working
         if cid not in self.convs:
             raise CloudError(404, "no_conversation", "none")
         self.working_calls.append({"cid": cid, "working": working, "device": device})
+        self.key_log.append({"method": "working", "key": self._key(token), "texts": []})
 
     async def push(
-        self, device: str, conversations: list[dict[str, Any]], messages: list[dict[str, Any]]
+        self,
+        device: str,
+        conversations: list[dict[str, Any]],
+        messages: list[dict[str, Any]],
+        token: str | None = None,
     ) -> dict[str, Any]:
         self._check("push")
         self.pushes.append({"device": device, "conversations": conversations, "messages": messages})
+        self.key_log.append(
+            {
+                "method": "push",
+                "key": self._key(token),
+                "texts": [m.get("text", "") for m in messages],
+            }
+        )
         accepted, rejected, redirected = 0, [], {}
         for c in conversations:
             cid = c["cid"]
@@ -297,8 +322,9 @@ class FakeSyncRelay:
             accepted += 1
         return {"cursor": self.seq, "accepted": accepted, "rejected": rejected}
 
-    async def delete_conversation(self, cid: str) -> dict[str, Any]:
+    async def delete_conversation(self, cid: str, token: str | None = None) -> dict[str, Any]:
         self._check("delete_conversation")
+        self.deleted_keys.append(self._key(token))
         if cid not in self.convs:
             raise CloudError(404, "no_conversation", "none")
         self.tombstone_conversation(cid)
@@ -496,9 +522,13 @@ def _gate_next_changes(relay: FakeSyncRelay) -> _Gate:
     orig = relay.changes
 
     async def changes(
-        since: int = 0, limit: int = 500, scope: str = "all", tail: int = 0
+        since: int = 0,
+        limit: int = 500,
+        scope: str = "all",
+        tail: int = 0,
+        token: str | None = None,
     ) -> dict[str, Any]:
-        out = await orig(since, limit, scope, tail)
+        out = await orig(since, limit, scope, tail, token)
         if gate.armed:
             gate.armed = False
             gate.entered.set()
@@ -578,6 +608,121 @@ def test_an_account_switch_during_a_pull_keeps_the_old_accounts_page(synced) -> 
     assert service.sync.thread_of(cid_a) is None
     assert service.sync.cursor == relay.seq
     assert any(p["since"] == 0 for p in relay.pulls[before:])
+
+
+def _gate_next_push(relay: FakeSyncRelay) -> _Gate:
+    """Holds the next push once the relay has answered it, so the round is still open."""
+    gate = _Gate()
+    orig = relay.push
+
+    async def push(
+        device: str,
+        conversations: list[dict[str, Any]],
+        messages: list[dict[str, Any]],
+        token: str | None = None,
+    ) -> dict[str, Any]:
+        out = await orig(device, conversations, messages, token=token)
+        if gate.armed:
+            gate.armed = False
+            gate.entered.set()
+            await asyncio.to_thread(gate.release.wait, 10)
+        return out
+
+    relay.push = push  # type: ignore[method-assign]
+    return gate
+
+
+def _switch_to(
+    client: TestClient, service: MuseService, relay: FakeSyncRelay, account: str, key: str
+) -> None:
+    service.app.vault.set("NANOMUSE_CLOUD_KEY", key)
+    relay.switch_account(account)
+    client.portal.call(service.sync.account_changed, account)  # type: ignore[union-attr]
+
+
+def _pushed_texts(relay: FakeSyncRelay, key: str) -> list[str]:
+    return [
+        t for e in relay.key_log if e["method"] == "push" and e["key"] == key for t in e["texts"]
+    ]
+
+
+def _own_main_held_by_another_device(relay: FakeSyncRelay, service: MuseService) -> str:
+    """This device's main chat is not on the relay; another device's main already is, so the
+    first push of the main chat is refused with main_exists and a second round follows."""
+    relay.convs.pop(service.sync.cid_of(MAIN_THREAD) or "", None)
+    other_main = str(uuid.uuid4())
+    relay.add_conversation(other_main, "main", "Main chat", device="phone-2")
+    return other_main
+
+
+def test_a_switch_during_a_round_never_sends_the_new_accounts_note_under_the_old_key(
+    synced,
+) -> None:
+    client, service, llm, relay = synced
+    wait_for(lambda: settled(service))
+    _switch_to(client, service, relay, "acct-A", "key-A")
+    wait_for(lambda: settled(service))
+    other_main = _own_main_held_by_another_device(relay, service)
+    gate = _gate_next_push(relay)
+    client.portal.call(service.rename_thread, MAIN_THREAD, "Renamed for the test")  # type: ignore[union-attr]
+    assert gate.entered.wait(5)
+    # round one is on the wire under A's key; the account switches and B writes a note
+    _switch_to(client, service, relay, "acct-B", "key-B")
+    llm.script.append(LLMResponse(content="b answer", finish_reason="stop"))
+    client.post(f"/api/threads/{MAIN_THREAD}/send", json={"text": "B private note"})
+    gate.release.set()
+    wait_for(lambda: settled(service))
+    assert "B private note" not in _pushed_texts(relay, "key-A")
+    # the stale answer must not rebind B's main chat to A's relay conversation
+    assert service.sync.cid_of(MAIN_THREAD) != other_main
+    wait_for(lambda: "B private note" in _pushed_texts(relay, "key-B"))
+    wait_for(lambda: settled(service))
+    note = next(
+        e
+        for e in _events(client, MAIN_THREAD)
+        if e["type"] == "user" and e["text"] == "B private note"
+    )
+    assert note["synced"] is True
+
+
+def test_a_round_from_before_an_a_b_a_bounce_sends_nothing_of_b_under_a(synced) -> None:
+    client, service, llm, relay = synced
+    wait_for(lambda: settled(service))
+    _switch_to(client, service, relay, "acct-A", "key-A")
+    wait_for(lambda: settled(service))
+    _own_main_held_by_another_device(relay, service)
+    gate = _gate_next_push(relay)
+    client.portal.call(service.rename_thread, MAIN_THREAD, "Renamed for the test")  # type: ignore[union-attr]
+    assert gate.entered.wait(5)
+    _switch_to(client, service, relay, "acct-B", "key-B")
+    llm.script.append(LLMResponse(content="b answer", finish_reason="stop"))
+    client.post(f"/api/threads/{MAIN_THREAD}/send", json={"text": "B private note"})
+    # back to A before the round is answered: same account id as before, new generation
+    _switch_to(client, service, relay, "acct-A", "key-A")
+    gate.release.set()
+    wait_for(lambda: settled(service))
+    assert "B private note" not in _pushed_texts(relay, "key-A")
+    assert service.sync.account_id == "acct-A"
+
+
+def test_a_sign_out_during_a_push_marks_nothing_synced(synced) -> None:
+    client, service, llm, relay = synced
+    wait_for(lambda: settled(service))
+    _switch_to(client, service, relay, "acct-A", "key-A")
+    wait_for(lambda: settled(service))
+    gate = _gate_next_push(relay)
+    llm.script.append(LLMResponse(content="a answer", finish_reason="stop"))
+    client.post(f"/api/threads/{MAIN_THREAD}/send", json={"text": "A note"})
+    assert gate.entered.wait(5)
+    service.app.vault.delete("NANOMUSE_CLOUD_KEY")
+    client.portal.call(service.sync.signed_out)  # type: ignore[union-attr]
+    gate.release.set()
+    wait_for(lambda: service.sync._push_task is None or service.sync._push_task.done())
+    note = next(
+        e for e in _events(client, MAIN_THREAD) if e["type"] == "user" and e["text"] == "A note"
+    )
+    assert not note.get("synced")
+    assert "A note" in _pushed_texts(relay, "key-A")
 
 
 # ----------------------------------------------------------------------------- the switch, the failures
