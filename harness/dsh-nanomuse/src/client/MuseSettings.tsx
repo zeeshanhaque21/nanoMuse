@@ -26,9 +26,6 @@ import type { RenderSlot } from './MuseSidebar.tsx'
 import { REPO_URL } from './panels.ts'
 import { AppBehaviorRows, ConversationRows, DeveloperRows, HotkeyField } from './Sections.tsx'
 
-// No default homepage: this fork does not point people at a site it cannot verify. Empty hides the link.
-const SITE_URL = ''
-
 /** The pages that make up the everyday group, in Muse's order; the rest are Advanced. */
 export const COMPUTER_SECTION = 'nanomuse-computer'
 export const DATA_SECTION = 'nanomuse-data'
@@ -319,7 +316,6 @@ export function makeGeneralSection(t: Translate, version: string) {
               pool && !spent && (pool.warn || used >= 80)
                 ? h('button', { type: 'button', className: 'nm-usage-link', style: { background: 'none', border: 0, padding: 0, cursor: 'pointer', font: 'inherit' }, onClick: () => { settingsBus.openSection?.('nanomuse-cloud') } }, t('gnNearlyOut'))
                 : null,
-              account.member || !SITE_URL ? null : h('a', { className: 'nm-usage-link', href: SITE_URL, target: '_blank', rel: 'noopener noreferrer', onClick: (e: { preventDefault(): void }) => { e.preventDefault(); openLink(SITE_URL) } }, t('gnUpgrade')),
               // the pool is spent: the one ask the project makes
               spent
                 ? h(Fragment, null,
