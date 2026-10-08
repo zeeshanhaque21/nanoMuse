@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -396,19 +398,19 @@ def test_goal_check_ins(tmp_path: Path):
     assert parse_check_in("weekdays") == ("weekdays", None, 9, 0)
     assert parse_check_in("every other tuesday") is None
 
-    tz = datetime.now().astimezone().tzinfo
-    # Wednesday 2026-01-07 10:00
-    now = datetime(2026, 1, 7, 10, 0, tzinfo=tz)
-    assert next_check_in("daily 08:00", now) == datetime(2026, 1, 8, 8, 0, tzinfo=tz)
-    assert next_check_in("daily 12:00", now) == datetime(2026, 1, 7, 12, 0, tzinfo=tz)
+    # Wednesday 2026-01-07 10:00, in the host's own zone for that date (January, not today's DST)
+    now = datetime(2026, 1, 7, 10, 0).astimezone()
+    assert next_check_in("daily 08:00", now) == datetime(2026, 1, 8, 8, 0).astimezone()
+    assert next_check_in("daily 12:00", now) == datetime(2026, 1, 7, 12, 0).astimezone()
     # Friday evening → Monday for weekdays
-    friday = datetime(2026, 1, 9, 20, 0, tzinfo=tz)
-    assert next_check_in("weekdays 07:30", friday) == datetime(2026, 1, 12, 7, 30, tzinfo=tz)
-    assert next_check_in("weekly mon 09:00", now) == datetime(2026, 1, 12, 9, 0, tzinfo=tz)
-    assert next_check_in("weekly", now) == datetime(2026, 1, 14, 9, 0, tzinfo=tz)  # same weekday
-    assert next_check_in("monthly 1 09:00", now) == datetime(2026, 2, 1, 9, 0, tzinfo=tz)
-    assert next_check_in("monthly 31", datetime(2026, 2, 1, tzinfo=tz)) == datetime(
-        2026, 3, 31, 9, 0, tzinfo=tz
+    friday = datetime(2026, 1, 9, 20, 0).astimezone()
+    assert next_check_in("weekdays 07:30", friday) == datetime(2026, 1, 12, 7, 30).astimezone()
+    assert next_check_in("weekly mon 09:00", now) == datetime(2026, 1, 12, 9, 0).astimezone()
+    assert next_check_in("weekly", now) == datetime(2026, 1, 14, 9, 0).astimezone()  # same weekday
+    assert next_check_in("monthly 1 09:00", now) == datetime(2026, 2, 1, 9, 0).astimezone()
+    assert (
+        next_check_in("monthly 31", datetime(2026, 2, 1).astimezone())
+        == datetime(2026, 3, 31, 9, 0).astimezone()
     )
 
     store = GoalStore(tmp_path / "g.db")
@@ -459,3 +461,19 @@ def test_goal_store_upgrades_an_old_database(tmp_path: Path):
     )
     assert store.update(g.id, category="finance").category == "finance"
     store.close()
+
+
+def test_check_in_keeps_its_wall_clock_across_dst(monkeypatch: pytest.MonkeyPatch):
+    """A daily 09:00 check-in stays at 09:00 on the far side of the spring-forward change."""
+    from nanomuse.goals.store import next_check_in
+
+    monkeypatch.setenv("TZ", "America/Los_Angeles")
+    time.tzset()
+    try:
+        after = datetime(2026, 3, 7, 12, 0).astimezone()
+        due = next_check_in("daily 09:00", after)
+        assert due == datetime(2026, 3, 8, 9, 0).astimezone()
+        assert due.utcoffset().total_seconds() == -7 * 3600  # PDT, not the PST the input carried
+    finally:
+        monkeypatch.undo()
+        time.tzset()
