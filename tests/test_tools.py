@@ -116,6 +116,40 @@ async def test_shell_output_is_capped_in_memory(tmp_path: Path, monkeypatch):
     assert r.ok and "cut" not in r.output
 
 
+def _proc_entry_running(stat: Path) -> bool:
+    try:
+        return not (stat.is_file() and stat.read_text().rsplit(")", 1)[-1].split()[0] == "Z")
+    except (FileNotFoundError, ProcessLookupError):
+        return False
+
+
+@pytest.mark.parametrize("state", ["Z", "S", None, "ESRCH", "EACCES"])
+def test_proc_entry_running_handles_reaping(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, state: str | None
+):
+    stat = tmp_path / "stat"
+    stat.write_text("123 (child) S")
+    original = Path.read_text
+
+    def read_stat(path, *args, **kwargs):
+        if path == stat:
+            if state is None:
+                raise FileNotFoundError("process reaped after is_file")
+            if state == "ESRCH":
+                raise ProcessLookupError("process reaped after open")
+            if state == "EACCES":
+                raise PermissionError("stat permission denied")
+            return f"123 (child) {state}"
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read_stat)
+    if state == "EACCES":
+        with pytest.raises(PermissionError):
+            _proc_entry_running(stat)
+    else:
+        assert _proc_entry_running(stat) is (state == "S")
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="process groups are POSIX")
 async def test_shell_timeout_stops_the_whole_tree(tmp_path: Path):
     """A timed-out command used to lose only the shell: `sleep` in a pipeline, a server put
@@ -139,7 +173,7 @@ async def test_shell_timeout_stops_the_whole_tree(tmp_path: Path):
         except ProcessLookupError:
             return False
         stat = Path(f"/proc/{pid}/stat")  # Linux: a zombie waiting for init is as good as gone
-        return not (stat.is_file() and stat.read_text().rsplit(")", 1)[-1].split()[0] == "Z")
+        return _proc_entry_running(stat)
 
     for _ in range(100):  # the kill is delivered at once; the reap takes a moment
         if not alive():
