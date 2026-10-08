@@ -139,6 +139,10 @@ class ConversationSync:
         self.working: dict[str, dict[str, Any]] = {}
         # a one-off pull from zero waiting its turn (side chats just turned on)
         self._pull_from_zero = False
+        # a trigger that came in while a pull was on the wire: one more pull once it is through
+        self._pull_again = False
+        # bumped on every account switch; a page requested before a switch is dropped, not applied
+        self._account_gen = 0
         # a 401 from the relay: nothing more until the next sign-in
         self._paused = False
         self._applying = False
@@ -316,6 +320,7 @@ class ConversationSync:
         previous = self.account_id
         if account_id and account_id != previous:
             self.state.update(account_id=account_id, cursor=0)
+            self._account_gen += 1
             self.working.clear()
             self._save()
             self._rehome_main(previous, account_id)
@@ -633,7 +638,12 @@ class ConversationSync:
     def pull_soon(self) -> None:
         if not self.active or self._stopped:
             return
-        if self._pull_task is not None and not self._pull_task.done():
+        if (
+            self._pull_task is not None
+            and not self._pull_task.done()
+            and not self._pull_task.cancelling()
+        ):
+            self._pull_again = True
             return
         try:
             loop = asyncio.get_running_loop()
@@ -642,13 +652,17 @@ class ConversationSync:
         self._pull_task = loop.create_task(self._pull_quietly(), name="sync-pull")
 
     async def _pull_quietly(self) -> int:
-        try:
-            return await self.pull()
-        except CloudError:
-            pass  # noted by pull()
-        except Exception:  # noqa: BLE001
-            logger.exception("sync pull")
-        return 0
+        applied = 0
+        while True:
+            self._pull_again = False
+            try:
+                applied += await self.pull()
+            except CloudError:
+                pass  # noted by pull()
+            except Exception:  # noqa: BLE001
+                logger.exception("sync pull")
+            if not self._pull_again or self._stopped:
+                return applied
 
     def _note_error(self, exc: CloudError) -> None:
         """Rule 7: network errors are silent (the next trigger tries again); ``sync_off`` flips
@@ -819,6 +833,7 @@ class ConversationSync:
     async def _pull_locked(self) -> int:
         self.client.cloud.api_key = self.svc.hub._key()
         applied = 0
+        generation = self._account_gen
         # C9: a fresh device (cursor 0) asks for the tail of its scope, not the whole store;
         # side chats just turned on ask once more from zero, for everything, as a tail too
         from_zero = self._pull_from_zero or self.cursor == 0
@@ -836,6 +851,10 @@ class ConversationSync:
                     )
             else:
                 out = await self.client.changes(self.cursor, PAGE, scope=self.scope)
+            if generation != self._account_gen:
+                # the account switched while this page was on the wire: its rows and cursor
+                # belong to the account before, so none of them is applied (C10)
+                return applied
             # The page's conversations first, then its messages, each in seq order: a rename
             # puts a conversation's seq above its messages, and the relay sends every
             # message's conversation along with the page so none of them is an orphan.

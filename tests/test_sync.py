@@ -5,6 +5,7 @@ conversation, tombstones, the switch — and the ``@<device>`` mention in the co
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 import uuid
 from collections.abc import Callable, Iterator
@@ -401,9 +402,9 @@ def test_the_second_main_adopts_the_accounts_id(synced) -> None:
 # ----------------------------------------------------------------------------- pull
 def test_pull_makes_threads_and_history_and_tombstones_remove(synced) -> None:
     client, service, llm, relay = synced
-    # the first pull the engine starts with the app must end before this test writes to the
-    # relay, or that background pull can take the rows and the explicit pull below reports 0
-    wait_for(lambda: service.sync._pull_task is None or service.sync._pull_task.done())
+    # the startup push and the pull it schedules must both be through before this test writes
+    # to the relay, or that background pull can take the rows and the explicit pull reports 0
+    wait_for(lambda: settled(service))
     cid = str(uuid.uuid4())
     relay.add_conversation(cid, "side", "Dinner plans", device="phone-1")
     m1 = relay.add_message(cid, "user", "book a table", created_at=1738000050)
@@ -479,6 +480,104 @@ def test_the_hub_frame_triggers_a_pull_and_our_own_echo_does_not(synced) -> None
         {"type": "sync", "what": "conversations", "cursor": relay.seq, "from": "phone-1"},
     )  # type: ignore[union-attr]
     wait_for(lambda: "From the phone" in [x["title"] for x in client.get("/api/threads").json()])
+
+
+class _Gate:
+    def __init__(self) -> None:
+        self.armed = True
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+
+def _gate_next_changes(relay: FakeSyncRelay) -> _Gate:
+    """Holds the next `changes` after its page is taken, so a pull is on the wire while the
+    test acts; the page is the relay's state at the moment of the call."""
+    gate = _Gate()
+    orig = relay.changes
+
+    async def changes(
+        since: int = 0, limit: int = 500, scope: str = "all", tail: int = 0
+    ) -> dict[str, Any]:
+        out = await orig(since, limit, scope, tail)
+        if gate.armed:
+            gate.armed = False
+            gate.entered.set()
+            await asyncio.to_thread(gate.release.wait, 10)
+        return out
+
+    relay.changes = changes  # type: ignore[method-assign]
+    return gate
+
+
+def test_rows_written_while_a_push_is_pending_are_applied_once(synced) -> None:
+    client, service, llm, relay = synced
+    wait_for(lambda: settled(service))
+    before = len(relay.pulls)
+    # a rename puts a push on its delay; the push sends the title, then pulls behind itself
+    client.portal.call(service.rename_thread, MAIN_THREAD, "Renamed for the test")  # type: ignore[union-attr]
+    push = service.sync._push_task
+    assert push is not None and not push.done()
+    cid = str(uuid.uuid4())
+    relay.add_conversation(cid, "side", "Dinner plans", device="phone-1")
+    relay.add_message(cid, "user", "book a table", created_at=1738000050)
+    relay.add_message(cid, "assistant", "Booked for 7", created_at=1738000060)
+    wait_for(lambda: len(relay.pulls) > before)
+    wait_for(lambda: settled(service))
+    t = next(x for x in client.get("/api/threads").json() if x["title"] == "Dinner plans")
+    evs = _events(client, t["id"])
+    assert [(e["type"], e["text"]) for e in evs] == [
+        ("user", "book a table"),
+        ("assistant", "Booked for 7"),
+    ]
+    assert client.post("/api/sync/pull").json()["applied"] == 0
+
+
+def test_a_hub_frame_during_a_pull_gets_one_pull_after_it(synced) -> None:
+    client, service, llm, relay = synced
+    wait_for(lambda: settled(service))
+    gate = _gate_next_changes(relay)
+    client.portal.call(service.sync.pull_soon)  # type: ignore[union-attr]
+    assert gate.entered.wait(5)
+    cid = str(uuid.uuid4())
+    relay.add_conversation(cid, "side", "Arrived mid-pull")
+    relay.add_message(cid, "user", "hello")
+    before = len(relay.pulls)
+    client.portal.call(
+        service.sync.on_frame,  # type: ignore[union-attr]
+        {"type": "sync", "what": "messages", "cursor": relay.seq, "from": "phone-1"},
+    )
+    gate.release.set()
+    wait_for(lambda: service.sync.thread_of(cid) is not None)
+    wait_for(lambda: settled(service))
+    assert len(relay.pulls) - before == 1
+    assert service.sync.cursor == relay.seq
+
+
+def test_an_account_switch_during_a_pull_keeps_the_old_accounts_page(synced) -> None:
+    client, service, llm, relay = synced
+    wait_for(lambda: settled(service))
+    relay.switch_account("acct-A")
+    client.portal.call(service.sync.account_changed, "acct-A")  # type: ignore[union-attr]
+    wait_for(lambda: settled(service))
+    cid_a = str(uuid.uuid4())
+    relay.add_conversation(cid_a, "side", "Account A only")
+    relay.add_message(cid_a, "user", "a's own")
+    gate = _gate_next_changes(relay)
+    client.portal.call(service.sync.pull_soon)  # type: ignore[union-attr]
+    assert gate.entered.wait(5)
+    relay.switch_account("acct-B")
+    cid_b = str(uuid.uuid4())
+    relay.add_conversation(cid_b, "side", "Account B only")
+    relay.add_message(cid_b, "user", "b's own")
+    before = len(relay.pulls)
+    client.portal.call(service.sync.account_changed, "acct-B")  # type: ignore[union-attr]
+    gate.release.set()
+    wait_for(lambda: service.sync.thread_of(cid_b) is not None)
+    wait_for(lambda: settled(service))
+    assert service.sync.account_id == "acct-B"
+    assert service.sync.thread_of(cid_a) is None
+    assert service.sync.cursor == relay.seq
+    assert any(p["since"] == 0 for p in relay.pulls[before:])
 
 
 # ----------------------------------------------------------------------------- the switch, the failures
