@@ -60,7 +60,7 @@ https://github.com/user-attachments/assets/c7694d5a-9450-4f99-9254-5d70560d7565
 | **Linux** x64 | [AppImage](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-linux-x64.AppImage) · [.deb](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-linux-x64.deb) · [tar.gz](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-linux-x64.tar.gz) |
 | **Docker** | `bash scripts/self-host.sh --local` で自分のリレーを、`docker compose up -d app` で自分のサーバーにウェブアプリを。[セルフホスティング](../self-hosting.md) |
 
-ダウンロードはすべて [GitHub の最新リリース](https://github.com/zeeshanhaque21/nanoMuse/releases/latest)から。GitHub が遅い地域では同じファイルが [github.com/zeeshanhaque21/nanoMuse/dl](https://github.com/zeeshanhaque21/nanoMuse/releases/latest) にあります。アプリを開き、メールアドレスか中国本土の携帯番号でサインインすれば、エージェントが使うモデルが用意されます。スマホ、デスクトップ、ウェブはひとつのアカウントを共有し、同じ会話が見えます。
+ダウンロードはすべて [GitHub の最新リリース](https://github.com/zeeshanhaque21/nanoMuse/releases/latest)から。アプリを開き、メールアドレスか中国本土の携帯番号でサインインすれば、エージェントが使うモデルが用意されます。スマホ、デスクトップ、ウェブはひとつのアカウントを共有し、同じ会話が見えます。
 
 ## できること
 

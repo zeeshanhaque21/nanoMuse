@@ -60,7 +60,7 @@ https://github.com/user-attachments/assets/bf0ec2ae-59aa-4358-9dd0-c9d045ee7bee
 | **Linux** x64 | [AppImage](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-linux-x64.AppImage) · [.deb](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-linux-x64.deb) · [tar.gz](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-linux-x64.tar.gz) |
 | **Docker** | `bash scripts/self-host.sh --local` 架自己的中繼；`docker compose up -d app` 在自己的伺服器上跑網頁版；見[自己部署](../self-hosting.md) |
 
-下載都來自 [GitHub 最新版本](https://github.com/zeeshanhaque21/nanoMuse/releases/latest)；GitHub 下載不順時，同樣的檔案在 [github.com/zeeshanhaque21/nanoMuse/dl](https://github.com/zeeshanhaque21/nanoMuse/releases/latest)。打開 App，用電子郵件或中國大陸手機號登入，它就有模型可用。手機、桌面和網頁共用一個帳號，看到的是同樣的對話。
+下載都來自 [GitHub 最新版本](https://github.com/zeeshanhaque21/nanoMuse/releases/latest)。打開 App，用電子郵件或中國大陸手機號登入，它就有模型可用。手機、桌面和網頁共用一個帳號，看到的是同樣的對話。
 
 ## 能做什麼
 

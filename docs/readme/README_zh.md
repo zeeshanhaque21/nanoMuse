@@ -60,7 +60,7 @@ https://github.com/user-attachments/assets/bf0ec2ae-59aa-4358-9dd0-c9d045ee7bee
 | **Linux** x64 | [AppImage](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-linux-x64.AppImage) · [.deb](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-linux-x64.deb) · [tar.gz](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-linux-x64.tar.gz) |
 | **Docker** | `bash scripts/self-host.sh --local` 搭自己的中继；`docker compose up -d app` 在自己的服务器上跑网页版；见[自己部署](../self-hosting.md) |
 
-下载都来自 [GitHub 最新版本](https://github.com/zeeshanhaque21/nanoMuse/releases/latest)；GitHub 下不动时，同样的文件在 [github.com/zeeshanhaque21/nanoMuse/dl](https://github.com/zeeshanhaque21/nanoMuse/releases/latest)。打开 App，用邮箱或中国大陆手机号登录，它就有模型可用。手机、桌面和网页共用一个账号，看到的是同样的对话。
+下载都来自 [GitHub 最新版本](https://github.com/zeeshanhaque21/nanoMuse/releases/latest)。打开 App，用邮箱或中国大陆手机号登录，它就有模型可用。手机、桌面和网页共用一个账号，看到的是同样的对话。
 
 ## 能做什么
 

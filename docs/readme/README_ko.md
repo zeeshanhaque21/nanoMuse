@@ -60,7 +60,7 @@ https://github.com/user-attachments/assets/c7694d5a-9450-4f99-9254-5d70560d7565
 | **Linux** x64 | [AppImage](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-linux-x64.AppImage) · [.deb](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-linux-x64.deb) · [tar.gz](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-linux-x64.tar.gz) |
 | **Docker** | `bash scripts/self-host.sh --local`로 자신의 릴레이를, `docker compose up -d app`으로 자신의 서버에 웹 앱을. [직접 호스팅](../self-hosting.md) |
 
-모든 다운로드는 [GitHub 최신 릴리스](https://github.com/zeeshanhaque21/nanoMuse/releases/latest)에 있습니다. GitHub가 느린 곳이라면 같은 파일이 [github.com/zeeshanhaque21/nanoMuse/dl](https://github.com/zeeshanhaque21/nanoMuse/releases/latest)에 있습니다. 앱을 열고 이메일이나 중국 본토 휴대폰 번호로 로그인하면 에이전트가 쓸 모델이 준비됩니다. 휴대폰, 데스크톱, 웹은 하나의 계정을 공유하고 같은 대화를 보여 줍니다.
+모든 다운로드는 [GitHub 최신 릴리스](https://github.com/zeeshanhaque21/nanoMuse/releases/latest)에 있습니다. 앱을 열고 이메일이나 중국 본토 휴대폰 번호로 로그인하면 에이전트가 쓸 모델이 준비됩니다. 휴대폰, 데스크톱, 웹은 하나의 계정을 공유하고 같은 대화를 보여 줍니다.
 
 ## 무엇을 하나
 

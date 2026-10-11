@@ -60,7 +60,7 @@ Todas las versiones: [releases](https://github.com/zeeshanhaque21/nanoMuse/relea
 | **Linux** x64 | [AppImage](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-linux-x64.AppImage) · [.deb](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-linux-x64.deb) · [tar.gz](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-linux-x64.tar.gz) |
 | **Docker** | `bash scripts/self-host.sh --local` para tu propio relay; `docker compose up -d app` para la app web en un servidor tuyo; véase [autoalojamiento](../self-hosting.md) |
 
-Todas las descargas vienen de la [última versión](https://github.com/zeeshanhaque21/nanoMuse/releases/latest); los mismos archivos están en [github.com/zeeshanhaque21/nanoMuse/dl](https://github.com/zeeshanhaque21/nanoMuse/releases/latest) si GitHub va lento donde estás. Abre la app, inicia sesión con un correo o un número de teléfono de China continental, y el agente ya tiene un modelo con el que pensar. El teléfono, el escritorio y la web comparten una cuenta y muestran las mismas conversaciones.
+Todas las descargas vienen de la [última versión](https://github.com/zeeshanhaque21/nanoMuse/releases/latest). Abre la app, inicia sesión con un correo o un número de teléfono de China continental, y el agente ya tiene un modelo con el que pensar. El teléfono, el escritorio y la web comparten una cuenta y muestran las mismas conversaciones.
 
 ## Qué hace
 
