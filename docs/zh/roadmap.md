@@ -1,6 +1,6 @@
 # 路线图
 
-个人智能体不该只长在别人的云里，nanoMuse 想做一个开源、低成本的平替：装在自己的设备上，模型自己选，中继也能自己架。我们希望和全球的开发者、使用者一起，让每个人真正拥有自己的个人智能体。提个 [issue](https://github.com/nano-muse/nanoMuse/issues/new/choose) 或者发个 [PR](../../CONTRIBUTING.md) 都是在帮 nanoMuse 变得更好。
+个人智能体不该只长在别人的云里，nanoMuse 想做一个开源、低成本的平替：装在自己的设备上，模型自己选，中继也能自己架。我们希望和全球的开发者、使用者一起，让每个人真正拥有自己的个人智能体。提个 [issue](https://github.com/zeeshanhaque21/nanoMuse/issues/new/choose) 或者发个 [PR](../../CONTRIBUTING.md) 都是在帮 nanoMuse 变得更好。
 
 这一页是给想来帮忙的人画的地图：我们现在在做什么，接下来做什么，每个领域先从哪里下手。不写日期：一样东西在一台真手机和一台真电脑上能用了，就发。
 
