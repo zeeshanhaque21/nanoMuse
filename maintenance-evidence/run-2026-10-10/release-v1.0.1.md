@@ -6,7 +6,7 @@ Tracking upstream [`v1.0.1`](https://github.com/nano-muse/nanoMuse/releases/tag/
 |---|---|
 | Upstream release | https://github.com/nano-muse/nanoMuse/releases/tag/v1.0.1 |
 | Upstream tag commit | `4f56f9654a6c7f5f7b3f934da4f04f5172e45c42` |
-| **Sanitized fork commit** | the sanitized commit on `fork/main` this run produced (tree `553837494695326a15474c3ad1693620d12e48e0`); exact SHA in `completion.md` |
+| **Sanitized fork commit** | the sanitized commit this run produced on `fork/main`; its exact SHA is in `completion.md` |
 | Fork tag | `v1.0.1-fork.1` (annotated) on the sanitized commit — **never** the raw upstream commit |
 | Also tracks | `v1.0.2` (Trim), `v1.0.0` (Keel) — the same sanitized commit |
 
