@@ -30,7 +30,7 @@ git grep -l 'nanomuse\.cn' -- . \
   ':(exclude)docs/release-notes-template.md' ':(exclude)nanomuse/server/static/**'
 ```
 
-Remainder — **13 files**, every one classified, none a new active reference:
+Remainder — **17 files**, every one classified, none a new active reference:
 
 ```
 cloud/README.md                     the deploy artifact name cloud.nanomuse.cn.caddy
@@ -38,11 +38,17 @@ docs/zh/cloud.md                    attribution prose for upstream's public rela
 docs/zh/every-device.md             attribution prose for upstream's showcase site
 docs/zh/privacy.md                  legal text (in the test's ALLOWED set)
 maintenance-evidence/run-2026-10-05/*   immutable prior-run evidence (5 files)
+maintenance-evidence/run-2026-10-10/*   this run's evidence — it quotes the scan command
+                                        and the classification (4 files)
 maintenance/RUNBOOK.md              this runbook's own literal scan commands
 tests/test_fork_relay_defaults.py   absence assertion
 tests/test_fork_upstream_037_sanitization.py   absence assertion
 tests/test_nudges_runtime.py        absence assertion
 ```
+
+(The runbook's "as of the 0.1.41 sync" list is 13 files; the four extra are this run's own
+evidence files, which necessarily quote `nanomuse\.cn` — the same reason the
+`run-2026-10-05` files are in the remainder.)
 
 Active-surface scan of the areas the command does not exclude is **empty**:
 
