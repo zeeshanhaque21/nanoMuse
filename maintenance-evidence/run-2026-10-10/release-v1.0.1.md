@@ -8,6 +8,7 @@ Tracking upstream [`v1.0.1`](https://github.com/nano-muse/nanoMuse/releases/tag/
 | Upstream tag commit | `4f56f9654a6c7f5f7b3f934da4f04f5172e45c42` |
 | **Sanitized fork commit** | the sanitized commit this run produced on `fork/main`; its exact SHA is in `completion.md` |
 | Fork tag | `v1.0.1-fork.1` (annotated) on the sanitized commit — **never** the raw upstream commit |
+| Merged fork PR | [#17](https://github.com/zeeshanhaque21/nanoMuse/pull/17) |
 | Also tracks | `v1.0.2` (Trim), `v1.0.0` (Keel) — the same sanitized commit |
 
 ## Assets
@@ -24,9 +25,10 @@ O=nanoMuse fork`, signer SHA-256 `811846ed…` — the same key as every prior f
 
 ## Sanitization
 
-Same as `v1.0.2-fork.1`: the canonical scan leaves 13 classified files; the active surfaces
-carry no `nanomuse.cn`; the relay seam is `cloud.base_url` / `NANOMUSE_CLOUD_BASE_URL` only,
-with no default relay and a `relay_unconfigured` error before any network I/O.
+Same as `v1.0.2-fork.1`: the canonical scan leaves 13 classified files, and the only others are
+this run's own four evidence files, which necessarily quote the scan command. The active
+surfaces carry no `nanomuse.cn`; the relay seam is `cloud.base_url` / `NANOMUSE_CLOUD_BASE_URL`
+only, with no default relay and a `relay_unconfigured` error before any network I/O.
 
 ## Fork-only changes kept
 

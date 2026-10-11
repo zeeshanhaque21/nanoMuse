@@ -8,7 +8,7 @@ Tracking upstream [`v1.0.2`](https://github.com/nano-muse/nanoMuse/releases/tag/
 | Upstream tag commit | `7c91811ef16a34fd575c8614fad2ca754088d763` |
 | **Sanitized fork commit** | the sanitized commit this run produced on `fork/main`; its exact SHA is in `completion.md` |
 | Fork tag | `v1.0.2-fork.1` (annotated) on the sanitized commit — **never** the raw upstream commit |
-| Merged fork PR | this run's PR (see the completion report) |
+| Merged fork PR | [#17](https://github.com/zeeshanhaque21/nanoMuse/pull/17) |
 | Also tracks | `v1.0.1` (Ballast), `v1.0.0` (Keel) — the same sanitized commit |
 
 ## Assets
@@ -37,9 +37,10 @@ omit every fork-only change below.
 The canonical scan (`maintenance/RUNBOOK.md`) leaves only 13 files, every one classified:
 attribution prose (`docs/zh/cloud.md`, `docs/zh/every-device.md`), legal text
 (`docs/zh/privacy.md`), a deploy-artifact filename (`cloud/README.md`), immutable prior-run
-evidence, this runbook, and three absence-assertion tests. The active surfaces
-(`nanomuse/`, `web/src/`, `cloud/nanomuse_cloud/`, `harness/*/src/`, `android/src/`,
-`nanomuse/server/static/`) carry **no** `nanomuse.cn`.
+evidence, this runbook, and three absence-assertion tests. The only other files the scan
+reports are this run's own four evidence files, which necessarily quote the scan command. The
+active surfaces (`nanomuse/`, `web/src/`, `cloud/nanomuse_cloud/`, `harness/*/src/`,
+`android/src/`, `nanomuse/server/static/`) carry **no** `nanomuse.cn`.
 
 The relay seam is `cloud.base_url` / `NANOMUSE_CLOUD_BASE_URL` only; there is no default
 relay, and an empty relay raises `relay_unconfigured` before any network I/O.
