@@ -338,7 +338,7 @@ side_chats = false
 # ------------------------------------------------------------------------------
 [cloud]
 base_url = ""   # a relay you run yourself: its public address (docs/self-hosting.md); empty runs with no relay
-required = true          # the first run does not finish without an account; false for a runtime with no relay at all
+required = false         # the first run does not finish without an account; false for a runtime with no relay at all
 models = true            # the account's models as a source (the apps' "Use nanoMuse Cloud models" switch); false keeps the sign-in for sync and the devices only
 sync = true              # default for the account-wide Data controls → Sync switch (the person's choice, once made, counts)
 

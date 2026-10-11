@@ -51,6 +51,8 @@ Every version: [releases](https://github.com/zeeshanhaque21/nanoMuse/releases).
 
 ## Install
 
+**This fork ships no hosted demo and no default relay.** Point it at [your own relay](docs/cloud.md) first, then install from [this fork's releases](https://github.com/zeeshanhaque21/nanoMuse/releases/latest); upstream's public site and download mirror are not used by this fork.
+
 | | |
 |---|---|
 | **Android** 8.0+, arm64 | [nanoMuse-1.0.2-arm64.apk](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-1.0.2-arm64.apk): every version is signed with the same key and installs over the last |
@@ -60,7 +62,7 @@ Every version: [releases](https://github.com/zeeshanhaque21/nanoMuse/releases).
 | **Linux** x64 | [AppImage](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-linux-x64.AppImage) · [.deb](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-linux-x64.deb) · [tar.gz](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-linux-x64.tar.gz) |
 | **Docker** | `bash scripts/self-host.sh --local` for your own relay; `docker compose up -d app` for the web app on a server of yours; see [self-hosting](docs/self-hosting.md) |
 
-All downloads come from the [latest release](https://github.com/zeeshanhaque21/nanoMuse/releases/latest); the same files are on [github.com/zeeshanhaque21/nanoMuse/dl](https://github.com/zeeshanhaque21/nanoMuse/releases/latest) when GitHub is slow where you are. Open the app, sign in with an e-mail or a mainland-China phone number, and it has a model to think with. The phone, the desktop and the web share one account and show the same conversations.
+All downloads come from the [latest release](https://github.com/zeeshanhaque21/nanoMuse/releases/latest). Open the app, sign in with an e-mail or a mainland-China phone number, and it has a model to think with. The phone, the desktop and the web share one account and show the same conversations.
 
 ## What it does
 

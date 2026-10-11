@@ -41,7 +41,7 @@
   | Linux x64 | `nanoMuse-Desktop-<version>-linux-x64.deb` / `.AppImage` (needs FUSE; `--appimage-extract-and-run` without) / `.tar.gz` (unpack anywhere, run `./nanomuse-desktop`) |
   | DeepSeek Harness Desktop you already run | `dsh-nanomuse-<version>.tgz`: `dsh plugin --profile desktop add …` ([how](https://github.com/zeeshanhaque21/nanoMuse/blob/main/harness/README.md)) |
 
-  In our measurements GitHub's own downloads are quick from China as well; if they fail where you are, the same files are on [github.com/zeeshanhaque21/nanoMuse/releases/latestv<version>/](https://github.com/zeeshanhaque21/nanoMuse/releases/latestv<version>/) within fifteen minutes.
+  In our measurements GitHub's own downloads are quick from China as well.
 
 ## Community
 
@@ -81,7 +81,7 @@ Based on [OpenMinis](https://github.com/OpenMinis/OpenMinis) 1.13 (GPL-3.0), mod
   | Linux x64 | `nanoMuse-Desktop-<version>-linux-x64.deb` / `.AppImage`（需要 FUSE；没有就加 `--appimage-extract-and-run`）/ `.tar.gz`（解压到任意位置，运行 `./nanomuse-desktop`）|
   | 已在用 DeepSeek Harness Desktop | `dsh-nanomuse-<version>.tgz`：`dsh plugin --profile desktop add …`（[怎么装](https://github.com/zeeshanhaque21/nanoMuse/blob/main/harness/README.md)） |
 
-  实测从国内直接下 GitHub 也不慢；万一下不动，同样的文件十五分钟内会出现在 [github.com/zeeshanhaque21/nanoMuse/releases/latestv<version>/](https://github.com/zeeshanhaque21/nanoMuse/releases/latestv<version>/)。
+  实测从国内直接下 GitHub 也不慢。
 
 ### 社区
 
