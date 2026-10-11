@@ -14,6 +14,7 @@ from nanomuse.calendar import CalendarFeeds
 from nanomuse.config import Settings
 from nanomuse.contacts import ContactBook
 from nanomuse.goals import GoalStore
+from nanomuse.llm import session as llm_session
 from nanomuse.llm.base import BaseLLM
 from nanomuse.llm.vision import keep_newest_images
 from nanomuse.logger import logger
@@ -27,15 +28,26 @@ from nanomuse.ui import UI
 
 
 class Incoming:
-    """A user message on its way to the agent: the text, what was attached to it, and the
-    language of the client's screens (a BCP-47 tag, "" when the client did not say)."""
+    """A user message on its way to the agent: the text, what was attached to it, the
+    language of the client's screens (a BCP-47 tag, "" when the client did not say), and,
+    for *Use nanoMuse Cloud this time*, the model client this one turn runs on (``llm``)
+    and its id (``model``); None and "" for a turn on the configured model."""
 
-    __slots__ = ("files", "language", "text")
+    __slots__ = ("files", "language", "llm", "model", "text")
 
-    def __init__(self, text: str, files: list[Attachment] | None = None, language: str = ""):
+    def __init__(
+        self,
+        text: str,
+        files: list[Attachment] | None = None,
+        language: str = "",
+        llm: BaseLLM | None = None,
+        model: str = "",
+    ):
         self.text = text
         self.files = files or []
         self.language = language
+        self.llm = llm
+        self.model = model
 
 
 class MuseAgent:
@@ -70,6 +82,9 @@ class MuseAgent:
         # The conversation (thread) this agent is; approvals "for this conversation" are
         # bound to it and last as long as it does. Without one, each run stands alone.
         self.conversation_id = conversation_id
+        # The id model calls carry for a vendor that wants one per conversation (OpenCode Go):
+        # the thread's, else one of this agent's own for as long as it lives.
+        self.session_id = conversation_id or llm_session.new_fallback()
         self.messages: list[Message] = []
         self.state = AgentState.IDLE
         self.turns = 0
@@ -410,6 +425,7 @@ class MuseAgent:
         task_token = self.sentinel.begin_task(
             purpose or user_input, conversation=self.conversation_id
         )
+        session_token = llm_session.enter(self.session_id)
         try:
             while step < self.settings.agent.max_steps:
                 step += 1
@@ -531,6 +547,7 @@ class MuseAgent:
             self.state = AgentState.ERROR
             raise
         finally:
+            llm_session.leave(session_token)
             self.sentinel.end_task(task_token)
             self._save_session()
         return final or ""
@@ -538,7 +555,8 @@ class MuseAgent:
     # ------------------------------------------------------------------ session persistence
     def reset(self) -> None:
         self.messages.clear()
-        self.sentinel.tainted = False
+        # only this conversation: the taint of the chats running beside this one is theirs
+        self.sentinel.untaint(self.conversation_id or "")
         self.state = AgentState.IDLE
 
     def _save_session(self) -> None:

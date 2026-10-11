@@ -15,25 +15,37 @@
   <a href="https://github.com/zeeshanhaque21/nanoMuse/blob/main/docs/readme/README_vi.md">Tiếng Việt</a>
 </p>
 <p align="center">
+  <a href="https://trendshift.io/repositories/286894?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-286894" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/286894/daily?language=Swift" alt="zeeshanhaque21%2FnanoMuse | Trendshift" width="250" height="55"/></a>
+</p>
+<p align="center">
   <a href="https://github.com/zeeshanhaque21/nanoMuse/stargazers"><img src="https://img.shields.io/github/stars/zeeshanhaque21/nanoMuse?style=flat&label=stars" alt="GitHub stars"></a>
   <a href="https://github.com/zeeshanhaque21/nanoMuse/releases"><img src="https://img.shields.io/github/downloads/zeeshanhaque21/nanoMuse/total?label=downloads" alt="下载量"></a>
+  <img src="https://komarev.com/ghpvc/?username=nano-muse-nanomuse&label=visitors&color=0a66e4&base=13835" alt="Visitors">
   <a href="https://github.com/zeeshanhaque21/nanoMuse/actions/workflows/ci.yml"><img src="https://github.com/zeeshanhaque21/nanoMuse/actions/workflows/ci.yml/badge.svg?branch=main" alt="Test Suite"></a>
-  <a href="https://arxiv.org/abs/2610.08699"><img src="https://img.shields.io/badge/arXiv-2610.08699-b31b1b" alt="arXiv 上的论文"></a>
   <a href="https://github.com/zeeshanhaque21/nanoMuse/blob/main/LICENSE"><img src="https://img.shields.io/github/license/zeeshanhaque21/nanoMuse?label=license" alt="GPL-3.0-or-later"></a>
+  <a href="https://arxiv.org/abs/2610.08699"><img src="https://img.shields.io/badge/arXiv-2610.08699-b31b1b" alt="arXiv 上的论文"></a>
+  <br>
   <a href="https://discord.gg/bkTySmm28X"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="Discord"></a>
 </p>
 
 **nanoMuse 是一个开源的个人智能体，面向你的每一台设备。** 一个有名字、有自己形象的智能体，和 Meta 的 [Muse](https://about.fb.com/news/2026/09/introducing-muse-personal-ai-agent/) 是同一类东西：不只回答问题，而是动手做事；App 关了也继续干；记得你；遇到无法撤销的操作会先停下来问你。
 
+*nano* 的意思是完整的一套，小到你自己就能跑、能部署：手机 App、桌面 App、网页控制台，还有把它们连在一起的中继，都在这个仓库里，GPL-3.0-or-later。**[免费、开源、非营利。一起把它做好。](../../CONTRIBUTING.md)** 登录就有一份免费的模型额度，走社区中继，钱是开发者出的；用完可以[换自己的 key](../own-key.md)。同一套中继也能跑在你自己的服务器上，数据不用出门。最新版本：**1.0.2 Trim**，[发布说明](https://github.com/zeeshanhaque21/nanoMuse/releases/tag/v1.0.2-fork.1)。
+
+> [!NOTE]
+> **nanoMuse 在持续进化**
+>
+> 个人智能体不该只长在别人的云里，nanoMuse 想做一个开源、低成本的平替：装在自己的设备上，模型自己选，中继也能自己架。我们希望和全球的开发者、使用者一起，让每个人真正拥有自己的个人智能体。提个 [issue](https://github.com/zeeshanhaque21/nanoMuse/issues/new/choose) 或者发个 [PR](../../CONTRIBUTING.md) 都是在帮 nanoMuse 变得更好。
 
 https://github.com/user-attachments/assets/bf0ec2ae-59aa-4358-9dd0-c9d045ee7bee
 
 
 ## 🗞️ 动态
 
-- `2026-10-07` 📄 我们的论文已发布在 [arXiv](https://arxiv.org/abs/2610.08699)。
-- `2026-10-07` 🚀 最新版本：[0.1.41 Choice](https://github.com/zeeshanhaque21/nanoMuse/releases/tag/v0.1.41)。
-- `2026-09-25` 🎉 nanoMuse 发布。
+- `2026-10-09` 🚀 版本 [1.0.0 Keel](https://github.com/zeeshanhaque21/nanoMuse/releases/tag/v1.0.0-fork.1) 发布，手机、电脑和浏览器都有；装在上一版之上，数据保留，每一处改动都写在发布说明里。
+- `2026-10-08` 🤗 我们的论文登上 [Hugging Face Daily Papers](https://huggingface.co/papers/2610.08699)，在 10 月 8 日的榜单上排第三；欢迎到论文页提问和留言。
+- `2026-10-07` 📄 我们的论文已发布在 [arXiv](https://arxiv.org/abs/2610.08699)：《nanoMuse: An Open-Source Personal Agent for Every Device You Own》，作者 Guangyi Liu、Yong Liu、Jiangning Zhang（浙江大学）；引用格式见本页末尾。
+- `2026-09-25` 🎉 nanoMuse 以 GPL-3.0-or-later 发布在 GitHub：一个基于 OpenMinis 1.13 的 Android 应用；中继、电脑端和 iPhone 版在随后几天陆续到来。
 
 全部版本：[releases](https://github.com/zeeshanhaque21/nanoMuse/releases)。
 
@@ -41,11 +53,11 @@ https://github.com/user-attachments/assets/bf0ec2ae-59aa-4358-9dd0-c9d045ee7bee
 
 | | |
 |---|---|
-| **Android** 8.0 以上，arm64 | [nanoMuse-0.1.41-arm64.apk](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v0.1.41/nanoMuse-0.1.41-arm64.apk)：每个版本同一把签名，覆盖安装即可升级 |
-| **iPhone / iPad** | [TestFlight](https://testflight.apple.com/join/ZHexbDqc)：测试版；Apple 的 beta 审核通过后，这个链接就能装到构建 · [iOS](../ios.md) |
-| **macOS** 12 以上 | [Apple 芯片](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-mac-arm64.dmg) · [Intel](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-mac-x64.dmg)：没有公证：第一次右键 → 打开 |
-| **Windows** 10 以上 | [nanoMuse-Desktop-0.1.41-win-x64.exe](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-win-x64.exe)：点一次「仍要运行」 |
-| **Linux** x64 | [AppImage](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-linux-x64.AppImage) · [.deb](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-linux-x64.deb) · [tar.gz](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v0.1.41/nanoMuse-Desktop-0.1.41-linux-x64.tar.gz) |
+| **Android** 8.0 以上，arm64 | [nanoMuse-1.0.2-arm64.apk](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-1.0.2-arm64.apk)：每个版本同一把签名，覆盖安装即可升级 |
+| **iPhone / iPad** | [TestFlight](https://testflight.apple.com/join/ZHexbDqc)：测试版，已通过 Apple 的 beta 审核；从这个链接安装 · [iOS](../ios.md) |
+| **macOS** 12 以上 | [Apple 芯片](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-mac-arm64.dmg) · [Intel](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-mac-x64.dmg)。没有公证：第一次右键 → 打开 |
+| **Windows** 10 以上 | [nanoMuse-Desktop-1.0.2-win-x64.exe](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-win-x64.exe)：点一次「仍要运行」 |
+| **Linux** x64 | [AppImage](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-linux-x64.AppImage) · [.deb](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-linux-x64.deb) · [tar.gz](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-linux-x64.tar.gz) |
 | **Docker** | `bash scripts/self-host.sh --local` 搭自己的中继；`docker compose up -d app` 在自己的服务器上跑网页版；见[自己部署](../self-hosting.md) |
 
 下载都来自 [GitHub 最新版本](https://github.com/zeeshanhaque21/nanoMuse/releases/latest)。打开 App，用邮箱或中国大陆手机号登录，它就有模型可用。手机、桌面和网页共用一个账号，看到的是同样的对话。
@@ -67,7 +79,7 @@ https://github.com/user-attachments/assets/bf0ec2ae-59aa-4358-9dd0-c9d045ee7bee
   </tr>
   <tr>
     <td width="50%" valign="top"><b>有自己的形象。</b><br>描述一句，你的图像模型来画，视频模型让它动起来。默认是一只小龙。</td>
-    <td width="50%" valign="top"><b>任何模型。</b><br>中继的额度；自己在十八家服务商（百炼、OpenRouter、OpenAI、Gemini、DeepSeek 等）任意一家的 key；或者你已经在付费的套餐：ChatGPT、Claude、Kimi。服务商没有图片或视频模型，这两项就不开，app 会直说。</td>
+    <td width="50%" valign="top"><b>任何模型。</b><br>中继的额度；自己在二十家服务商（百炼、OpenRouter、OpenAI、Gemini、DeepSeek 等）任意一家的 key；或者你已经在付费的套餐：ChatGPT、Claude、Kimi。服务商没有图片或视频模型，这两项就不开，App 会直说。</td>
   </tr>
 </table>
 
@@ -93,7 +105,7 @@ https://github.com/user-attachments/assets/bf0ec2ae-59aa-4358-9dd0-c9d045ee7bee
 
 ## 文档
 
-[docs/](../)：各平台的安装、多端、「手」、连接器、记忆、自己部署、协议。源文件在 [docs/](../)；每个版本改了什么在 [CHANGELOG](../../CHANGELOG.md) 和 [docs/releases/](../releases/)。
+[github.com/zeeshanhaque21/nanoMuse/docs](https://github.com/zeeshanhaque21/nanoMuse/tree/main/docs/)：各平台的安装、多端、「手」、连接器、记忆、自己部署、协议。源文件在 [docs/](../)；每个版本改了什么在 [CHANGELOG](../../CHANGELOG.md) 和 [docs/releases/](../releases/)。
 
 ## 自己部署
 
@@ -102,6 +114,28 @@ https://github.com/user-attachments/assets/bf0ec2ae-59aa-4358-9dd0-c9d045ee7bee
 ## 参与
 
 拿它做一件真事，报告哪里坏了，然后挑一件小而具体的事做：[CONTRIBUTING.md](../../CONTRIBUTING.md) 有环境和约定，[AGENTS.md](../../AGENTS.md) 是编程智能体在这棵树里要守的规矩，[路线图](../roadmap.md)说从哪儿入手。[Issues](https://github.com/zeeshanhaque21/nanoMuse/issues) · [Discussions](https://github.com/zeeshanhaque21/nanoMuse/discussions) · [Discord](https://discord.gg/bkTySmm28X)。
+
+## 维护者
+
+<table>
+  <tr>
+    <td align="center"><a href="https://github.com/lgy0404"><img src="https://avatars.githubusercontent.com/u/63797388?v=4&s=80" width="80" height="80" alt="Guangyi Liu"><br><strong>Guangyi Liu</strong></a><br><a href="mailto:guangyiliu@zju.edu.cn"><img src="https://img.shields.io/badge/e--mail-guangyiliu%40zju.edu.cn-0a66e4" alt="guangyiliu@zju.edu.cn"></a></td>
+  </tr>
+</table>
+
+## 社区贡献者
+
+每一位有改动合并进 `main` 的人，取自 GitHub 的贡献者列表。
+
+<!-- contributors:start -->
+<p>
+<a href="https://github.com/wsvn53"><img src="https://avatars.githubusercontent.com/u/912204?v=4&s=48" width="48" height="48" alt="wsvn53"></a>
+<a href="https://github.com/hobostay"><img src="https://avatars.githubusercontent.com/u/110803307?v=4&s=48" width="48" height="48" alt="hobostay"></a>
+<a href="https://github.com/aliabbas6622"><img src="https://avatars.githubusercontent.com/u/193962983?v=4&s=48" width="48" height="48" alt="aliabbas6622"></a>
+<a href="https://github.com/PovedaAqui"><img src="https://avatars.githubusercontent.com/u/9494679?v=4&s=48" width="48" height="48" alt="PovedaAqui"></a>
+<a href="https://github.com/jiangkaiqi2005"><img src="https://avatars.githubusercontent.com/u/184961141?v=4&s=48" width="48" height="48" alt="jiangkaiqi2005"></a>
+</p>
+<!-- contributors:end -->
 
 ## ⭐️ 引用
 
@@ -135,3 +169,8 @@ nanoMuse 是独立的社区项目，与 Meta Platforms, Inc. 无关，也未获�
 ## 许可
 
 [GPL-3.0-or-later](../../LICENSE)。手机 App 基于 OpenMinis 1.13（GPL-3.0），自 2026-09-24 起修改，见 [NOTICE](../../NOTICE)。Python 线更早的版本是 MIT（tag `pre-openminis`）。
+
+<p align="center">
+  <em>感谢来访 ✨ nanoMuse！</em><br><br>
+  <img src="https://komarev.com/ghpvc/?username=nano-muse-nanomuse&label=visitors&color=0a66e4&base=13835" alt="Visitors">
+</p>
