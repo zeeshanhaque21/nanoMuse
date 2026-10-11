@@ -1,5 +1,11 @@
 # Sync upstream nanoMuse v1.0.0–v1.0.2 into the fork (sanitized)
 
+> **Note on the branch.** The first push (branch `sync/upstream-1.0.2-sanitize`, PR #16)
+> had two commits without a `Signed-off-by` line, which the DCO check rejects. Per
+> `maintenance/RUNBOOK.md` §9 — never force-push — the branch was rebuilt as
+> `sync/upstream-1.0.2-sanitize-v2` with an **identical tree** and every commit signed off,
+> and PR #16 was closed as superseded. All SHAs below are the `-v2` branch's.
+
 Merges three published upstream releases into the fork without losing any fork-only
 feature, and keeps every `.cn` cloud-backend reference out of the shipped tree.
 
@@ -11,7 +17,7 @@ feature, and keeps every `.cn` cloud-backend reference out of the shipped tree.
 | Upstream tip merged | `5379e97a5e6d8c68c6f1fc4da3b4649692b94f82` (`upstream/main`) |
 | Published upstream releases discovered | `v1.0.0` (Keel) · `v1.0.1` (Ballast) · `v1.0.2` (Trim, Latest) |
 | Fork baseline before this run | `df0b3e35986496aa27d48388d5cc24b205252e6e` (`fork/main`) |
-| **Sanitized fork commit (this branch head)** | **`244f132c62`** |
+| **Sanitized fork commit** | branch `sync/upstream-1.0.2-sanitize-v2`, tree `553837494695326a15474c3ad1693620d12e48e0`; the commit this produces on `fork/main` is recorded in `completion.md` |
 | Diff | 405 files changed, 13,266 insertions(+), 2,769 deletions(−) |
 
 Releases are discovered independently of whether `upstream/main` moved; the previous
@@ -139,7 +145,7 @@ in the table above.
 | | passed | failed | skipped |
 |---|---|---|---|
 | `fork/main` baseline | 807 | **2** | 4 |
-| this branch (HEAD `244f132c62`) | 853 | **2** | 4 |
+| this branch (`sync/upstream-1.0.2-sanitize-v2`, tree `5538374946`) | 853 | **2** | 4 |
 
 Same two tests, so the merge adds 46 passing tests and no new failures.
 `tests/test_mac_window.py`, `nanomuse/computer/**` and `nanomuse/tools/computer.py` are
