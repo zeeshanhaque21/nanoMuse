@@ -40,7 +40,7 @@ enum NanoMuseTab: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .chat: return AppLocalized("Chat")
+        case .chat: return AppLocalized("tab.chat") // its own key: 聊天 as on Android, not upstream's 闲聊
         case .feed: return AppLocalized("Feed")
         case .ideas: return AppLocalized("Ideas")
         case .goals: return AppLocalized("Goals")
@@ -527,6 +527,19 @@ struct NanoMuseHomeView: View {
             // A notification tap ("Check-in: … — open to run it") or a Shortcut: show that conversation.
             guard let id = note.userInfo?["sessionId"] as? String, !id.isEmpty else { return }
             openSideChat(id)
+        }
+        .onReceive(NanoMuseVoicePrompt.shared.$pending) { request in
+            // The Action Button's voice prompt with no chat named (#296): the main chat, on
+            // screen, is the one to listen. Aimed at it by id, so a side chat pushed over it
+            // does not take the press; the id follows once the main chat has resolved.
+            guard let request, request.session == nil else { return }
+            drawerOpen = false
+            tab = .chat
+            chatPath.removeAll()
+            if let id = main.chatId { NanoMuseVoicePrompt.shared.aim(at: id) }
+        }
+        .onReceive(main.$chatId) { id in
+            if let id, NanoMuseVoicePrompt.shared.pending?.session == nil { NanoMuseVoicePrompt.shared.aim(at: id) }
         }
     }
 
