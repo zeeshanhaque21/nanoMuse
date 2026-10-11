@@ -58,10 +58,15 @@ grep -rl 'nanomuse\.cn' nanomuse/server/static/                                 
   (`nanomuse/cloud.py`).
 - `cloud/nanomuse_cloud/config.py`: `invite_url`, `own_key_docs`, `privacy_url`,
   `repo_url` all default to `""` (`openrouter_url` keeps its documented third-party default).
-- Sanitized at the owning layer, never by a blind global replace.
+- Sanitized at the owning layer. (The first pass was not perfect: the adversarial
+  review below found blind-replace scars in the docs, since fixed — see *Review findings*.)
 - The user's private relay (`jetson-orin-nano.time-mora.ts.net`) is not hardcoded and is
   untouched; it is set through the seam.
-- Attribution prose and immutable history are preserved, not rewritten.
+- Attribution prose is preserved: the Chinese docs keep their upstream mentions. The
+  `docs/roadmap.md`, `docs/zh/roadmap.md`, `docs/release-notes-template.md` and
+  `docs/readme/**` links were repointed at this fork, because the fork's own
+  `tests/test_fork_docs_sanitization.py` scans `docs/**/*.md` and fails on an upstream link —
+  the test is stricter than the runbook's preserve list, and it is the enforced contract.
 
 ## Fork-only features preserved (wired, not merely present)
 
@@ -97,6 +102,27 @@ is empty.
 | `node scripts/providers-json.mjs --check` | clean |
 | End-to-end smoke proof | `nanomuse serve` booted; SPA mounted; in-browser `/api/state` → 200 `1.0.2`; frozen bundled Chromium (`.local-browsers/chromium-1243`) navigated the real page |
 | Android release APK | built from this commit, release-signed, checksum recorded |
+| Adversarial review (fresh-context native subagent, read-only) | verdict **no BLOCKER**; findings fixed — see below |
+
+## Review findings (and what was done)
+
+A separate fresh-context reviewer independently re-ran the scan, the baseline comparison and
+the tests, and inspected the diff. Verdict: **safe to push/merge, no BLOCKER.** It found:
+
+| Finding | Severity | Resolution |
+|---|---|---|
+| `docs/release-notes-template.md` (EN+ZH): upstream's mirror link had been blindly replaced into the malformed `.../releases/latestv<version>/` | MAJOR | fixed — the mirror clause is dropped (this fork has no mirror) |
+| `README.md` + the nine `docs/readme/*.md`: label/href mismatch `[github.com/…/dl](…/releases/latest)` from the same blind replace | MINOR/NIT | fixed — clause dropped; the line now ends at the latest-release link |
+| `README.md`: the fork note ("no hosted demo and no default relay") was dropped by the merge | MINOR | fixed — restored at the top of *Install* |
+| `config/config.example.toml`: `required = true` while the code default is `false` and `base_url = ""` | MINOR | fixed — aligned with the default |
+| Docs link `v1.0.2-fork.1` / `v1.0.0-fork.1`, which do not exist until this run publishes | MINOR | resolved by publishing the releases below |
+
+Two claims in an earlier draft of this body were **false** and have been corrected above:
+"never by a blind global replace" (it had been, in the docs) and "immutable history …
+not rewritten" (roadmap/readme/template links were repointed, as the fork's own test
+requires). The reviewer also could not reproduce the *full-suite* baseline pass count
+because it only ran `test_mac_window.py`; the full baseline was run here and is recorded
+in the table above.
 
 ### The two failures are pre-existing, not regressions
 
