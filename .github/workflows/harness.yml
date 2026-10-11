@@ -100,7 +100,8 @@ jobs:
           if-no-files-found: error
 
   release:
-    if: (startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != '') && !contains(inputs.release_tag || github.ref_name, '-fork.')
+    # fork: -fork. tags publish the harness bundle too (upstream's condition, no fork exclusion)
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
     needs: bundle
     runs-on: ubuntu-latest
     permissions:
