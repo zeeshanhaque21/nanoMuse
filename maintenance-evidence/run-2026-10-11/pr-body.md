@@ -14,20 +14,28 @@ feature, and keeps every `.cn` cloud-backend reference out of the shipped tree.
 | Fork baseline before this run | `f3237f9b697e0fd6c988c1fafcd2bfce830d54fc` (`fork/main`) |
 | Previous merge base | `5379e97a5e6d8c68c6f1fc4da3b4649692b94f82` |
 | Commits integrated | 180 (`git rev-list --count fork/main..upstream/main`) |
-| **Tested content head** | `cc4b552a040c53d78d05e57ef88c75c63fb0827d` (branch `sync/upstream-1.0.3-sanitize`) |
-| Diff | 334 files changed, 12,087 insertions(+), 2,301 deletions(−) |
+| Content head (all code) | `cc4b552a040c53d78d05e57ef88c75c63fb0827d` |
+| Tested head | the branch tip — every commit after the content head changes only `maintenance-evidence/run-2026-10-11/`, so tip and content head have identical code |
+| Diff (`fork/main..cc4b552a04`, content only) | 334 files changed, 12,087 insertions(+), 2,301 deletions(−) |
 
-Five commits, each with a DCO `Signed-off-by` line. The first four carry all the content;
-the only commits after the tested content head are evidence-only edits under
-`maintenance-evidence/run-2026-10-11/`, which touch no code:
+Seven commits sit on `fork/main`: the sanitizing merge, three follow-up content commits, and
+two evidence commits. Each carries a DCO `Signed-off-by` line. The evidence commits touch
+only `maintenance-evidence/run-2026-10-11/`:
 
 ```
-cc4b552a04 fix(docs): restore the sentence period the mirror-clause removal ate, and guard it
-204633f988 style(sync): apply ruff format to the three files an earlier sanitization left unformatted
-f38a067f85 test(sync): keep the fork's expectations on two tests upstream 1.0.3 rewrote
-df23dbb031 build(web): regenerate committed static from the merged source (Node 22)
 c7bd659949 chore(sync): merge sanitized upstream through v1.0.3 (Helm)
+df23dbb031 build(web): regenerate committed static from the merged source (Node 22)
+f38a067f85 test(sync): keep the fork's expectations on two tests upstream 1.0.3 rewrote
+e7f645ae8e docs(evidence): add the 2026-10-11 sync PR body
+204633f988 style(sync): apply ruff format to the three files an earlier sanitization left unformatted
+cc4b552a04 fix(docs): restore the sentence period the mirror-clause removal ate, and guard it
+33161f53c7 docs(evidence): correct the PR body's counts, tested head, and preservation claims
 ```
+
+The full runtime suite was re-run at the branch tip as well as at the content head, so the
+numbers below describe the code that would merge rather than an earlier revision. Because
+each further evidence edit moves the tip without touching code, the exact tip SHA at merge
+time is recorded in `maintenance-evidence/run-2026-10-11/completion.md` instead of here.
 
 Releases are discovered independently of whether `upstream/main` moved. Fork releases
 already present (`v1.0.0-fork.1`, `v1.0.1-fork.1`, `v1.0.2-fork.1`, `v0.1.41-fork.1`, …)
@@ -156,7 +164,7 @@ merged code. They are fixed, not papered over:
 
 | Check | Result |
 |---|---|
-| `pytest -q -m "not live"` (runtime, py3.12 CI venv) | **954 passed, 5 skipped, 1 deselected, 0 failed** |
+| `pytest -q -m "not live"` (runtime, py3.12 CI venv) | **955 passed, 5 skipped, 1 deselected, 0 failed** |
 | Same command at the `fork/main` baseline (`/tmp/nm_base`, `f3237f9b69`) | **854 passed, 5 skipped, 1 deselected, 0 failed** |
 | Fork contract tests (3 files) | 144 passed |
 | `cloud/` `ruff check . && ruff format --check . && pytest -q` | clean; 178 passed |
@@ -169,7 +177,8 @@ merged code. They are fixed, not papered over:
 | `harness/desktop` typecheck + test | 59 tests pass, 0 fail |
 | `node scripts/connectors-json.mjs --check` / `providers-json.mjs --check` | clean |
 
-The merge adds **100** passing runtime tests and no new failure.
+The merge adds **101** passing runtime tests and no new failure (the count rose from 854 at
+`fork/main` to 955 here; the last one is the regression test for the scar below).
 
 ### CI
 
