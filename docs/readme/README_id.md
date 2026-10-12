@@ -60,7 +60,7 @@ Semua versi: [releases](https://github.com/zeeshanhaque21/nanoMuse/releases).
 | **Linux** x64 | [AppImage](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.3-fork.1/nanoMuse-Desktop-1.0.3-linux-x64.AppImage) · [.deb](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.3-fork.1/nanoMuse-Desktop-1.0.3-linux-x64.deb) · [tar.gz](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.3-fork.1/nanoMuse-Desktop-1.0.3-linux-x64.tar.gz) |
 | **Docker** | `bash scripts/self-host.sh --local` untuk relay sendiri; `docker compose up -d app` untuk aplikasi web di servermu; lihat [self-hosting](../self-hosting.md) |
 
-Semua unduhan berasal dari [rilis terbaru](https://github.com/zeeshanhaque21/nanoMuse/releases/latest) Buka aplikasinya, masuk dengan e-mail atau nomor ponsel Tiongkok daratan, dan agen langsung punya model untuk berpikir. Ponsel, desktop, dan web memakai satu akun dan menampilkan percakapan yang sama.
+Semua unduhan berasal dari [rilis terbaru](https://github.com/zeeshanhaque21/nanoMuse/releases/latest). Buka aplikasinya, masuk dengan e-mail atau nomor ponsel Tiongkok daratan, dan agen langsung punya model untuk berpikir. Ponsel, desktop, dan web memakai satu akun dan menampilkan percakapan yang sama.
 
 ## Apa yang dilakukannya
 

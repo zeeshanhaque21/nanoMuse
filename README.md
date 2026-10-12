@@ -62,7 +62,7 @@ Every version: [releases](https://github.com/zeeshanhaque21/nanoMuse/releases).
 | **Linux** x64 | [AppImage](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.3-fork.1/nanoMuse-Desktop-1.0.3-linux-x64.AppImage) · [.deb](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.3-fork.1/nanoMuse-Desktop-1.0.3-linux-x64.deb) · [tar.gz](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.3-fork.1/nanoMuse-Desktop-1.0.3-linux-x64.tar.gz) |
 | **Docker** | `bash scripts/self-host.sh --local` for your own relay; `docker compose up -d app` for the web app on a server of yours; see [self-hosting](docs/self-hosting.md) |
 
-All downloads come from the [latest release](https://github.com/zeeshanhaque21/nanoMuse/releases/latest) Open the app, sign in with an e-mail or a mainland-China phone number, and it has a model to think with. The phone, the desktop and the web share one account and show the same conversations.
+All downloads come from the [latest release](https://github.com/zeeshanhaque21/nanoMuse/releases/latest). Open the app, sign in with an e-mail or a mainland-China phone number, and it has a model to think with. The phone, the desktop and the web share one account and show the same conversations.
 
 ## What it does
 
