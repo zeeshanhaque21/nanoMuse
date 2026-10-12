@@ -51,9 +51,7 @@ REPO = os.environ.get("TRAFFIC_REPO") or "nano-muse/nanoMuse"
 # this mirror is not deployed by this fork, so the operator sets TRAFFIC_HOSTS for the
 # names their own box serves. Empty means "no known own hosts".
 OWN_HOSTS = {
-    h.strip().lower()
-    for h in (os.environ.get("TRAFFIC_HOSTS") or "").split(",")
-    if h.strip()
+    h.strip().lower() for h in (os.environ.get("TRAFFIC_HOSTS") or "").split(",") if h.strip()
 }
 DAY_OFFSET_S = int(os.environ.get("TRAFFIC_DAY_OFFSET_H") or "8") * 3600
 TOKEN = os.environ.get("GITHUB_TOKEN", "")

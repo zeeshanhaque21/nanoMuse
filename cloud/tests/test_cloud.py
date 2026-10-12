@@ -691,7 +691,7 @@ async def test_open_signup_members_unlimited_everyone_else_has_one_allowance():
         # the 0.5 co-creation bonus is gone; the names stay for the apps of the time
         "contribute_bonus_cny": 0,
         "contribute_bonus_available": False,
-"own_key_docs": "https://relay.test/own-key",
+        "own_key_docs": "https://relay.test/own-key",
         "openrouter_url": "https://openrouter.ai/keys",
         # 0.17: a mainland phone account is pointed to Bailian first, then OpenRouter, then an invite;
         # 0.21 adds the catalogue's facts to the two key ways (additive) and the whole card as `guidance`
@@ -2272,7 +2272,11 @@ async def test_me_says_where_the_person_is_and_orders_the_ways_on_by_it(tmp_path
         )
     )
     app, client, sender, up, cloud = make_stack(
-        geoip_db=str(db), catalog_probe=False, allowance_cny=0.002, invite_url="https://relay.test/web/?invite=", own_key_docs="https://relay.test/own-key"
+        geoip_db=str(db),
+        catalog_probe=False,
+        allowance_cny=0.002,
+        invite_url="https://relay.test/web/?invite=",
+        own_key_docs="https://relay.test/own-key",
     )
     assert app.state.geo.ready
 
@@ -2303,9 +2307,7 @@ async def test_me_says_where_the_person_is_and_orders_the_ways_on_by_it(tmp_path
     assert [w["id"] for w in cn_ways] == ["bailian", "openrouter", "invite"]
     assert cn_ways[0] == {"id": "bailian", "url": "https://relay.test/own-key", "mainland_only": True, **WAY_FACTS["bailian"]}
     assert cn_ways[1] == {"id": "openrouter", "url": "https://openrouter.ai/keys", "mainland_only": False, **WAY_FACTS["openrouter"]}
-    assert (
-        cn_ways[2]["id"] == "invite" and cn_ways[2]["url"].startswith("https://relay.test/web/?invite=") and cn_ways[2]["bonus_cny"] == 5
-    )
+    assert cn_ways[2]["id"] == "invite" and cn_ways[2]["url"].startswith("https://relay.test/web/?invite=") and cn_ways[2]["bonus_cny"] == 5
     for who, ip in ((us, "8.8.8.8"), (nowhere, "9.9.9.9")):
         ways = (await client.get("/v1/me", headers=auth(who, ip))).json()["spend"]["ways"]
         assert [w["id"] for w in ways] == ["openrouter", "bailian", "invite"], who["region"]
