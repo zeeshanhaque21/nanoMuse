@@ -9,7 +9,7 @@ relay itself is [`cloud/`](../../README.md).
 |---|---|
 | host | `nanomuse-hk` (SSH alias), Ubuntu 24.04, Docker |
 | relay | `/opt/nanomuse/relay/` — `docker-compose.yml`, `.env`, `src/`, `data/cloud.db` |
-| container | `nanomuse-relay`, on the `showcase_edge` network, no published ports |
+| container | `nanomuse-relay`, on the `showcase_edge` network, no published ports; runs as uid 10001, which owns `data/` on the host (`deploy.sh` keeps it so) |
 | TLS / vhost | `demo/showcase/sites.d/cloud.nanomuse.cn.caddy` → `nanomuse-relay:8787` |
 | backups | `/opt/nanomuse/backups/cloud-*.db.gz`, daily 04:10 UTC, 30 days (`backup.sh`, systemd timer) |
 | self-check | `selfcheck.sh` every 10 min (systemd timer): the public `/healthz`, the relay's `/v1/admin/health` (aggregates only: requests under way, hub counters, the hour's upstream errors, content-check refusals and refusals, the database), free disk, and the age of the newest `cloud-*.db.gz` under `/opt/nanomuse/backups` (a problem when it is older than 48 hours, `BACKUP_MAX_H`, or there is none) — one line in the journal (`journalctl -t nanomuse-selfcheck`); with `ALERT_URL` in `.env` (a webhook taking `{"text": …}`) a problem is posted there, once an hour per problem |
@@ -132,9 +132,15 @@ the *Free allowance* switch says it better to the apps.
 
 ```bash
 ssh nanomuse-hk 'cd /opt/nanomuse/relay && docker compose stop \
-  && gunzip -c /opt/nanomuse/backups/cloud-YYYYMMDD-HHMMSS.db.gz > data/cloud.db \
-  && rm -f data/cloud.db-wal data/cloud.db-shm && docker compose start'
+  && sudo sh -c "gunzip -c /opt/nanomuse/backups/cloud-YYYYMMDD-HHMMSS.db.gz > data/cloud.db \
+     && rm -f data/cloud.db-wal data/cloud.db-shm && chown 10001:10001 data/cloud.db" \
+  && docker compose start'
 ```
+
+`data/` belongs to uid 10001, the user the relay runs as, so the restored file
+is written with `sudo` and handed to that uid; a `cloud.db` left to the
+deploying user would stop the relay at start with the sentence about the
+directory not being writable.
 
 A backup is only readable with the `CLOUD_SECRET` it was written under;
 `backup.sh` keeps a copy of `.env` next to the database copies for that

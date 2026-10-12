@@ -23,20 +23,25 @@ hero:
 
 | | |
 |---|---|
-| **Android** 8.0+, arm64 | [nanoMuse-1.0.2-arm64.apk](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-1.0.2-arm64.apk) · [how to install](/android) |
-| **iPhone / iPad** | [TestFlight](https://testflight.apple.com/join/ZHexbDqc) — a beta; the link delivers the build once Apple's beta review has passed · [iOS](/ios) |
-| **macOS** 12+ | [Apple Silicon](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-mac-arm64.dmg) · [Intel](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-mac-x64.dmg) · [the desktop app](/desktop) |
-| **Windows** 10+ | [nanoMuse-Desktop-1.0.2-win-x64.exe](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-win-x64.exe) |
-| **Linux** x64 | [AppImage](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-linux-x64.AppImage) · [.deb](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-linux-x64.deb) · [tar.gz](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-linux-x64.tar.gz) |
+| **Android** 8.0+, arm64 | [nanoMuse-1.0.3-arm64.apk](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.3-fork.1/nanoMuse-1.0.3-arm64.apk) · [how to install](/android) |
+| **iPhone / iPad** | [TestFlight](https://testflight.apple.com/join/ZHexbDqc): a beta that passed Apple's beta review; the link installs it · [iOS](/ios) |
+| **macOS** 12+ | [Apple Silicon](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.3-fork.1/nanoMuse-Desktop-1.0.3-mac-arm64.dmg) · [Intel](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.3-fork.1/nanoMuse-Desktop-1.0.3-mac-x64.dmg) · [the desktop app](/desktop) |
+| **Windows** 10+ | [nanoMuse-Desktop-1.0.3-win-x64.exe](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.3-fork.1/nanoMuse-Desktop-1.0.3-win-x64.exe) |
+| **Linux** x64 | [AppImage](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.3-fork.1/nanoMuse-Desktop-1.0.3-linux-x64.AppImage) · [.deb](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.3-fork.1/nanoMuse-Desktop-1.0.3-linux-x64.deb) · [tar.gz](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.3-fork.1/nanoMuse-Desktop-1.0.3-linux-x64.tar.gz) |
 | **Docker** | `bash scripts/self-host.sh --local` for your own relay; `docker compose up -d app` for the web app · [run it yourself](/self-hosting) |
 
-Every download is on the [latest release](https://github.com/zeeshanhaque21/nanoMuse/releases/latest).
+Every download is on the [latest release](https://github.com/zeeshanhaque21/nanoMuse/releases/latest)
 
-[What changed in 1.0.2 Trim](https://github.com/zeeshanhaque21/nanoMuse/releases/tag/v1.0.2-fork.1) · [What each client can do](/parity) · [Where to start contributing](/roadmap) · [What the relay keeps](/privacy) · [What stays on a phone, and whose it is](/sync)
+[What changed in 1.0.3 Helm](https://github.com/zeeshanhaque21/nanoMuse/releases/tag/v1.0.3-fork.1) · [What each client can do](/parity) · [Where to start contributing](/roadmap) · [What the relay keeps](/privacy) · [What stays on a phone, and whose it is](/sync)
 
 ## The film
 
-74 seconds: what nanoMuse does on your phone, your computer and the web..
+
+74 seconds: what nanoMuse does on your phone, your computer and the web.
+
+::: info nanoMuse keeps evolving
+A personal agent should not live only in someone else's cloud, so nanoMuse is the open-source, low-cost alternative: on your own devices, with a model you choose and a relay you can host yourself. We want to build it with developers and users everywhere, so that each person truly owns a personal agent. Open an [issue](https://github.com/zeeshanhaque21/nanoMuse/issues/new/choose) or send a [pull request](../CONTRIBUTING.md); either one helps nanoMuse get better.
+:::
 
 ## Citation
 

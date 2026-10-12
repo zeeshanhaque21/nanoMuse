@@ -29,7 +29,7 @@ while [ $# -gt 0 ]; do
     --bind) BIND="$2"; shift ;;
     --port) PORT="$2"; shift ;;
     --no-start) START=0 ;;
-    -h|--help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $1 (try --help)" >&2; exit 2 ;;
   esac
   shift
@@ -199,6 +199,11 @@ if [ "$LOCAL" = 1 ]; then
 fi
 say
 say "Starting the relay$([ "$LOCAL" = 0 ] && echo " and Caddy")…"
+# The relay runs as uid 10001 in its container; the bind-mounted data directory must be its.
+# Docker creates a missing ./data as root, so the chown runs inside the image, as root, and
+# needs no sudo on the host. Idempotent.
+"${COMPOSE[@]}" "${FILES[@]}" build relay
+"${COMPOSE[@]}" "${FILES[@]}" run --rm --no-deps --user 0 relay chown -R 10001:10001 /srv/nanomuse-cloud/data
 "${COMPOSE[@]}" "${FILES[@]}" up -d --build
 
 health="$BASE/healthz"

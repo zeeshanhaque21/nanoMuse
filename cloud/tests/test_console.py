@@ -68,6 +68,18 @@ def test_web_console_translates_every_refusal_in_both_languages():
     assert "!" not in re.sub(r"[!=]==?|!\w", "", zh + en) and "！" not in zh
 
 
+def test_web_console_is_one_hub_device_per_tab():
+    """The id the console says hello with lives in sessionStorage, so two tabs of one
+    browser are two devices on the hub. Shared through localStorage, as before, the two
+    took turns replacing each other (close 4003) and reconnecting for as long as both
+    stayed open."""
+    source = (CONSOLE / "app.js").read_text(encoding="utf-8")
+    assert 'sessionStorage.getItem("nm.webid")' in source and 'sessionStorage.setItem("nm.webid"' in source
+    assert 'LS.setItem("nm.webid"' not in source and 'LS.getItem("nm.webid")' not in source
+    # the hello carries that id; the hub keys its connections on it (hub.py _attach)
+    assert "device: { id: webId," in source
+
+
 def test_console_copy_has_no_dashes_in_sentences():
     """The house rule: what a person reads carries no em dash. Checked on the two string
     tables (`const T = zh ? {...} : {...}`) of each console; the one-character placeholder
@@ -93,3 +105,52 @@ def test_admin_console_names_the_star_card_text_in_both_languages():
     assert "Empty: each app shows its own sentence. At most 200 characters." in source
     panel = source[source.index("function nudgesPanel()") : source.index("function settingsView()")]
     assert 'cardText("text")' in panel and 'cardText("text_zh"' in panel
+
+
+def test_admin_console_has_the_invites_view_in_both_languages():
+    """The Invites view (who brought whom, the inviters that brought most first) is in the
+    side navigation, reads `/v1/admin/invites`, and every string it draws is in the 简体中文
+    table and in the English one; the account drawer names the inviter and lists the people
+    brought."""
+    source = (CONSOLE / "admin" / "admin.js").read_text(encoding="utf-8")
+    assert '"invites"' in source[source.index("const VIEWS = ") : source.index("const PAGE = ")]
+    assert "invites: invitesView" in source and 'invites: () => "/v1/admin/invites?' in source
+    keys = (
+        "invNote",
+        "invSearch",
+        "invNone",
+        "invNoMatch",
+        "invKpiCode",
+        "invKpiInviters",
+        "invKpiInvited",
+        "invKpiActive",
+        "invKpiSameIp",
+        "invThWho",
+        "invThInvited",
+        "invThActive",
+        "invThSameIp",
+        "invThSpent",
+        "invThEarned",
+        "invThLast",
+        "invSort",
+        "invRecorded",
+        "invSameIp",
+        "invGone",
+        "invSeeRanking",
+        "invMore",
+        "invSameIpNote",
+        "invitedList",
+        "invEarnedLine",
+        "invNewest",
+        "invPill",
+    )
+    for key in keys:
+        assert source.count(f"{key}:") == 2, f"{key} is in one table only"
+    assert 'invites: "邀请"' in source and 'invites: "Invites"' in source
+    assert 'invThWho: "邀请人"' in source and 'invThWho: "Inviter"' in source
+    for key in keys:
+        assert f"T.{key}" in source, f"nothing draws {key}"
+    view = source[source.index("function invitesView()") : source.index("function placesView()")]
+    assert 'need("invites")' in view and "T.invSameIpNote" in view and "INV_OPEN" in view
+    drawer = source[source.index("function drawDrawer()") : source.index("function ledgerLine(")]
+    assert "a.inviter" in drawer and "T.invitedList(" in drawer and "inviteeRow(i, a)" in drawer

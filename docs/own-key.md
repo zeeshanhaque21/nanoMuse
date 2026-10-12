@@ -267,7 +267,8 @@ Ollama, LM Studio and vLLM on your own computer work too: pick the preset
 (`http://127.0.0.1:11434/v1`, `:1234`, `:8000`) and no key is needed. They
 count as *chat*; the hands need a model that sees, so run a multimodal one
 locally (Ollama's `qwen3-vl`, say) and pick it under *Operating the screen*
-(web console: type its id on the *Hands model* row). Pictures and clips need
+(web console: the *Hands model* row under *Chat model* lists what the endpoint
+serves; pick it there). Pictures and clips need
 one of the providers in the table.
 
 ## Any other OpenAI-compatible endpoint
@@ -282,3 +283,16 @@ Anything that speaks the OpenAI API works; choose *Custom*:
 
 What a custom endpoint covers is yours to say: nanoMuse takes it for chat, and
 the hands, picture and clip models count once their ids are filled in.
+
+**Several at once.** On the desktop app and in the web console the custom
+endpoints are a list, not one slot (#294): each one you add keeps its own key
+and its own models, and adding a second never replaces the first. On the
+desktop, *Settings → Account → Any OpenAI-compatible endpoint* shows one row
+per endpoint (its name over its host, with *Change key*, *Rename* and
+*Remove*) and an *Add an endpoint* row under them; the model pickers on
+*Settings → Models* list each endpoint as a group of its own. In the web
+console, *Connections → Chat model* shows one tile per endpoint under *Local or
+your own endpoint* with *Add an endpoint* last; the hands, pictures and clips
+pickers list the endpoints too ([web.md](web.md#where-it-shows)). A custom
+endpoint set before the list existed becomes its first entry, key and all,
+the next time the app starts. The phones keep one slot per provider.

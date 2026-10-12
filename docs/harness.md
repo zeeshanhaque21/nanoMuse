@@ -206,9 +206,11 @@ screen in [desktop-muse.md](desktop-muse.md):
   observer records each decision), schedule, memory.
 - **The conversation.** A stylesheet under `html[data-nm-muse]` over the harness's
   stable hooks: `[data-composer-card]` becomes one pill (*+*, *Message*, the send
-  disc), `[data-chat-flow-kind="user"]` the accent bubble, the assistant step the grey
-  bubble, `[data-approval-key]` Muse's permission card (shield, headline, *Allow once*
-  in blue, *Reject*), the hero greeting hidden with the composer docked at the bottom;
+  disc), `[data-chat-flow-kind="user"]` the ink pill (black with white text in the light
+  theme, white with black in the dark), the assistant step the grey pill, the header a
+  scrim the conversation scrolls under, `[data-approval-key]` Muse's permission card
+  (shield, headline, *Allow once* in blue, *Reject*), the hero greeting hidden with the
+  composer docked at the bottom;
   the harness's model, mode and plan controls are hidden from the composer and come
   back with the Developer switch. The harness's own DOM is not touched, only styled.
 - **Settings.** The `sidebar.settings` seat too (the stock `ui-settings-general` row
@@ -356,7 +358,7 @@ a community project with no affiliation) apply unchanged.
    project of its own), but a small Electron app that does what that one does at its
    core: starts the harness's Host as a child process with its own binary in Node mode
    (`ELECTRON_RUN_AS_NODE`, `--expose-internals`; the harness's `require-builtin` addon
-   fingerprints the Electron it was built for, so the shell pins `44.0.0`), from a `dsh`
+   fingerprints the Electron it was built for, so the shell pins one exact Electron version), from a `dsh`
    that npm installed under `resources/dsh` together with the bundle at build time,
    against a profile of its own under `~/.nanomuse/desktop` that names the bundle and
    links it from the copy inside the app. The runtime for the hands rides along as a
