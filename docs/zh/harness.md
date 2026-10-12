@@ -151,9 +151,9 @@ Laptop B 自己的聊天里让它的 Muse「在 Desk A 上」运行一条命令�
   一支笔（*更换形象* → 经宿主 `PUT /v1/me/profile`，处处生效；*编辑名称*）、连接状态、四个标签：
   来自会话和 hub 通知的活动、卡片上作出的审批（一个文档级的观察器记录每一次决定）、日程、记忆。
 - **对话。** 一张 `html[data-nm-muse]` 下的样式表，盖在 harness 稳定的挂钩上：`[data-composer-card]`
-  变成一个药丸形（*+*、*消息*、发送圆钮），`[data-chat-flow-kind="user"]` 变成强调色气泡，智能体的
-  步骤变成灰色气泡，`[data-approval-key]` 变成 Muse 的权限卡片（盾牌、标题、蓝色的*允许一次*、
-  *拒绝*），主视觉的问候隐藏，输入框停靠在底部；harness 的模型、模式和计划控件从输入框里隐藏，打开
+  变成一个药丸形（*+*、*消息*、发送圆钮），`[data-chat-flow-kind="user"]` 变成墨色药丸（浅色下
+  黑底白字，深色下白底黑字），智能体的步骤变成灰色药丸，页眉变成罩在对话上的一层渐隐，
+  `[data-approval-key]` 变成 Muse 的权限卡片（盾牌、标题、蓝色的*允许一次*、*拒绝*），主视觉的问候隐藏，输入框停靠在底部；harness 的模型、模式和计划控件从输入框里隐藏，打开
   「开发者」开关就回来。harness 自己的 DOM 不动，只加样式。
 - **设置。** 同样接管 `sidebar.settings` 位（原装的 `ui-settings-general` 行关掉）：分组导航（
   通用、账号、模型、智能体、电脑操作、设备、数据控制、帮助与支持、法律信息），然后是其他插件注册的
@@ -270,7 +270,7 @@ DeepSeek Harness 是 MIT 许可；它是依赖，不是内嵌的拷贝，它的�
    准备一个私有 Host、一个主运行时和硬件令牌签名，本身就是一个项目），而是一个小小的 Electron App，
    做那个 App 核心上做的事：用自己的二进制以 Node 模式把 harness 的 Host 作为子进程启动
    （`ELECTRON_RUN_AS_NODE`、`--expose-internals`；harness 的 `require-builtin` 原生扩展带着它构建时
-   所针对的 Electron 的指纹，所以外壳钉在 `44.0.0`），dsh 是构建时 npm 装到 `resources/dsh` 下的，
+   所针对的 Electron 的指纹，所以外壳钉死一个确切的 Electron 版本），dsh 是构建时 npm 装到 `resources/dsh` 下的，
    bundle 也一起；用的是 `~/.nanomuse/desktop` 下它自己的 profile，里面写明 bundle，并链接到 App 内的
    那份拷贝。负责手的运行时以 PyInstaller 构建随行，`NANOMUSE_PY` 把预设指向它。`desktop-app.yml`
    在每个发布标签上构建 Windows 安装包、两种架构的 macOS dmg/zip 和 Linux AppImage/deb，把每个打包好

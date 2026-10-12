@@ -22,7 +22,9 @@ REDACTED = "[redacted]"
 
 # where a request line with its query is written: uvicorn's access log for HTTP, its error
 # logger for the WebSocket handshake ("WebSocket /ws" [accepted] / 403 / <code>), and httpx
-# (with httpcore underneath) for what the gateway itself asks of a container
+# (with httpcore underneath) for what the gateway itself asks of a container; httpx 2 ships as
+# the httpx2 package and logs under that name (Starlette's test client prefers it when it is
+# installed), so httpx2 and its httpcore2 are covered too
 REQUEST_LOGGERS = ("uvicorn.access", "uvicorn.error", "httpx", "httpcore", "httpx2", "httpcore2")
 
 

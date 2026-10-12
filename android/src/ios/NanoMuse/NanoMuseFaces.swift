@@ -149,13 +149,22 @@ final class NanoMuseFaceStore: ObservableObject {
         load()
     }
 
-    /// Back to the dragon.
+    /// Back to the dragon. The stills and the meta go; a clip of the person's own
+    /// (NanoMuseOwnClip, in the same folder) is not the drawn face's and stays.
     func reset(sync: Bool = true) {
         NanoMuseAvatarMotion.shared.clear()
-        try? FileManager.default.removeItem(at: Self.directory)
+        removeStills()
         custom = [:]
         meta = Meta()
         if sync { NanoMuseProfileSync.shared.faceChanged() }
+    }
+
+    private func removeStills() {
+        let fm = FileManager.default
+        for mood in NanoMuseMood.allCases {
+            try? fm.removeItem(at: Self.file(mood))
+        }
+        try? fm.removeItem(at: Self.metaFile)
     }
 
     /// Wear a face that another device drew (pulled from the profile). Clips are per device:
@@ -164,7 +173,7 @@ final class NanoMuseFaceStore: ObservableObject {
         guard stills[.idle] != nil else { return }
         NanoMuseAvatarMotion.shared.clear()
         let fm = FileManager.default
-        try? fm.removeItem(at: Self.directory)
+        removeStills()
         try? fm.createDirectory(at: Self.directory, withIntermediateDirectories: true)
         var kept: [NanoMuseMood: UIImage] = [:]
         for (mood, image) in stills {
@@ -240,6 +249,7 @@ final class NanoMuseFaceStore: ObservableObject {
 /// Otherwise the still, with the small life the Android header gives it: a
 /// slow breath when idle, a quicker bob while working, a tilt while
 /// waiting, a pop when happy and a shake on error. Android: AgentAvatar.kt.
+/// A clip of the person's own (NanoMuseOwnClip, #324) plays instead for every mood.
 struct NanoMuseFaceView: View {
     var mood: NanoMuseMood
     var size: CGFloat
@@ -247,15 +257,30 @@ struct NanoMuseFaceView: View {
 
     @ObservedObject private var faces = NanoMuseFaceStore.shared
     @ObservedObject private var motion = NanoMuseAvatarMotion.shared
+    @ObservedObject private var own = NanoMuseOwnClip.shared
     @Environment(\.scenePhase) private var scenePhase
+    /// Reduce Motion on: the still keeps still (no breath, bob, tilt, pop or shake); the mood
+    /// still changes with its crossfade, and a clip the person chose still plays.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var breath = false
     @State private var popped = false
     @State private var shake: CGFloat = 0
 
-    /// The clip for this mood, when there is one for the face that is worn.
+    /// The clip for this mood: the person's own, when one is set (#324), stands in for every
+    /// mood; else the drawn face's clip for this mood, or the dragon's.
     private var clip: URL? {
+        if let ownClip = own.clip { return ownClip }
         if faces.hasCustomFace { return motion.clips[mood] }
         return NanoMuseAvatarMotion.dragonClip(mood)
+    }
+
+    private var clipVersion: Int { own.clip != nil ? own.version : motion.clipVersion }
+
+    /// The still under the clip, and the face itself when there is no clip: the drawn one for
+    /// this mood, or the own clip's first frame when nothing was drawn, else the dragon.
+    private var still: UIImage? {
+        if !faces.hasCustomFace, own.clip != nil, let poster = own.poster { return poster }
+        return faces.image(for: mood)
     }
 
     var body: some View {
@@ -266,15 +291,15 @@ struct NanoMuseFaceView: View {
             if let clip {
                 ZStack {
                     // The still underneath covers the first frames while the player warms up.
-                    if let img = faces.image(for: mood) {
+                    if let img = still {
                         Image(uiImage: img).resizable().scaledToFill()
                     }
-                    NanoMuseLoopingClipView(url: clip, version: motion.clipVersion)
+                    NanoMuseLoopingClipView(url: clip, version: clipVersion)
                 }
                 .frame(width: size, height: size)
                 .clipShape(Circle())
                 .transition(.opacity)
-            } else if let img = faces.image(for: mood) {
+            } else if let img = still {
                 Image(uiImage: img)
                     .resizable()
                     .scaledToFill()
@@ -296,13 +321,14 @@ struct NanoMuseFaceView: View {
         .offset(x: shake, y: bob)
         .animation(.easeInOut(duration: 0.35), value: mood)
         .onAppear {
-            startBreathing()
+            if !reduceMotion { startBreathing() }
             NanoMuseClipPlayers.shared.setSuspended(scenePhase != .active)
         }
         .nmOnChange(of: scenePhase) { phase in
             NanoMuseClipPlayers.shared.setSuspended(phase != .active)
         }
         .nmOnChange(of: mood) { newMood in
+            guard !reduceMotion else { return }
             if newMood == .happy {
                 popped = true
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.45)) { popped = false }
@@ -316,8 +342,9 @@ struct NanoMuseFaceView: View {
         .accessibilityLabel(Text(AppLocalized("Agent face")))
     }
 
-    /// The still's own motion; a clip brings its own and stays at rest.
-    private var animatesStill: Bool { clip == nil }
+    /// The still's own motion; a clip brings its own and stays at rest, and so does the still
+    /// under Reduce Motion.
+    private var animatesStill: Bool { clip == nil && !reduceMotion }
 
     private var scale: CGFloat {
         if popped { return 1.12 }
@@ -459,6 +486,18 @@ enum NanoMuseTones {
     static let hairline = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(red: 0.227, green: 0.227, blue: 0.235, alpha: 1) : UIColor(red: 0.898, green: 0.898, blue: 0.918, alpha: 1) })
     static let canvas = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? .black : UIColor(red: 0.953, green: 0.953, blue: 0.961, alpha: 1) })
     static let action = Color(red: 0.039, green: 0.4, blue: 0.894)
+    /// The chat's ink (Android's `ChatColors.userBubble` and `sendButton` since #331): your
+    /// message pill, the send disc and the scroll-to-latest disc. Black on the white canvas in
+    /// light, white on the black canvas in dark; `onInk` is what sits on it, the canvas colour.
+    static let ink = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? .white : .black })
+    static let onInk = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? .black : .white })
+    /// The agent's message pill, a shade off the canvas (Android's `ChatColors.assistantBubble`:
+    /// #F2F2F7 in light, #1C1C1E in dark). The composer pill keeps `bubble`.
+    static let agentPill = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(red: 0.11, green: 0.11, blue: 0.118, alpha: 1) : UIColor(red: 0.949, green: 0.949, blue: 0.969, alpha: 1) })
+    /// The pill bar's indicator disc and the glyph on it: the same ink as the chat, black with
+    /// a white glyph in light and white with a black glyph in dark, as Android's MuseBottomBar.
+    static let tabIndicator = ink
+    static let tabIndicatorGlyph = onInk
 }
 
 /// Whether the UI runs in Chinese right now (the in-app override wins).

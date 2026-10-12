@@ -351,6 +351,23 @@
     <string name="nm_avatar_use_this">Usar esta</string>
     <string name="nm_avatar_use_this_hint">Los estados de ánimo (trabajando, esperando, hecho, ups) se dibujan a partir de ella después, en segundo plano.</string>
     <string name="nm_avatar_footer">Las imágenes se guardan en este teléfono en minis-global/nanomuse/avatar. Cada cara cuesta cinco imágenes de tu proveedor: la que eliges más cuatro estados de ánimo.</string>
+    <string name="nm_own_clip_title">Tu propio clip</string>
+    <string name="nm_own_clip_body">Un vídeo corto tuyo se reproduce como la cara en reposo, y los demás estados recurren a él. MP4 o MOV con vídeo H.264, de hasta 15 segundos y 30 MB; se reproduce sin sonido en bucle.</string>
+    <string name="nm_own_clip_on">Tu clip está activo y se reproduce en todos los estados; donde se muestra una imagen fija siguen usándose las dibujadas. «Cara predeterminada» lo quita.</string>
+    <string name="nm_own_clip_local">El clip se queda en este teléfono. No se sube a nanoMuse Cloud ni se sincroniza con tus otros dispositivos.</string>
+    <string name="nm_own_clip_choose">Elegir un clip</string>
+    <string name="nm_own_clip_replace">Sustituir el clip</string>
+    <string name="nm_own_clip_default">Cara predeterminada</string>
+    <string name="nm_own_clip_menu">Tu propio clip…</string>
+    <string name="nm_own_clip_preview_title">Vista previa</string>
+    <string name="nm_own_clip_preview_body">Así se reproduce como cara: sin sonido, en bucle, recortado al círculo.</string>
+    <string name="nm_own_clip_details">%1$d s · %2$s</string>
+    <string name="nm_own_clip_use">Usar</string>
+    <string name="nm_own_clip_refused_format">Ese archivo no se puede usar aquí. Elige un MP4 o MOV con vídeo H.264, de hasta 15 segundos y 30 MB.</string>
+    <string name="nm_own_clip_refused_long">Ese clip dura %1$d segundos. El límite es 15 segundos, y 30 MB.</string>
+    <string name="nm_own_clip_refused_large">Ese clip ocupa %1$s. El límite es 30 MB, y 15 segundos.</string>
+    <string name="nm_own_clip_unreadable">No se pudo leer el clip. Prueba con otro.</string>
+    <string name="nm_a11y_own_clip_preview">Vista previa de tu clip</string>
 
     <!-- First run (Muse-style welcome; the steps are OpenMinis' provider and model screens) -->
     <string name="nm_setup_title">Te damos la bienvenida a nanoMuse</string>
@@ -1107,4 +1124,19 @@
     <string name="nm_models_search">Buscar modelos</string>
     <string name="nm_models_search_clear">Borrar la búsqueda</string>
     <string name="nm_models_no_match">Ningún modelo coincide</string>
+    <!-- Names for icon-only controls, read by screen readers (#338) -->
+    <string name="nm_a11y_show_password">Mostrar contraseña</string>
+    <string name="nm_a11y_hide_password">Ocultar contraseña</string>
+    <string name="nm_a11y_avatar_candidate">Candidato %1$d</string>
+    <string name="nm_a11y_share_card">Tarjeta %1$d</string>
+    <string name="nm_a11y_add">Añadir</string>
+    <string name="nm_a11y_mark_done">Marcar como hecho</string>
+    <string name="nm_a11y_mark_not_done">Marcar como no hecho</string>
+    <string name="nm_a11y_done">Hecho</string>
+    <string name="nm_a11y_not_done">No hecho</string>
+    <string name="nm_a11y_like">Me gusta</string>
+    <string name="nm_a11y_unlike">Quitar me gusta</string>
+    <string name="nm_a11y_liked">Te gusta</string>
+    <string name="nm_a11y_not_liked">No te gusta</string>
+    <string name="nm_a11y_post_details">Detalles de la publicación</string>
 </resources>

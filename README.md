@@ -30,7 +30,7 @@
 
 **nanoMuse is an open-source personal agent for every device you own.** One agent with a name and a look of its own, in the style of Meta's [Muse](https://about.fb.com/news/2026/09/introducing-muse-personal-ai-agent/): it does things instead of answering questions, keeps working while the app is closed, remembers you, and stops to ask before anything you could not undo.
 
-*nano* means the whole set, small enough to run and deploy yourself: the phone app, the desktop app, the web console and the relay that joins them are all in this repository, under GPL-3.0-or-later. **[Free, open source, non-profit. Let's build it together.](CONTRIBUTING.md)** Sign in and you get a free allowance of model use on the community relay (the developer pays for it); when it is gone, [use your own key](docs/own-key.md). The same relay runs on a server of yours, so nothing has to leave your house. Latest: **1.0.2 Trim**, [release notes](https://github.com/zeeshanhaque21/nanoMuse/releases/tag/v1.0.2-fork.1).
+*nano* means the whole set, small enough to run and deploy yourself: the phone app, the desktop app, the web console and the relay that joins them are all in this repository, under GPL-3.0-or-later. **[Free, open source, non-profit. Let's build it together.](CONTRIBUTING.md)** Sign in and you get a free allowance of model use on the community relay (the developer pays for it); when it is gone, [use your own key](docs/own-key.md). The same relay runs on a server of yours, so nothing has to leave your house. Latest: **1.0.3 Helm**, [release notes](https://github.com/zeeshanhaque21/nanoMuse/releases/tag/v1.0.3-fork.1).
 
 > [!NOTE]
 > **nanoMuse keeps evolving**
@@ -55,11 +55,11 @@ Every version: [releases](https://github.com/zeeshanhaque21/nanoMuse/releases).
 
 | | |
 |---|---|
-| **Android** 8.0+, arm64 | [nanoMuse-1.0.2-arm64.apk](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-1.0.2-arm64.apk): every version is signed with the same key and installs over the last |
+| **Android** 8.0+, arm64 | [nanoMuse-1.0.3-arm64.apk](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.3-fork.1/nanoMuse-1.0.3-arm64.apk): every version is signed with the same key and installs over the last |
 | **iPhone / iPad** | [TestFlight](https://testflight.apple.com/join/ZHexbDqc): a beta that passed Apple's beta review; the link installs it · [iOS](docs/ios.md) |
-| **macOS** 12+ | [Apple Silicon](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-mac-arm64.dmg) · [Intel](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-mac-x64.dmg). Not notarised: right-click → *Open* the first time |
-| **Windows** 10+ | [nanoMuse-Desktop-1.0.2-win-x64.exe](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-win-x64.exe): click *Run anyway* once |
-| **Linux** x64 | [AppImage](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-linux-x64.AppImage) · [.deb](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-linux-x64.deb) · [tar.gz](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-linux-x64.tar.gz) |
+| **macOS** 12+ | [Apple Silicon](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.3-fork.1/nanoMuse-Desktop-1.0.3-mac-arm64.dmg) · [Intel](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.3-fork.1/nanoMuse-Desktop-1.0.3-mac-x64.dmg). Not notarised: right-click → *Open* the first time |
+| **Windows** 10+ | [nanoMuse-Desktop-1.0.3-win-x64.exe](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.3-fork.1/nanoMuse-Desktop-1.0.3-win-x64.exe): click *Run anyway* once |
+| **Linux** x64 | [AppImage](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.3-fork.1/nanoMuse-Desktop-1.0.3-linux-x64.AppImage) · [.deb](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.3-fork.1/nanoMuse-Desktop-1.0.3-linux-x64.deb) · [tar.gz](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.3-fork.1/nanoMuse-Desktop-1.0.3-linux-x64.tar.gz) |
 | **Docker** | `bash scripts/self-host.sh --local` for your own relay; `docker compose up -d app` for the web app on a server of yours; see [self-hosting](docs/self-hosting.md) |
 
 All downloads come from the [latest release](https://github.com/zeeshanhaque21/nanoMuse/releases/latest). Open the app, sign in with an e-mail or a mainland-China phone number, and it has a model to think with. The phone, the desktop and the web share one account and show the same conversations.
@@ -132,9 +132,11 @@ Everyone whose change has landed on `main`, from GitHub's contributors list.
 <!-- contributors:start -->
 <p>
 <a href="https://github.com/wsvn53"><img src="https://avatars.githubusercontent.com/u/912204?v=4&s=48" width="48" height="48" alt="wsvn53"></a>
+<a href="https://github.com/PovedaAqui"><img src="https://avatars.githubusercontent.com/u/9494679?v=4&s=48" width="48" height="48" alt="PovedaAqui"></a>
 <a href="https://github.com/hobostay"><img src="https://avatars.githubusercontent.com/u/110803307?v=4&s=48" width="48" height="48" alt="hobostay"></a>
 <a href="https://github.com/aliabbas6622"><img src="https://avatars.githubusercontent.com/u/193962983?v=4&s=48" width="48" height="48" alt="aliabbas6622"></a>
-<a href="https://github.com/PovedaAqui"><img src="https://avatars.githubusercontent.com/u/9494679?v=4&s=48" width="48" height="48" alt="PovedaAqui"></a>
+<a href="https://github.com/Ichiro786"><img src="https://avatars.githubusercontent.com/u/158778170?v=4&s=48" width="48" height="48" alt="Ichiro786"></a>
+<a href="https://github.com/cypggs"><img src="https://avatars.githubusercontent.com/u/3694954?v=4&s=48" width="48" height="48" alt="cypggs"></a>
 <a href="https://github.com/jiangkaiqi2005"><img src="https://avatars.githubusercontent.com/u/184961141?v=4&s=48" width="48" height="48" alt="jiangkaiqi2005"></a>
 </p>
 <!-- contributors:end -->
@@ -173,6 +175,6 @@ nanoMuse is an independent community project, not affiliated with or endorsed by
 [GPL-3.0-or-later](LICENSE). The phone app is based on OpenMinis 1.13 (GPL-3.0), modified since 2026-09-24; see [NOTICE](NOTICE). Earlier versions of the Python line were MIT (tag `pre-openminis`).
 
 <p align="center">
-  <em>Thanks for visiting ✨ nanoMuse!</em><br><br>
+  <em>Thanks for visiting ✨ nanoMuse.</em><br><br>
   <img src="https://komarev.com/ghpvc/?username=nano-muse-nanomuse&label=visitors&color=0a66e4&base=13835" alt="Visitors">
 </p>

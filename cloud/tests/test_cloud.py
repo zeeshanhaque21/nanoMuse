@@ -691,7 +691,7 @@ async def test_open_signup_members_unlimited_everyone_else_has_one_allowance():
         # the 0.5 co-creation bonus is gone; the names stay for the apps of the time
         "contribute_bonus_cny": 0,
         "contribute_bonus_available": False,
-"own_key_docs": "https://relay.test/own-key",
+        "own_key_docs": "https://relay.test/own-key",
         "openrouter_url": "https://openrouter.ai/keys",
         # 0.17: a mainland phone account is pointed to Bailian first, then OpenRouter, then an invite;
         # 0.21 adds the catalogue's facts to the two key ways (additive) and the whole card as `guidance`
@@ -1786,6 +1786,21 @@ def test_database_from_before_0_4_migrates(tmp_path):
     assert db._conn.execute("SELECT invite_code, contribute FROM accounts WHERE id='a1'").fetchone()[0] == ""
 
 
+def test_the_three_tables_read_by_address_are_indexed_on_it():
+    """The operator's "accounts seen from this address" reads ledger, api_keys and events by
+    ip (db.accounts_at_address); each has the partial index, events included, which is the
+    largest of the three. Opening the database twice creates nothing twice."""
+    db = Database(":memory:")
+
+    def indexes() -> list[str]:
+        return sorted(r["name"] for r in db._conn.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall())
+
+    before = indexes()
+    assert {"ledger_ip", "api_keys_ip", "events_ip"} <= set(before)
+    db._migrate()
+    assert indexes() == before  # a second run neither fails nor adds anything
+
+
 def test_database_from_0_4_moves_to_the_lifetime_allowance(tmp_path):
     """0.4 kept a daily cap and credit beyond it; 0.5 has one pool. On the first open the
     service seeds every account with what it had spent plus the allowance, plus any 0.4
@@ -2257,7 +2272,11 @@ async def test_me_says_where_the_person_is_and_orders_the_ways_on_by_it(tmp_path
         )
     )
     app, client, sender, up, cloud = make_stack(
-        geoip_db=str(db), catalog_probe=False, allowance_cny=0.002, invite_url="https://relay.test/web/?invite=", own_key_docs="https://relay.test/own-key"
+        geoip_db=str(db),
+        catalog_probe=False,
+        allowance_cny=0.002,
+        invite_url="https://relay.test/web/?invite=",
+        own_key_docs="https://relay.test/own-key",
     )
     assert app.state.geo.ready
 
@@ -2288,9 +2307,7 @@ async def test_me_says_where_the_person_is_and_orders_the_ways_on_by_it(tmp_path
     assert [w["id"] for w in cn_ways] == ["bailian", "openrouter", "invite"]
     assert cn_ways[0] == {"id": "bailian", "url": "https://relay.test/own-key", "mainland_only": True, **WAY_FACTS["bailian"]}
     assert cn_ways[1] == {"id": "openrouter", "url": "https://openrouter.ai/keys", "mainland_only": False, **WAY_FACTS["openrouter"]}
-    assert (
-        cn_ways[2]["id"] == "invite" and cn_ways[2]["url"].startswith("https://relay.test/web/?invite=") and cn_ways[2]["bonus_cny"] == 5
-    )
+    assert cn_ways[2]["id"] == "invite" and cn_ways[2]["url"].startswith("https://relay.test/web/?invite=") and cn_ways[2]["bonus_cny"] == 5
     for who, ip in ((us, "8.8.8.8"), (nowhere, "9.9.9.9")):
         ways = (await client.get("/v1/me", headers=auth(who, ip))).json()["spend"]["ways"]
         assert [w["id"] for w in ways] == ["openrouter", "bailian", "invite"], who["region"]

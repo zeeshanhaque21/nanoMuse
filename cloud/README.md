@@ -124,6 +124,17 @@ docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
 RELAY_BIND=0.0.0.0 docker compose -f docker-compose.yml -f docker-compose.local.yml up -d   # reachable from the LAN
 ```
 
+The image runs the relay as `relay`, uid 10001, not as root. Both compose files
+bind-mount `./data` as the data directory (`CLOUD_DB`, the GeoIP file beside it),
+and Docker creates a missing bind-mount source owned by root, which uid 10001
+cannot write; so `data/` must belong to that uid on the host before the first
+start, and once more when upgrading from an image that ran as root, whose
+`cloud.db` is root's: `sudo chown -R 10001:10001 data` (or, without sudo,
+`docker compose run --rm --no-deps --user 0 relay chown -R 10001:10001
+/srv/nanomuse-cloud/data`). `scripts/self-host.sh` and the production
+`deploy.sh` do this themselves; a relay that cannot write its data directory
+stops at start with a sentence saying so instead of a traceback.
+
 Back up `data/cloud.db` together with `CLOUD_SECRET`: the hashes are useless
 without the secret, and the secret alone is useless without the database.
 
@@ -171,7 +182,11 @@ for the full list. The ones that matter:
 | `DAILY_CAP_TOKENS` | 0 (off) | tokens per account per day |
 | `PER_MINUTE_REQUESTS` | 30 | per account — what stops a runaway loop |
 | `MAX_IN_FLIGHT` | 4 | requests of one account under way at the same time (0 = off); each holds a reservation against the allowance while it runs — see *Money* |
+| `UPSTREAM_TIMEOUT_S` | 180 | how long one call to the provider may take (connecting has 20 s of its own); a reservation that outlives it by two minutes is dropped |
+| `TRUSTED_PROXIES` | empty | whose `X-Forwarded-For` to believe, comma-separated addresses or networks; empty = every loopback, private, link-local and shared address (Caddy on this box or the compose network, a tailnet) |
+| `PASSWORD_MIN_LEN` | 8 | the shortest password the relay accepts (`400 password_short` below it) |
 | `PASSWORD_MAX_ATTEMPTS`, `LOCKOUT_S` | 5, 900 | wrong passwords before an account is locked for that long (a code still works) |
+| `PASSWORD_RESET_WINDOW_S` | 1800 | after a sign-in with a code, how long a new password may be set without the old one (the way back in when it is forgotten) |
 | `LOGIN_FAIL_PER_IP_HOUR` | 30 | wrong passwords from one network address per hour across all accounts — a list of numbers tried once each never trips the per-account lock, this does (0.12); 0 = off |
 | `CODE_TTL_S`, `CODE_MAX_ATTEMPTS` | 600, 5 | how long a sign-in code is good for, and how many wrong guesses it survives |
 | `CODE_PER_IDENTIFIER_10M`, `CODE_PER_IP_HOUR` | 3, 10 | codes one number or address may request per ten minutes, and one network address per hour; past either the request is answered `429 code_too_often` |
@@ -193,6 +208,7 @@ for the full list. The ones that matter:
 | `GITHUB_COLLECT` | `1` | `0` turns the collector off (a relay without a way out, tests) |
 | `GITHUB_API` | `https://api.github.com` | where the collector reads; a mirror for a relay that cannot reach GitHub |
 | `ADMIN_EMAIL` | empty | where a threshold rule's *notify* goes (0.22, *Controls*), through the `SMTP_*` settings; empty = the rule writes its audit line and the log says there was nobody to tell |
+| `NANOMUSE_CLOUD_BASE` | `PUBLIC_BASE`, else `http://127.0.0.1:8787` | read by the admin CLI only (`nanomuse-cloud admin …`, below): the address of the relay it talks to when `--base` is not given; the relay itself does not read it |
 
 The default menu (0.17): `deepseek-v4.1-flash` (the chat model — text and
 images in, ¥2 / ¥8 per million tokens, charged at 0.7×; it thinks before it
@@ -522,6 +538,15 @@ Identifiers are kept AES-GCM-encrypted with a key derived from
 `CLOUD_SECRET`. A person can also remove themselves: `POST /v1/auth/delete`
 with their key deletes the account, its keys, ledger and devices.
 
+The *Invites* view (`/v1/admin/invites`) shows who invited whom: the
+inviters in order of the accounts their code brought, each with how many of
+those ever made a request, how many were seen from one of the inviter's own
+addresses (what one person padding their own pool looks like), what they
+spent, what the inviter's pool got from them and when the first and the last
+signed up; a row unfolds to the newest of the people it brought, and the
+account drawer names an account's inviter and lists everyone it brought. The
+accounts table marks an inviter with the count and sorts by it.
+
 Two more panels come from `/v1/admin/series` and `/v1/admin/traffic`: the
 relay's own numbers by day (sign-ins, new and active accounts, sign-ups
 through an invite, data switches turned on, calls, refusals, upstream errors, and the
@@ -711,8 +736,8 @@ curl -X PUT -H "X-Admin-Token: $CLOUD_ADMIN_TOKEN" -H 'Content-Type: application
   -d '{"star":{"moments":{"tasks":[5,20]},"cooldown_days":14,"text":"A star on GitHub helps others find nanoMuse.","text_zh":"在 GitHub 点个 star，让更多人找到 nanoMuse。"}}' \
   https://$CLOUD_DOMAIN/v1/admin/nudges
 # the switches (0.22): what is on, flip one with a note for the audit log, read the log —
-# from the relay's own shell (the CLI reads CLOUD_ADMIN_TOKEN and PUBLIC_BASE from the
-# environment, or --token / --base; --actor names you in the log, else cli:<user>)
+# from the relay's own shell (the CLI reads CLOUD_ADMIN_TOKEN and NANOMUSE_CLOUD_BASE, else
+# PUBLIC_BASE, from the environment, or --token / --base; --actor names you in the log, else cli:<user>)
 nanomuse-cloud admin controls list
 nanomuse-cloud admin controls set free_allowance off --note "upstream bill" --actor lgy
 nanomuse-cloud admin controls set free_allowance on

@@ -51,6 +51,7 @@
     GET  /v1/admin/accounts/{id}/ledger X-Admin-Token ?limit=&before= → the account's statement, every line, page by page (before = last id shown)
     GET  /v1/admin/accounts/{id}/events X-Admin-Token ?limit=&before= → the account's timeline, every entry, page by page
     GET  /v1/admin/address    X-Admin-Token  ?ip=…              → the accounts seen from one address
+    GET  /v1/admin/invites    X-Admin-Token  ?limit=200&per=20  → who invited whom: the funnel and the inviters ranked by the accounts their code brought, with the newest `per` of them
     GET  /v1/admin/usage      X-Admin-Token  ?days=14           → charged tokens and yuan per day and kind
     GET  /v1/admin/overview   X-Admin-Token  ?days=30           → the dashboard: accounts, today / week / period by kind and model, signals, events
     GET  /v1/admin/events     X-Admin-Token  ?limit=200&kind=…  → the timeline across accounts (never message content)
@@ -534,6 +535,7 @@ def create_app(
     @app.delete("/v1/me/sessions/{prefix}", status_code=204)
     async def me_revoke_session(prefix: str, caller: Caller = Depends(caller_dep)) -> Response:
         cloud.revoke_session(caller, prefix)
+        await _drop_signed_out(caller.account_id)
         return Response(status_code=204)
 
     @app.get("/v1/me/events")
@@ -543,7 +545,15 @@ def create_app(
     @app.post("/v1/auth/sign-out", status_code=204)
     async def sign_out(caller: Caller = Depends(caller_dep)) -> Response:
         cloud.sign_out(caller)
+        await _drop_signed_out(caller.account_id)
         return Response(status_code=204)
+
+    async def _drop_signed_out(account_id: str) -> None:
+        # a key that was just revoked may still hold a hub socket (the device signed out
+        # from elsewhere); the hub closes it with 4001 now rather than at the next reconnect
+        hub = getattr(app.state, "hub", None)
+        if hub is not None:
+            await hub.drop_signed_out(account_id)
 
     @app.post("/v1/auth/session-key")
     async def session_key(request: Request, caller: Caller = Depends(caller_dep)) -> dict:
@@ -563,6 +573,7 @@ def create_app(
         """Every other device; {"all": true} takes this one too."""
         body = await _json(request)
         n = cloud.sign_out_all(caller, keep_current=not bool(body.get("all")))
+        await _drop_signed_out(caller.account_id)
         return {"signed_out": n}
 
     @app.post("/v1/auth/delete", status_code=204)
@@ -1132,7 +1143,9 @@ def create_app(
             cloud.db.note_video_check(task_id)
             done += 1
             if charged is not None:
-                log.info("video task %s settled by the relay for %s: %s, charged %d", task_id[:12], str(task["account_id"])[:8], status, charged)
+                log.info(
+                    "video task %s settled by the relay for %s: %s, charged %d", task_id[:12], str(task["account_id"])[:8], status, charged
+                )
         return done
 
     app.state.settle_video_tasks = settle_video_tasks  # the tests call it directly
@@ -1191,7 +1204,10 @@ def create_app(
         def hub_dep(caller: Caller = Depends(caller_dep)) -> Caller:
             if not cloud.controls.on("hub"):
                 raise CloudError(
-                    503, "hub_paused", "The device hub is paused on this relay for now; each device keeps working on its own.", {"paused": True}
+                    503,
+                    "hub_paused",
+                    "The device hub is paused on this relay for now; each device keeps working on its own.",
+                    {"paused": True},
                 )
             return caller
 
@@ -1397,6 +1413,13 @@ def create_app(
         place = geo.place(ip.strip())
         out["place"] = place.as_dict() if place is not None else None
         return with_places(out)
+
+    @app.get("/v1/admin/invites", dependencies=[Depends(admin_dep)])
+    async def admin_invites(limit: int = 200, per: int = 20) -> dict:
+        """The inviters in order of how many accounts their code brought, with what those
+        accounts did and the newest `per` of them, and the funnel; an account's detail
+        page lists its invitees in full."""
+        return with_places(cloud.admin_invites(max(1, min(limit, 1000)), max(0, min(per, 100))))
 
     @app.get("/v1/admin/events", dependencies=[Depends(admin_dep)])
     async def admin_events(limit: int = 200, kind: str = "") -> dict:

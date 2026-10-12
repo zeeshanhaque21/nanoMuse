@@ -490,7 +490,7 @@ class Settings:
     # INVITE_URL is the link the apps offer to share; the code is appended.
     # OWN_KEY_DOCS is the guide the apps open when the allowance is used up and
     # the person wants to bring their own model key.
-# No default: the operator configures the relay's own URLs (empty hides the link).
+    # No default: the operator configures the relay's own URLs (empty hides the link).
     invite_url: str = field(default_factory=lambda: _env("INVITE_URL", ""))
     own_key_docs: str = field(default_factory=lambda: _env("OWN_KEY_DOCS", ""))
     # OPENROUTER_URL is where someone outside mainland China gets a key (0.17): Alibaba

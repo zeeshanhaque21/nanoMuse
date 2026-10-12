@@ -345,6 +345,23 @@
     <string name="nm_avatar_use_this">Use this one</string>
     <string name="nm_avatar_use_this_hint">The moods (working, waiting, done, oops) are drawn from it next, in the background.</string>
     <string name="nm_avatar_footer">Pictures are stored on this phone under minis-global/nanomuse/avatar. Each face costs five images from your provider: one you chose plus four moods.</string>
+    <string name="nm_own_clip_title">Your own clip</string>
+    <string name="nm_own_clip_body">A short video of yours plays as the face at rest, and the other moods fall back to it. MP4 or MOV with H.264 video, up to 15 seconds and 30 MB; it plays muted in a loop.</string>
+    <string name="nm_own_clip_on">Your clip is on and plays for every mood; the drawn stills still show where a still is used. Default face removes it.</string>
+    <string name="nm_own_clip_local">The clip stays on this phone. It is not uploaded to nanoMuse Cloud or synced to your other devices.</string>
+    <string name="nm_own_clip_choose">Choose a clip</string>
+    <string name="nm_own_clip_replace">Replace the clip</string>
+    <string name="nm_own_clip_default">Default face</string>
+    <string name="nm_own_clip_menu">Your own clip…</string>
+    <string name="nm_own_clip_preview_title">Preview</string>
+    <string name="nm_own_clip_preview_body">This is how it plays as the face: muted, in a loop, cropped to the circle.</string>
+    <string name="nm_own_clip_details">%1$d s · %2$s</string>
+    <string name="nm_own_clip_use">Use</string>
+    <string name="nm_own_clip_refused_format">That file cannot be used here. Pick an MP4 or MOV with H.264 video, up to 15 seconds and 30 MB.</string>
+    <string name="nm_own_clip_refused_long">That clip runs %1$d seconds. The limit is 15 seconds, and 30 MB.</string>
+    <string name="nm_own_clip_refused_large">That clip is %1$s. The limit is 30 MB, and 15 seconds.</string>
+    <string name="nm_own_clip_unreadable">The clip could not be read. Try another one.</string>
+    <string name="nm_a11y_own_clip_preview">Preview of your clip</string>
 
     <!-- First run (Muse-style welcome; the steps are OpenMinis' provider and model screens) -->
     <string name="nm_setup_title">Welcome to nanoMuse</string>
@@ -408,11 +425,11 @@
     <string name="nm_profile_today">Today</string>
     <string name="nm_profile_yesterday">Yesterday</string>
     <string name="nm_profile_activity_empty">Nothing yet today. What you ask for and what the agent does about it shows up here.</string>
-    <string name="nm_profile_approvals_empty">No standing approvals. When you answer "always allow" to a risky step, it is listed here and can be revoked.</string>
+    <string name="nm_profile_approvals_empty">No standing approvals. When you answer \"always allow\" to a risky step, it is listed here and can be revoked.</string>
     <string name="nm_profile_approvals_always">Always allowed</string>
     <string name="nm_profile_always_allowed">Always allowed · %1$s</string>
     <string name="nm_profile_manage_permissions">Manage permissions</string>
-    <string name="nm_profile_daily_empty">No routines yet. Ask the agent for something "every morning" and it will appear here.</string>
+    <string name="nm_profile_daily_empty">No routines yet. Ask the agent for something \"every morning\" and it will appear here.</string>
     <string name="nm_profile_manage_routines">Manage routines</string>
     <string name="nm_profile_card_soul">SOUL</string>
     <string name="nm_profile_card_memory">Memory</string>
@@ -420,21 +437,21 @@
     <!-- Changing the face from the chat -->
     <string name="nm_avatar_status_options">Generating options</string>
     <string name="nm_avatar_status_finalizing">Finalizing avatar</string>
-    <string name="nm_avatar_options_drawing">Drawing four takes on "%1$s"…</string>
-    <string name="nm_avatar_options_pick_hint">Tap the one you like, or tell me: "the second one".</string>
+    <string name="nm_avatar_options_drawing">Drawing four takes on \"%1$s\"…</string>
+    <string name="nm_avatar_options_pick_hint">Tap the one you like, or tell me: \"the second one\".</string>
     <string name="nm_avatar_options_failed">The pictures did not come through. Check the image model under ••• → Avatar studio and try again.</string>
     <string name="nm_avatar_provider_busy">The image provider is busy right now; try again in a minute.</string>
     <string name="nm_avatar_options_again">Again</string>
     <string name="nm_avatar_options_keep">Keep current</string>
     <string name="nm_avatar_option_n">Option %1$d</string>
     <string name="nm_avatar_option_retry">Retry</string>
-    <string name="nm_avatar_options_ready">Here are a few takes on "%1$s": pick the one you like best.</string>
-    <string name="nm_avatar_drawing_now">I\'m drawing a few takes on "%1$s" now. Pictures take a little while; I\'ll tell you when they\'re ready.</string>
+    <string name="nm_avatar_options_ready">Here are a few takes on \"%1$s\": pick the one you like best.</string>
+    <string name="nm_avatar_drawing_now">I\'m drawing a few takes on \"%1$s\" now. Pictures take a little while; I\'ll tell you when they\'re ready.</string>
     <string name="nm_avatar_drawing_again">One more round, give me a moment.</string>
     <string name="nm_avatar_adopted">Done, my new look is on. I\'m %1$s now.</string>
     <string name="nm_avatar_pick_line">Option %1$d</string>
     <string name="nm_avatar_cannot_start">I can\'t draw a new look yet: %1$s</string>
-    <string name="nm_avatar_memory_line">- %1$s: the user changed my avatar to "%2$s".</string>
+    <string name="nm_avatar_memory_line">- %1$s: the user changed my avatar to \"%2$s\".</string>
     <string name="nm_avatar_share_text">My new look: %1$s. Have a look.</string>
     <string name="nm_avatar_share_button">Share avatar</string>
     <string name="nm_avatar_share_later">Later</string>
@@ -1084,4 +1101,19 @@
     <string name="nm_models_search">Search models</string>
     <string name="nm_models_search_clear">Clear the search</string>
     <string name="nm_models_no_match">No model matches</string>
+    <!-- Names for icon-only controls, read by screen readers (#338) -->
+    <string name="nm_a11y_show_password">Show password</string>
+    <string name="nm_a11y_hide_password">Hide password</string>
+    <string name="nm_a11y_avatar_candidate">Candidate %1$d</string>
+    <string name="nm_a11y_share_card">Card %1$d</string>
+    <string name="nm_a11y_add">Add</string>
+    <string name="nm_a11y_mark_done">Mark as done</string>
+    <string name="nm_a11y_mark_not_done">Mark as not done</string>
+    <string name="nm_a11y_done">Done</string>
+    <string name="nm_a11y_not_done">Not done</string>
+    <string name="nm_a11y_like">Like</string>
+    <string name="nm_a11y_unlike">Unlike</string>
+    <string name="nm_a11y_liked">Liked</string>
+    <string name="nm_a11y_not_liked">Not liked</string>
+    <string name="nm_a11y_post_details">Post details</string>
 </resources>

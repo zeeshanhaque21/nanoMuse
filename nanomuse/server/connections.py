@@ -1,10 +1,10 @@
 """Connections: the model, email, the browser and MCP servers, set up from the app.
 
-Muse's Connections screen is where you plug things in and take them out again. Here that
-means: non-secret settings go to ``<data_dir>/app-settings.json`` (layered over
+The Connections screen is where a person plugs things in and takes them out again. Here
+that means: non-secret settings go to ``<data_dir>/app-settings.json`` (layered over
 ``config.toml`` on every start, for the app and the CLI alike); secrets go straight into
 the encrypted vault and are referred to as ``{{vault:NAME}}``. Nothing here is ever shown
-to the model — it only gets the tools that result.
+to the model; it only gets the tools that result.
 """
 
 from __future__ import annotations
@@ -37,6 +37,7 @@ from nanomuse.llm.chatgpt import DEFAULT_MODEL as CHATGPT_DEFAULT_MODEL
 from nanomuse.logger import logger
 from nanomuse.schema import Message
 from nanomuse.search import WebSearchProvider
+from nanomuse.server.endpoints import Endpoints
 from nanomuse.server.failures import describe_failure
 from nanomuse.tools import (
     Calendar,
@@ -262,6 +263,49 @@ def normalize_base_url(url: str) -> str:
     return url
 
 
+async def fetch_models(base_url: str, key: str = "") -> tuple[list[str], str]:
+    """The model ids an OpenAI-compatible endpoint lists (``GET /models``, then ``/v1/models``
+    when the address names no version), sorted; with an empty list, one word on why
+    (``404``, ``HTTP 401``, ``ConnectError``, ``empty list``). Never raises."""
+    headers = {"Authorization": f"Bearer {key}"} if key else {}
+    candidates = [f"{base_url}/models"]
+    if not re.search(r"/v\d+$", base_url):
+        candidates.append(f"{base_url}/v1/models")
+    error = ""
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+            for url in candidates:
+                try:
+                    r = await client.get(url, headers=headers)
+                except httpx.HTTPError as exc:
+                    error = f"{type(exc).__name__}"
+                    continue
+                if r.status_code == 404:
+                    error = "404"
+                    continue
+                if r.status_code >= 400:
+                    error = f"HTTP {r.status_code}"
+                    break
+                data = r.json()
+                rows = data.get("data") if isinstance(data, dict) else data
+                ids = sorted(
+                    {
+                        str(row.get("id") if isinstance(row, dict) else row)
+                        for row in (rows or [])
+                        if (row.get("id") if isinstance(row, dict) else row)
+                    }
+                )
+                if ids:
+                    return ids, ""
+                error = "empty list"
+                break
+    except Exception as exc:  # noqa: BLE001
+        error = f"{type(exc).__name__}"
+    return [], error
+
+
 PROXY_SCHEMES = ("http", "https", "socks5", "socks5h")
 
 
@@ -345,6 +389,13 @@ class Connections:
         self._toml_sources = [
             c for c in svc.settings.connectors.contacts.sources if c.name not in app_sources
         ]
+        # custom OpenAI-compatible endpoints, several at once (#294); the chat slot of before
+        # on an unlisted host becomes endpoint number one on the first start with the list
+        self.endpoints = Endpoints(self)
+        try:
+            self.endpoints.migrate()
+        except (OSError, ValueError, VaultError) as exc:
+            logger.warning("the endpoint list could not be set up: {}", exc)
 
     # ------------------------------------------------------------------ helpers
     @property
@@ -434,8 +485,12 @@ class Connections:
                     and getattr(self.svc, "hub", None) is not None
                     and s.llm.base_url.rstrip("/") == model_url(self.svc.hub.cloud.base_url)
                 ),
+                # the endpoint of the list the slot points at (#294); "" for any other host
+                "endpoint": self.endpoints.id_for(s.llm.endpoint),
             },
             "providers": self._providers(),
+            # the custom OpenAI-compatible endpoints, several at once (#294): never a key
+            "endpoints": self.endpoints.view(),
             "embeddings": self._embeddings_view(),
             "search": self._search_view(),
             "email": {
@@ -560,7 +615,16 @@ class Connections:
 
     # ------------------------------------------------------------------ model
     def set_llm(self, body: dict[str, Any]) -> dict[str, Any]:
+        """The chat model. ``endpoint`` names one of the list (#294): the slot takes its
+        address and its key by reference, and ``provider``, ``base_url`` and ``api_key`` in
+        the body are ignored; the other fields apply as always."""
         llm = dict(self.data.get("llm") or {})
+        body = dict(body)
+        if body.get("endpoint"):
+            fields = self.endpoints.slot_fields(str(body["endpoint"]))
+            body.update({"provider": fields["provider"], "base_url": fields["base_url"]})
+            body["api_key"] = None
+            llm["api_key"] = fields["api_key"]
         for key in ("provider", "model", "base_url", "tool_mode", "image_model", "video_model"):
             if body.get(key) is not None:
                 llm[key] = str(body[key]).strip()
@@ -842,52 +906,38 @@ class Connections:
         preset = PROVIDERS.get(preset_id) or {}
         base_url = normalize_base_url(str(body.get("base_url") or preset.get("base_url") or ""))
         catalogue: list[str] = list(preset.get("models") or [])
+        key = str(body.get("api_key") or "").strip()
+        endpoint = self.endpoints.get(str(body.get("endpoint") or ""))
+        if endpoint is not None:
+            # one of the endpoint list (#294): its address and its own key, and the models it
+            # was saved with when it does not answer now
+            base_url = str(endpoint["base_url"])
+            catalogue = [str(m) for m in endpoint.get("models") or []]
+            if not key:
+                key = self.vault.resolve(str(endpoint.get("api_key") or ""), strict=False)
         if not base_url:
             return {"models": catalogue, "source": "catalogue"}
-        key = str(body.get("api_key") or "").strip()
         if not key and normalize_base_url(self.settings.llm.base_url or "") == base_url:
             key = self.vault.resolve(self.settings.llm.api_key or "", strict=False)
-        headers = {"Authorization": f"Bearer {key}"} if key else {}
-        candidates = [f"{base_url}/models"]
-        if not re.search(r"/v\d+$", base_url):
-            candidates.append(f"{base_url}/v1/models")
-        error = ""
-        try:
-            import httpx
-
-            async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
-                for url in candidates:
-                    try:
-                        r = await client.get(url, headers=headers)
-                    except httpx.HTTPError as exc:
-                        error = f"{type(exc).__name__}"
-                        continue
-                    if r.status_code == 404:
-                        error = "404"
-                        continue
-                    if r.status_code >= 400:
-                        error = f"HTTP {r.status_code}"
-                        break
-                    data = r.json()
-                    rows = data.get("data") if isinstance(data, dict) else data
-                    ids = sorted(
-                        {
-                            str(row.get("id") if isinstance(row, dict) else row)
-                            for row in (rows or [])
-                            if (row.get("id") if isinstance(row, dict) else row)
-                        }
-                    )
-                    if ids:
-                        return {
-                            "models": ids,
-                            "image_models": [i for i in ids if looks_like_image_model(i)],
-                            "video_models": [i for i in ids if looks_like_video_model(i)],
-                            "source": "live",
-                        }
-                    error = "empty list"
-                    break
-        except Exception as exc:  # noqa: BLE001
-            error = f"{type(exc).__name__}"
+        if self.vault.has_placeholders(key):
+            key = ""
+        ids, error = await fetch_models(base_url, key)
+        if ids:
+            return {
+                "models": ids,
+                "image_models": [i for i in ids if looks_like_image_model(i)],
+                "video_models": [i for i in ids if looks_like_video_model(i)],
+                "source": "live",
+            }
+        if endpoint is not None:
+            # the saved list serves the picture and clip pickers too
+            return {
+                "models": catalogue,
+                "image_models": [i for i in catalogue if looks_like_image_model(i)],
+                "video_models": [i for i in catalogue if looks_like_video_model(i)],
+                "source": "catalogue",
+                "error": error,
+            }
         return {"models": catalogue, "source": "catalogue", "error": error}
 
     async def test_llm(self) -> dict[str, Any]:
@@ -1392,6 +1442,8 @@ class Connections:
             "cloud": self.svc.app.llm_is_cloud(),
             "base_url": gui.base_url or "",
             "key_source": self._key_source(gui.api_key),
+            # the endpoint of the list the slot points at (#294); "" for any other host
+            "endpoint": self.endpoints.id_for(gui.endpoint) if gui.model else "",
             "max_steps": gui.max_steps,
             "phone": self.svc.phone.status(),
         }
@@ -1405,6 +1457,13 @@ class Connections:
         model; a catalogue id brings its endpoint along and must have models that see.
         """
         gui = dict(self.data.get("gui") or {})
+        body = dict(body)
+        if body.get("endpoint"):
+            # one of the endpoint list (#294): its address, its key by reference
+            fields = self.endpoints.slot_fields(str(body["endpoint"]))
+            body.update({"provider": fields["provider"], "base_url": fields["base_url"]})
+            body["api_key"] = None
+            gui["api_key"] = fields["api_key"]
         if body.get("enabled") is not None:
             gui["enabled"] = bool(body["enabled"])
         for key in ("provider", "model", "base_url"):
@@ -1483,6 +1542,8 @@ class Connections:
             "model": media.model,
             "base_url": media.base_url or "",
             "key_source": self._key_source(media.api_key),
+            # the endpoint of the list the slot points at (#294); "" for any other host
+            "endpoint": self.endpoints.id_for(media.endpoint) if media.configured else "",
             "configured": media.configured,
             "from_app": bool(self.data.get(slot)),
             "effective_provider": resolved["provider"] if resolved else "",
@@ -1500,6 +1561,14 @@ class Connections:
         if slot not in _MEDIA_KEYS:
             raise ValueError("slot must be 'image' or 'video'")
         media = dict(self.data.get(slot) or {})
+        body = dict(body)
+        if body.get("endpoint"):
+            # one of the endpoint list (#294): its address, its key by reference
+            fields = self.endpoints.slot_fields(str(body["endpoint"]))
+            body.update({"provider": fields["provider"], "base_url": fields["base_url"]})
+            body["api_key"] = fields["api_key"] or None
+            if not fields["api_key"]:
+                media["api_key"] = ""
         for key in ("provider", "model", "base_url"):
             if body.get(key) is not None:
                 media[key] = str(body[key]).strip()
@@ -1702,4 +1771,5 @@ __all__ = [
     "PROVIDERS",
     "VIDEO_KEY",
     "Connections",
+    "fetch_models",
 ]

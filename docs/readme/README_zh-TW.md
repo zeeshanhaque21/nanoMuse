@@ -30,7 +30,7 @@
 
 **nanoMuse 是一個開源的個人智慧體，面向你的每一台裝置。** 一個有名字、有自己形象的智慧體，和 Meta 的 [Muse](https://about.fb.com/news/2026/09/introducing-muse-personal-ai-agent/) 是同一類東西：不只回答問題，而是動手做事；App 關了也繼續做；記得你；遇到無法復原的操作會先停下來問你。
 
-*nano* 的意思是完整的一套，小到你自己就能跑、能部署：手機 App、桌面 App、網頁主控台，還有把它們連在一起的中繼，都在這個儲存庫裡，GPL-3.0-or-later。**[免費、開源、非營利。一起把它做好。](../../CONTRIBUTING.md)** 登入就有一份免費的模型額度，走社群中繼，錢是開發者出的；用完可以[換成自己的 key](../own-key.md)。同一套中繼也能跑在你自己的伺服器上，資料不必出門。最新版本：**1.0.2 Trim**，[發行說明](https://github.com/zeeshanhaque21/nanoMuse/releases/tag/v1.0.2-fork.1)。
+*nano* 的意思是完整的一套，小到你自己就能跑、能部署：手機 App、桌面 App、網頁主控台，還有把它們連在一起的中繼，都在這個儲存庫裡，GPL-3.0-or-later。**[免費、開源、非營利。一起把它做好。](../../CONTRIBUTING.md)** 登入就有一份免費的模型額度，走社群中繼，錢是開發者出的；用完可以[換成自己的 key](../own-key.md)。同一套中繼也能跑在你自己的伺服器上，資料不必出門。最新版本：**1.0.3 Helm**，[發行說明](https://github.com/zeeshanhaque21/nanoMuse/releases/tag/v1.0.3-fork.1)。
 
 > [!NOTE]
 > **nanoMuse 在持續進化**
@@ -53,14 +53,14 @@ https://github.com/user-attachments/assets/bf0ec2ae-59aa-4358-9dd0-c9d045ee7bee
 
 | | |
 |---|---|
-| **Android** 8.0 以上，arm64 | [nanoMuse-1.0.2-arm64.apk](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-1.0.2-arm64.apk)：每個版本都用同一把金鑰簽署，直接覆蓋安裝即可升級 |
+| **Android** 8.0 以上，arm64 | [nanoMuse-1.0.3-arm64.apk](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.3-fork.1/nanoMuse-1.0.3-arm64.apk)：每個版本都用同一把金鑰簽署，直接覆蓋安裝即可升級 |
 | **iPhone / iPad** | [TestFlight](https://testflight.apple.com/join/ZHexbDqc)：測試版，已通過 Apple 的 beta 審核；從這個連結安裝 · [iOS](../ios.md) |
-| **macOS** 12 以上 | [Apple 晶片](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-mac-arm64.dmg) · [Intel](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-mac-x64.dmg)。未經公證：第一次右鍵 → 打開 |
-| **Windows** 10 以上 | [nanoMuse-Desktop-1.0.2-win-x64.exe](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-win-x64.exe)：點一次「仍要執行」 |
-| **Linux** x64 | [AppImage](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-linux-x64.AppImage) · [.deb](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-linux-x64.deb) · [tar.gz](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.2-fork.1/nanoMuse-Desktop-1.0.2-linux-x64.tar.gz) |
+| **macOS** 12 以上 | [Apple 晶片](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.3-fork.1/nanoMuse-Desktop-1.0.3-mac-arm64.dmg) · [Intel](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.3-fork.1/nanoMuse-Desktop-1.0.3-mac-x64.dmg)。未經公證：第一次右鍵 → 打開 |
+| **Windows** 10 以上 | [nanoMuse-Desktop-1.0.3-win-x64.exe](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.3-fork.1/nanoMuse-Desktop-1.0.3-win-x64.exe)：點一次「仍要執行」 |
+| **Linux** x64 | [AppImage](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.3-fork.1/nanoMuse-Desktop-1.0.3-linux-x64.AppImage) · [.deb](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.3-fork.1/nanoMuse-Desktop-1.0.3-linux-x64.deb) · [tar.gz](https://github.com/zeeshanhaque21/nanoMuse/releases/download/v1.0.3-fork.1/nanoMuse-Desktop-1.0.3-linux-x64.tar.gz) |
 | **Docker** | `bash scripts/self-host.sh --local` 架自己的中繼；`docker compose up -d app` 在自己的伺服器上跑網頁版；見[自己部署](../self-hosting.md) |
 
-下載都來自 [GitHub 最新版本](https://github.com/zeeshanhaque21/nanoMuse/releases/latest)。打開 App，用電子郵件或中國大陸手機號登入，它就有模型可用。手機、桌面和網頁共用一個帳號，看到的是同樣的對話。
+下載都來自 [GitHub 最新版本](https://github.com/zeeshanhaque21/nanoMuse/releases/latest)打開 App，用電子郵件或中國大陸手機號登入，它就有模型可用。手機、桌面和網頁共用一個帳號，看到的是同樣的對話。
 
 ## 能做什麼
 
@@ -130,9 +130,11 @@ https://github.com/user-attachments/assets/bf0ec2ae-59aa-4358-9dd0-c9d045ee7bee
 <!-- contributors:start -->
 <p>
 <a href="https://github.com/wsvn53"><img src="https://avatars.githubusercontent.com/u/912204?v=4&s=48" width="48" height="48" alt="wsvn53"></a>
+<a href="https://github.com/PovedaAqui"><img src="https://avatars.githubusercontent.com/u/9494679?v=4&s=48" width="48" height="48" alt="PovedaAqui"></a>
 <a href="https://github.com/hobostay"><img src="https://avatars.githubusercontent.com/u/110803307?v=4&s=48" width="48" height="48" alt="hobostay"></a>
 <a href="https://github.com/aliabbas6622"><img src="https://avatars.githubusercontent.com/u/193962983?v=4&s=48" width="48" height="48" alt="aliabbas6622"></a>
-<a href="https://github.com/PovedaAqui"><img src="https://avatars.githubusercontent.com/u/9494679?v=4&s=48" width="48" height="48" alt="PovedaAqui"></a>
+<a href="https://github.com/Ichiro786"><img src="https://avatars.githubusercontent.com/u/158778170?v=4&s=48" width="48" height="48" alt="Ichiro786"></a>
+<a href="https://github.com/cypggs"><img src="https://avatars.githubusercontent.com/u/3694954?v=4&s=48" width="48" height="48" alt="cypggs"></a>
 <a href="https://github.com/jiangkaiqi2005"><img src="https://avatars.githubusercontent.com/u/184961141?v=4&s=48" width="48" height="48" alt="jiangkaiqi2005"></a>
 </p>
 <!-- contributors:end -->
@@ -171,6 +173,6 @@ nanoMuse 是獨立的社群專案，與 Meta Platforms, Inc. 無關，也未獲�
 [GPL-3.0-or-later](../../LICENSE)。手機 App 基於 OpenMinis 1.13（GPL-3.0），自 2026-09-24 起修改，見 [NOTICE](../../NOTICE)。Python 這一支更早的版本採 MIT 授權（tag `pre-openminis`）。
 
 <p align="center">
-  <em>感謝來訪 ✨ nanoMuse！</em><br><br>
+  <em>感謝來訪 ✨ nanoMuse。</em><br><br>
   <img src="https://komarev.com/ghpvc/?username=nano-muse-nanomuse&label=visitors&color=0a66e4&base=13835" alt="Visitors">
 </p>

@@ -76,3 +76,24 @@ def test_the_scan_sees_the_active_docs() -> None:
         "website/.vitepress/config.mts",
         "site/legacy.html",
     } <= names
+
+
+# Removing upstream's download-mirror clause from the ten READMEs swallowed the
+# joining ";" and the sentence's own "." along with the clause, leaving
+# ".../releases/latest) Open the app" -- a scar review found on 2026-10-11.
+# The signature is a release link followed by whitespace and a word, which only
+# the Latin-script readmes can produce: the ja/ko ones continue with a particle
+# straight after ")" and the zh/zh-TW ones have no space there at all.
+RELEASE_LINK_GLUED = re.compile(r"releases/latest\)\s+[^\s.。！？!?]")
+
+
+def test_no_readme_glues_a_sentence_onto_the_release_link() -> None:
+    hits = [
+        f"{path.relative_to(ROOT).as_posix()}:{n}"
+        for pattern in ("README.md", "docs/readme/*.md")
+        for path in ROOT.glob(pattern)
+        if path.is_file()
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+        if RELEASE_LINK_GLUED.search(line)
+    ]
+    assert not hits, "missing sentence terminator after the release link: " + ", ".join(hits)
