@@ -18,18 +18,15 @@ feature, and keeps every `.cn` cloud-backend reference out of the shipped tree.
 | Tested head | the branch tip — every commit after the content head changes only `maintenance-evidence/run-2026-10-11/`, so tip and content head have identical code |
 | Diff (`fork/main..cc4b552a04`, content only) | 334 files changed, 12,087 insertions(+), 2,301 deletions(−) |
 
-Seven commits sit on `fork/main`: the sanitizing merge, three follow-up content commits, and
-two evidence commits. Each carries a DCO `Signed-off-by` line. The evidence commits touch
-only `maintenance-evidence/run-2026-10-11/`:
+Five content commits sit on `fork/main`, each with a DCO `Signed-off-by` line. Everything
+after `cc4b552a04` is evidence-only, touching nothing but `maintenance-evidence/run-2026-10-11/`:
 
 ```
 c7bd659949 chore(sync): merge sanitized upstream through v1.0.3 (Helm)
 df23dbb031 build(web): regenerate committed static from the merged source (Node 22)
 f38a067f85 test(sync): keep the fork's expectations on two tests upstream 1.0.3 rewrote
-e7f645ae8e docs(evidence): add the 2026-10-11 sync PR body
 204633f988 style(sync): apply ruff format to the three files an earlier sanitization left unformatted
 cc4b552a04 fix(docs): restore the sentence period the mirror-clause removal ate, and guard it
-33161f53c7 docs(evidence): correct the PR body's counts, tested head, and preservation claims
 ```
 
 The full runtime suite was re-run at the branch tip as well as at the content head, so the
