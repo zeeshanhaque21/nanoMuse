@@ -84,10 +84,22 @@ def test_add_lists_the_models_and_keeps_the_key_in_the_vault(server, listed, set
         ).status_code
         == 400
     )
+    # Fork: no relay is configured by default (`cloud.base_url == ""`), so `<relay>/v1`
+    # is the relative address `/v1` and is refused as malformed before the account check.
+    assert settings.cloud.base_url == ""
+    assert (
+        client.post(
+            "/api/connections/endpoints", json={"base_url": settings.cloud.base_url + "/v1"}
+        ).status_code
+        == 400
+    )
+    # With a relay configured the upstream contract holds: it is the account, not an endpoint.
+    settings.cloud.base_url = "https://relay.example.net"
     relay = client.post(
         "/api/connections/endpoints", json={"base_url": settings.cloud.base_url + "/v1"}
     )
     assert relay.status_code == 400 and "nanoMuse Cloud" in relay.json()["detail"]
+    settings.cloud.base_url = ""
     added = client.post(
         "/api/connections/endpoints",
         json={"base_url": "gateway.example/v1", "api_key": "sk-gateway-1", "models": "my-typed"},
